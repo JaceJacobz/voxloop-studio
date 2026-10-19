@@ -59,12 +59,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const update = () => { out.textContent = format(parseFloat(slider.value)); };
         slider.addEventListener("input", update);
         update();
+        return update;
     }
 
     bindReadout(strengthSlider, "tune-strength-value", v => `${Math.round(v)}%`);
     bindReadout(retuneSlider, "tune-retune-value", v => (v === 0 ? "Instant" : `${Math.round(v)} ms`));
     bindReadout(flattenSlider, "tune-flatten-value", v => `${Math.round(v)}%`);
-    bindReadout(shiftSlider, "tune-shift-value", v => (v === 0 ? "0 (automatic)" : `${v > 0 ? "+" : ""}${Math.round(v)} semitone${Math.abs(v) === 1 ? "" : "s"}`));
+    // 0 means "let Vocal Vault decide" only while the automatic key match is ticked; otherwise it means no move at all
+    const updateShiftReadout = bindReadout(shiftSlider, "tune-shift-value", v => (v === 0 ? (autoKeyBox.checked ? "0 (automatic)" : "0 (no move)") : `${v > 0 ? "+" : ""}${Math.round(v)} semitone${Math.abs(v) === 1 ? "" : "s"}`));
+    autoKeyBox.addEventListener("change", updateShiftReadout);
 
     // -----------------------------------------------------
     // Open the step
@@ -91,6 +94,8 @@ document.addEventListener("DOMContentLoaded", () => {
             autoNote.textContent = "Off because the key is not known yet.";
             keyNote.textContent = "Key not detected yet. Choose it by hand.";
         }
+
+        updateShiftReadout();
 
         // How far the beat's tuning is from A = 440 Hz.
         try {
@@ -147,6 +152,7 @@ document.addEventListener("DOMContentLoaded", () => {
             refCents: beatTuningCents,
             strength: parseFloat(strengthSlider.value) / 100,
             retuneMs: parseFloat(retuneSlider.value),
+            minRetuneMs: parseFloat(retuneSlider.value),          // the slider is the speed: no hidden minimum
             flatten: parseFloat(flattenSlider.value) / 100,
             manualSemitones: parseInt(shiftSlider.value, 10) || 0,
             autoTranspose: autoKeyBox.checked,
@@ -231,9 +237,6 @@ document.addEventListener("DOMContentLoaded", () => {
     function showResults(result) {
 
         results.classList.remove("hidden");
-        if (typeof window.vvRefreshPipelineChrome === "function") {
-            try { window.vvRefreshPipelineChrome(); } catch (e) {}
-        }
 
         const rows = [["original", "Original"]];
         if (result.stats.detuned) rows.push(["detuned", "Detuned (test)"]);

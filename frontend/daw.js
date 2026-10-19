@@ -1091,6 +1091,19 @@
     }
 
     /** Composite every non-muted lane onto one mono vocal, with per-lane mix levels. */
+    // The lead on its own, on the composite's timeline, exactly as recorded (the lead lane is never gained).
+    async function renderLeadReference(mainLane, length, sr) {
+        const leadCtx = new OfflineAudioContext(1, length, sr);
+        for (const clip of mainLane.clips) {
+            if (!clip.buffer) continue;
+            const src = leadCtx.createBufferSource();
+            src.buffer = clip.buffer;
+            src.connect(leadCtx.destination);
+            src.start(Math.max(0, clip.start));
+        }
+        return leadCtx.startRendering();
+    }
+
     async function renderCompositeVocal() {
         // Include muted-by-mix mute skip; harmony lanes can be empty if they will generate from main
         const active = lanes.filter((l) => {
@@ -1166,26 +1179,17 @@
 
         const rendered = await offline.startRendering();
 
-        // Lead-only reference on the same timeline so Pipeline can balance/ride
-        // the lead while keeping adlibs/tags at the relative level set here.
+        // Lead-only reference on the same timeline so Pipeline can balance/ride the lead while keeping adlibs/tags at the
+        // relative level set here. Only when the lead really is in this composite (a muted lead is not), and never at the
+        // cost of the send itself: if it cannot be built, Pipeline simply works as before and the person is told.
         let stack = null;
-        if (mainLane && active.length > 1 && mainLane.clips.some((c) => c.buffer)) {
+        if (mainLane && active.includes(mainLane) && active.length > 1 && mainLane.clips.some((c) => c.buffer)) {
             try {
-                const leadCtx = new OfflineAudioContext(1, length, sr);
-                for (const clip of mainLane.clips) {
-                    if (!clip.buffer) continue;
-                    const src = leadCtx.createBufferSource();
-                    src.buffer = clip.buffer;
-                    src.connect(leadCtx.destination);
-                    src.start(Math.max(0, clip.start));
-                }
-                stack = {
-                    leadReference: await leadCtx.startRendering(),
-                    extras: active.length - 1
-                };
+                stack = { leadReference: await renderLeadReference(mainLane, length, sr), extras: active.length - 1 };
             } catch (leadErr) {
                 console.warn("Lead reference render failed", leadErr);
                 stack = null;
+                report.push("Could not build the lead reference, so mastering may even out your adlib / tag levels a little");
             }
         }
 

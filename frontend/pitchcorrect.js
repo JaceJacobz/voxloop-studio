@@ -719,9 +719,10 @@ function createTuneEngine() {
     function naturalize(track, notes, info, raw, o, hopSec) {
 
         const midi = track.midi;
-        const att = o.attackTighten != null ? o.attackTighten : 0.45;
-        const endHold = o.endHold != null ? o.endHold : 0.3;
-        const vibAmt = o.vibratoAmount != null ? o.vibratoAmount : 0.6;
+        const k = Math.min(1, Math.max(0, o.strength != null ? o.strength : 1));      // the strength slider scales every one of these
+        const att = (o.attackTighten != null ? o.attackTighten : 0.45) * k;
+        const endHold = (o.endHold != null ? o.endHold : 0.3) * k;
+        const vibAmt = (o.vibratoAmount != null ? o.vibratoAmount : 0.6) * k;
         const out = { vibratoAdded: 0, onsetsTightened: 0, endsHeld: 0, vibratoKept: 0 };
         const linkFrames = Math.ceil(0.06 / hopSec);
 
@@ -804,7 +805,7 @@ function createTuneEngine() {
             ? (0.88 * strength + 0.12 * strength * strength)   // 100% → ~1.0 still, but mid softer
             : strength;
 
-        let skipped = 0, partial = 0, corrected = 0, longPulled = 0, spokenLifted = 0;
+        let skipped = 0, partial = 0, corrected = 0, longPulled = 0, spokenLifted = 0, spokenLeft = 0;
         const spokenSung = o.spokenSung !== false && o.spokenSung !== 0;
 
         function speechiness(nt) {
@@ -829,6 +830,24 @@ function createTuneEngine() {
             return Math.min(1, score);
         }
 
+        // Context: rap and talk-sing are a stream of SHORT notes whose pitch glides (syllables), not notes that sit on a pitch.
+        // One short piece cannot show that, a run of them does: in the surrounding 1.4 s, are the notes short, many, and unsteady?
+        // (Fast sung runs are short and many too, but each note sits on a steady pitch, so they do not count.)
+        const nDur = notes.map((nt) => (nt.end - nt.start) * hopSec), nMid = notes.map((nt) => 0.5 * (nt.start + nt.end) * hopSec);
+        const nStd = notes.map((nt) => {
+            let sm = 0, sm2 = 0, c = 0;
+            for (let k = nt.start; k < nt.end; k++) { const m = track.midi[k]; if (isNaN(m)) continue; sm += m; sm2 += m * m; c++; }
+            if (c < 3) return 0;
+            const mu = sm / c; return Math.sqrt(Math.max(0, sm2 / c - mu * mu)) * 100;
+        });
+        const medianOf = (a) => { const q = a.slice().sort((x, y) => x - y); return q[q.length >> 1]; };
+        function speechContext(ni) {
+            const d = [], sd = [];
+            for (let j = 0; j < notes.length; j++) if (Math.abs(nMid[j] - nMid[ni]) <= 0.7) { d.push(nDur[j]); sd.push(nStd[j]); }
+            if (d.length < 5) return false;
+            return medianOf(d) < 0.17 && d.length / 1.4 >= 4 && medianOf(sd) > 14;
+        }
+
         for (let ni = 0; ni < notes.length; ni++) {
 
             const nt = notes[ni];
@@ -840,8 +859,13 @@ function createTuneEngine() {
             // Centre error before strength / selective (cents)
             const errCents = (target - (nt.center + move)) * 100;
             const absErr = Math.abs(errCents);
-            const speech = spokenSung ? speechiness(nt) : 0;
-            const talk = speech >= 0.45;
+            // "Spoken to sung": ON pulls talk-sing and rap lines onto notes. OFF leaves them exactly as performed (speech has
+            // no notes to snap to, and snapping it is what makes rap sound robotic). Either way a sung note is never touched by this.
+            let speech = speechiness(nt);
+            if (speechContext(ni)) speech = Math.max(speech, 0.65);
+            const isSpeech = speech >= 0.45;
+            const talk = spokenSung && isSpeech;
+            const speechLeft = !spokenSung && isSpeech;
 
             // How hard this note is pulled (0 = leave, 1 = full strength)
             let notePull = 1;
@@ -863,6 +887,7 @@ function createTuneEngine() {
                 } else notePull = 1;
             }
 
+            if (speechLeft) { notePull = 0; spokenLeft++; }
             if (notePull <= 0.02) skipped++;
             else if (notePull < 0.95) partial++;
             else corrected++;
@@ -886,7 +911,11 @@ function createTuneEngine() {
             // Talk-sing gets extra flatten so the line holds a pitch instead of sliding.
             let flatten = Math.max(0, Math.min(1, o.flatten === undefined ? 0.35 : o.flatten));
             if (talk) flatten = Math.min(1, Math.max(flatten, 0.55 + 0.35 * speech));
+            flatten *= Math.min(1, Math.max(0, strength));          // the strength slider is the master amount: at 0 nothing is flattened either
             const longFlatten = isLong ? (flatten * flatten * (0.8 + 0.2 * flatten)) : flatten;
+            // A note that Selective leaves alone keeps its vibrato at the default setting (the slider's resting place is 40 %);
+            // push Flatten above that and the vibrato of in-tune notes is flattened too, up to completely flat at 100 %.
+            const skipFlat = speechLeft ? 0 : Math.max(0, Math.min(1, (flatten - 0.4) / 0.6));
 
             for (let k = nt.start; k < nt.end; k++) {
                 if (isNaN(track.midi[k])) continue;
@@ -905,13 +934,13 @@ function createTuneEngine() {
                     const flatAmt = longFlatten * (0.25 + 0.75 * notePull);
                     raw[k] = move * 100 + frameResid - flatAmt * drift * (1 - Math.min(1, Math.abs(frameResid) / 100));
                 } else if (isLong && notePull <= 0.02) {
-                    // Selective skip: only global transpose, keep singer's shape
-                    raw[k] = move * 100;
+                    // Selective skip: only global transpose, keep singer's shape (unless Flatten is raised above its default)
+                    raw[k] = move * 100 - skipFlat * (track.midi[k] - nt.center) * 100;
                 } else {
                     const drift = (track.midi[k] - nt.center) * 100;
                     const flatAmt = flatten * (0.3 + 0.7 * Math.max(notePull, notePull <= 0.02 ? 0 : 1));
                     if (notePull <= 0.02) {
-                        raw[k] = move * 100;
+                        raw[k] = move * 100 - skipFlat * drift;
                     } else {
                         raw[k] = offset - flatAmt * drift;
                     }
@@ -965,16 +994,21 @@ function createTuneEngine() {
             const strengthFloor = 14 + effStrength * 14;
             retuneMs = Math.max(retuneMs, strengthFloor);
         }
-        // Extra glide when long notes were pulled
-        if (longPulled > 0) retuneMs = Math.max(retuneMs, 20 + Math.min(12, longPulled));
-        if (corrected + partial > 0 && retuneMs < 18) retuneMs = Math.max(retuneMs, 18);
+        if (o.minRetuneMs != null) {
+            // the person chose the speed: honour it (0 is a hard retune; 4 ms only keeps it from clicking)
+            retuneMs = Math.max(retuneMs, 4);
+        } else {
+            // Extra glide when long notes were pulled
+            if (longPulled > 0) retuneMs = Math.max(retuneMs, 20 + Math.min(12, longPulled));
+            if (corrected + partial > 0 && retuneMs < 18) retuneMs = Math.max(retuneMs, 18);
+        }
 
         return {
             shift: smoothRuns(raw, track.midi, hopMs, retuneMs),
             notes: info,
             biasCents: smart ? smart.biasCents : 0,
             ambiguous: smart ? smart.ambiguous : 0,
-            selective: { skipped, partial, corrected, thresh: selectThresh, soft: selectSoft, spokenLifted },
+            selective: { skipped, partial, corrected, thresh: selectThresh, soft: selectSoft, spokenLifted, spokenLeft },
             natural: natural,
             retuneMsUsed: retuneMs
         };
