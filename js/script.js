@@ -76,8 +76,34 @@ document.addEventListener("DOMContentLoaded", () => {
         get vocalOffset() { return vocalOffset; },
         get beatBpm() { return detectedBpm; },
         beatKey: null,         // set by runBeatKeyAnalysis
-        vocalPitch: null       // set by runVocalPitchAnalysis (range, lowest note, pitch curve)
+        vocalPitch: null,      // set by runVocalPitchAnalysis (range, lowest note, pitch curve)
+        // Used by Beat Lab handoff
+        setBeatBuffer(buf) { beatBuffer = buf; },
+        setVocalBuffer(buf) { vocalBuffer = buf; },
+        ensureAudioContext() {
+            if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            return audioContext;
+        }
     };
+
+    // Beat Lab → Pipeline handoff
+    window.addEventListener("vl-set-beat", (ev) => {
+        const { buffer, name, meta } = ev.detail || {};
+        if (!buffer) return;
+        beatBuffer = buffer;
+        // The Beat Lab made this beat, so it KNOWS its tempo and key. Using those is exact; re-detecting them from the audio
+        // was wrong about one beat in two (a dorian beat read as a major key, a fifth off, the tempo off by 25%).
+        window.VocalVaultKnownBeat = meta ? { buffer, bpm: meta.bpm, key: meta.key } : null;
+        if (beatFileName) beatFileName.textContent = name || "Beat Lab instrumental";
+        const chip = document.getElementById("role-beat-chip");
+        if (chip) chip.textContent = "Beat: " + (name || "Beat Lab");
+        // Clear stale analysis tied to a previous beat
+        window.VocalVaultState.beatKey = null;
+        try {
+            if (typeof drawWaveform === "function" && beatCanvas) drawWaveform(beatCanvas, beatBuffer);
+        } catch (e) {}
+        console.log("[Voxloop] Beat Lab beat loaded into Pipeline", buffer.duration.toFixed(1) + "s");
+    });
 
 
     // =====================================================
@@ -114,13 +140,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const vocalFile = vocalInput.files[0];
         const beatFile = beatInput.files[0];
+        const hasBeat = !!(beatFile || beatBuffer);
 
-        // Both files are required.
-        if (!vocalFile || !beatFile) {
+        // Vocal is required; beat can come from file or Beat Lab.
+        if (!vocalFile || !hasBeat) {
 
             if (window.VocalVaultModal) {
                 window.VocalVaultModal.alert(
-                    "Select both a vocal track and an instrumental beat.",
+                    hasBeat
+                        ? "Select a vocal track to continue."
+                        : "Select a vocal track and an instrumental beat (or create one in Beat Lab).",
                     "Missing tracks"
                 );
             }
@@ -139,14 +168,20 @@ document.addEventListener("DOMContentLoaded", () => {
             )();
 
             // Decode both audio files.
-            [vocalBuffer, beatBuffer] = await Promise.all([
-                decodeFile(audioContext, vocalFile),
-                decodeFile(audioContext, beatFile)
-            ]);
+            if (beatFile) {
+                [vocalBuffer, beatBuffer] = await Promise.all([
+                    decodeFile(audioContext, vocalFile),
+                    decodeFile(audioContext, beatFile)
+                ]);
+            } else {
+                // Beat already provided by Beat Lab
+                vocalBuffer = await decodeFile(audioContext, vocalFile);
+            }
 
             // Display selected track names.
             alignmentVocalName.textContent = vocalFile.name;
-            alignmentBeatName.textContent = beatFile.name;
+            // (a beat made in the Beat Lab has no file, only its name: using beatFile.name here crashed the alignment step)
+            alignmentBeatName.textContent = beatFile ? beatFile.name : (beatFileName && beatFileName.textContent) || "Beat Lab instrumental";
 
             // Display beat duration.
             beatDurationDisplay.textContent = formatTime(
@@ -917,8 +952,10 @@ continueAnalysisButton.addEventListener("click", () => {
 
         try {
 
-            const result =
-                await window.VocalVaultAnalysis.analyzeBpm(currentBeat);
+            const known = window.VocalVaultKnownBeat;
+            const result = (known && known.buffer === currentBeat && known.bpm > 30)
+                ? { bpm: known.bpm, confidence: 1, alternatives: [] }          // told by the Beat Lab: no guessing
+                : await window.VocalVaultAnalysis.analyzeBpm(currentBeat);
 
             // Ignore the result if a different beat was loaded meanwhile.
             if (analyzedBeatBuffer !== currentBeat) return;
@@ -1162,8 +1199,10 @@ async function runBeatKeyAnalysis() {
 
     try {
 
-        const result =
-            await window.VocalVaultAnalysis.detectKey(
+        const knownBeat = window.VocalVaultKnownBeat;
+        const result = (knownBeat && knownBeat.buffer === currentBeat && knownBeat.key)
+            ? Object.assign({ confidence: 1, source: "Beat Lab" }, knownBeat.key)       // told by the Beat Lab: exact
+            : await window.VocalVaultAnalysis.detectKey(
                 currentBeat
             );
 
@@ -1204,8 +1243,9 @@ async function runBeatKeyAnalysis() {
                     result.confidence * 100
                 );
 
-            beatKeyStatus.textContent =
-                `Detected • ${confidencePercent}% confidence`;
+            beatKeyStatus.textContent = result.source === "Beat Lab"
+                ? "From the Beat Lab • exact"
+                : `Detected • ${confidencePercent}% confidence`;
 
         }
 
@@ -2184,6 +2224,9 @@ function showVocalTempo() {
                 const fillInstruments = document.getElementById("fill-instruments")
                     ? document.getElementById("fill-instruments").checked
                     : false;
+                const harshness = document.getElementById("mix-calm")
+                    ? document.getElementById("mix-calm").value
+                    : "standard";
                 if (!window.VocalVaultAutomix || !window.VocalVaultAutomix.process) {
                     throw new Error("Automix engine not loaded (check automix.js / presets.js script tags).");
                 }
@@ -2195,7 +2238,8 @@ function showVocalTempo() {
                     style,
                     polishLevel,
                     balanceMode,
-                    fillInstruments
+                    fillInstruments,
+                    harshness
                 });
 
                 if (autoMixStatus) autoMixStatus.textContent = "Automix complete!";

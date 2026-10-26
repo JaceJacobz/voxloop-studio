@@ -462,7 +462,7 @@ function peakSoften(channels, ceilingDb) {
  * Listen to the finished mix offline: peak + harsh top.
  * Fix at most 1–2 small things, then stop.
  */
-function listenAndCorrect(channels, sr) {
+function listenAndCorrect(channels, sr, harshness) {
   const report = [];
   let chs = channels.map((c) => Float32Array.from(c));
   const n = chs[0].length;
@@ -507,36 +507,18 @@ function listenAndCorrect(channels, sr) {
     peak = samplePeak();
   }
 
-  // 2) Harsh top only if clearly excessive
-  const harsh = harshRatio();
-  if (harsh > 0.22 && fixes < 2) {
-    // gentle shelf cut ~7kHz ~2dB
-    const freq = 7000;
-    const gainDb = -2.2;
-    const A = Math.pow(10, gainDb / 40);
-    const w0 = 2 * Math.PI * freq / sr;
-    const cosw = Math.cos(w0), sinw = Math.sin(w0);
-    const alpha = sinw / 2 * Math.sqrt(2);
-    const b0 = A * ((A + 1) + (A - 1) * cosw + 2 * Math.sqrt(A) * alpha);
-    const b1 = -2 * A * ((A - 1) + (A + 1) * cosw);
-    const b2 = A * ((A + 1) + (A - 1) * cosw - 2 * Math.sqrt(A) * alpha);
-    const a0 = (A + 1) - (A - 1) * cosw + 2 * Math.sqrt(A) * alpha;
-    const a1 = 2 * ((A - 1) - (A + 1) * cosw);
-    const a2 = (A + 1) - (A - 1) * cosw - 2 * Math.sqrt(A) * alpha;
-    const c0 = b0 / a0, c1 = b1 / a0, c2 = b2 / a0, d1 = a1 / a0, d2 = a2 / a0;
-    chs = chs.map((ch) => {
-      const y = new Float32Array(n);
-      let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-      for (let i = 0; i < n; i++) {
-        const x0 = ch[i];
-        const out = c0 * x0 + c1 * x1 + c2 * x2 - d1 * y1 - d2 * y2;
-        x2 = x1; x1 = x0; y2 = y1; y1 = out;
-        y[i] = out;
-      }
-      return y;
-    });
-    report.push("Listen pass: eased a bit of harsh top so the mix stays smooth.");
-    fixes++;
+  // 2) Harsh top: measured as the 4-9 kHz band against the 0.3-3 kHz body over the parts that are playing
+  //    (a smooth mix reads about -15 dB or lower). If it is too bright, a gentle, limited dip around 6 kHz.
+  const studio = window.VocalVaultStudio && window.VocalVaultStudio.engine;
+  if (studio && studio.calmMixTop && fixes < 2 && harshness !== "off") {
+    const before = studio.measureTop(chs, sr);
+    const top = studio.calmMixTop(chs, sr);
+    if (top.applied) {
+      chs = top.channels;
+      const after = studio.measureTop(chs, sr);
+      report.push(`Listen pass: the top end was bright (${before.medianDb.toFixed(1)} dB against the body, smooth is about -15), so it was eased by ${top.cutDb.toFixed(1)} dB around 6 kHz (now ${after.medianDb.toFixed(1)} dB).`);
+      fixes++;
+    }
   }
 
   if (!fixes) report.push("Listen pass: mix already measured clean — no extra changes.");
@@ -750,6 +732,14 @@ async function processAutomix(state, options) {
     setStatus("Cleaning up and balancing the vocal…");
     await nextFrame();
     const prepOpts = { highPassHz: first.hpfCutoff };
+    // Harshness control (the Calm stage): off / gentle / standard / firm
+    const CALM = {
+      off: false,
+      gentle: { amount: 0.6, sibTargetDb: -11, presTargetDb: -15 },                                     // only clearly harsh voices
+      standard: { amount: 0.9 },                                                                         // targets -13 / -17 (see calmVoice)
+      firm: { amount: 1, sibTargetDb: -16, presTargetDb: -20, maxSibCutDb: 10, maxPresCutDb: 7 }          // bright or strained voices
+    };
+    prepOpts.calm = CALM[opt.harshness] !== undefined ? CALM[opt.harshness] : CALM.standard;
     if (recipe) prepOpts.eq = recipe.eq;
     if (studioStack) prepOpts.phraseEven = false;      // it would lift the soft lanes and lower the lead toward each other
     const prepared = Studio.prepareVocal(vocal, prepOpts);
@@ -1182,7 +1172,7 @@ async function processAutomix(state, options) {
   setStatus("Checking the mix…");
   await nextFrame();
   {
-    const qc = listenAndCorrect(channels, sr);
+    const qc = listenAndCorrect(channels, sr, opt.harshness);
     channels = qc.channels;
     lines.push(...qc.report);
   }

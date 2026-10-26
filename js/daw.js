@@ -111,6 +111,7 @@
         els.preloader = $("preloader");
         els.modePipeline = $("mode-pipeline");
         els.modeStudio = $("mode-studio");
+        els.modeBeatlab = $("mode-beatlab");
         els.subtitle = $("mode-subtitle");
         els.lanes = $("studio-lanes");
         els.empty = $("studio-empty");
@@ -173,6 +174,7 @@
                 d = Math.max(d, c.start + c.duration);
             });
         });
+        if (isRecording) d = Math.max(d, playhead + 12);     // keep the ruler ahead of you while recording
         return Math.max(d, 30);
     }
 
@@ -202,12 +204,20 @@
 
     function setMode(mode) {
         const isStudio = mode === "studio";
+        const isBeatlab = mode === "beatlab";
+        const isPipeline = mode === "pipeline" || (!isStudio && !isBeatlab);
+        if (!["studio", "beatlab", "pipeline"].includes(mode)) mode = "pipeline";
+
         els.shell?.classList.toggle("mode-studio", isStudio);
-        els.shell?.classList.toggle("mode-pipeline", !isStudio);
-        els.modePipeline?.classList.toggle("hidden", isStudio);
+        els.shell?.classList.toggle("mode-pipeline", isPipeline);
+        els.shell?.classList.toggle("mode-beatlab", isBeatlab);
+
+        els.modePipeline?.classList.toggle("hidden", !isPipeline);
         els.modeStudio?.classList.toggle("hidden", !isStudio);
-        els.modePipeline?.setAttribute("aria-hidden", isStudio ? "true" : "false");
+        els.modeBeatlab?.classList.toggle("hidden", !isBeatlab);
+        els.modePipeline?.setAttribute("aria-hidden", isPipeline ? "false" : "true");
         els.modeStudio?.setAttribute("aria-hidden", isStudio ? "false" : "true");
+        els.modeBeatlab?.setAttribute("aria-hidden", isBeatlab ? "false" : "true");
 
         document.querySelectorAll(".mode-btn").forEach((btn) => {
             const on = btn.dataset.mode === mode;
@@ -218,6 +228,8 @@
         if (els.subtitle) {
             els.subtitle.textContent = isStudio
                 ? "Record · multi-lane · punch-in anywhere"
+                : isBeatlab
+                ? "Generate · arrange · mix · send to vocals"
                 : "Upload → align → correct → mix → master";
         }
 
@@ -225,6 +237,10 @@
             renderLanes();
             drawRuler();
             updatePlayheadUi();
+        }
+        // Pause Beat Lab audio when leaving that mode
+        if (!isBeatlab && window.VoxloopBeatLab && typeof window.VoxloopBeatLab.pause === "function") {
+            try { window.VoxloopBeatLab.pause(); } catch (e) {}
         }
         try {
             localStorage.setItem("vv-mode", mode);
@@ -250,6 +266,23 @@
             status("Could not decode beat");
         }
     }
+
+    function loadBeatBuffer(buffer, name) {
+        if (!buffer) return;
+        ensureCtx();
+        beat = { file: null, buffer, name: name || "Beat Lab", duration: buffer.duration };
+        if (els.beatName) els.beatName.textContent = beat.name;
+        refreshRoles();
+        drawRuler();
+        updateTotals();
+        status("Beat Lab instrumental loaded");
+        renderLanes();
+    }
+
+    window.addEventListener("vl-set-beat-studio", (ev) => {
+        const d = ev.detail || {};
+        if (d.buffer) loadBeatBuffer(d.buffer, d.name);
+    });
 
     async function importAudioFiles(fileList) {
         const files = Array.from(fileList || []).filter((f) => f && f.type && f.type.indexOf("audio") === 0);
@@ -473,6 +506,8 @@
                 el.style.left = c.start * pxPerSec() + "px";
                 el.style.width = Math.max(4, c.duration * pxPerSec()) + "px";
                 el.style.background = lane.color;
+                el.dataset.clipId = c.id;
+                el.dataset.laneId = lane.id;
                 el.innerHTML = "<span>" + escapeHtml(c.name) + "</span>";
                 el.title = c.name + " @ " + fmt(c.start);
                 track.appendChild(el);
@@ -522,35 +557,43 @@
         });
 
         drawRuler();
+        if (window.VLRack && window.VLRack.afterRender) window.VLRack.afterRender();   // FX Rack: redraw selection + fx badges
+        if (window.VLAuto) window.VLAuto.afterRender();                                  // volume automation rows (before the playhead line is sized)
+        if (window.VLStudioUI) window.VLStudioUI.afterRender();                          // playhead line, live clip
     }
 
     function drawClipWave(clipEl, buffer) {
         try {
+            const STEP = 4, BAR = 3, FLOOR = -54, H = 72;
+            const cssW = Math.max(2, parseFloat(clipEl.style.width) || 100);
             const canvas = document.createElement("canvas");
-            const w = Math.max(2, parseFloat(clipEl.style.width) || 100);
-            canvas.width = Math.min(2000, Math.floor(w));
-            canvas.height = 36;
+            canvas.width = Math.min(4096, Math.max(STEP, Math.floor(cssW / STEP) * STEP));
+            canvas.height = H;
             canvas.className = "clip-wave";
             const ctx = canvas.getContext("2d");
             const data = buffer.getChannelData(0);
-            const step = Math.max(1, Math.floor(data.length / canvas.width));
-            ctx.fillStyle = "rgba(0,0,0,0.25)";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.strokeStyle = "rgba(255,255,255,0.5)";
-            ctx.beginPath();
-            const mid = canvas.height / 2;
-            for (let x = 0; x < canvas.width; x++) {
-                let min = 1, max = -1;
-                const start = x * step;
-                for (let i = 0; i < step && start + i < data.length; i++) {
-                    const v = data[start + i];
-                    if (v < min) min = v;
-                    if (v > max) max = v;
+            const bars = Math.floor(canvas.width / STEP);
+            const per = Math.max(1, Math.floor(data.length / bars));
+            const mid = H / 2;
+            ctx.fillStyle = "rgba(0,0,0,0.22)";
+            ctx.fillRect(0, 0, canvas.width, H);
+            ctx.fillStyle = "rgba(255,255,255,0.14)";
+            ctx.fillRect(0, mid - 0.5, canvas.width, 1);
+            ctx.fillStyle = "rgba(255,255,255,0.88)";
+            for (let b = 0; b < bars; b++) {
+                // peak of this slice, drawn on a dB scale so quiet and loud parts both read clearly
+                let pk = 0;
+                const start = b * per, end = Math.min(data.length, start + per);
+                for (let i = start; i < end; i += 2) {
+                    const v = Math.abs(data[i]);
+                    if (v > pk) pk = v;
                 }
-                ctx.moveTo(x, mid + min * mid);
-                ctx.lineTo(x, mid + max * mid);
+                const db = pk > 1e-5 ? 20 * Math.log10(pk) : -90;
+                const h = Math.max(2, Math.min(1, Math.max(0, (db - FLOOR) / -FLOOR)) * (H - 10));
+                const x = b * STEP, y = mid - h / 2;
+                if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, BAR, h, 1.5); ctx.fill(); }
+                else ctx.fillRect(x, y, BAR, h);
             }
-            ctx.stroke();
             clipEl.appendChild(canvas);
         } catch (_) {}
     }
@@ -619,11 +662,28 @@
         if (els.roleBeat) els.roleBeat.textContent = "Beat: " + (beat.name || "—");
     }
 
+    let activeGains = [];   // gain nodes of the playing clips, so volume automation can be edited while the song plays
+
     function stopSources() {
         activeSources.forEach((s) => {
             try { s.stop(); } catch (_) {}
         });
         activeSources = [];
+        activeGains = [];
+    }
+
+    // Re-draw the volume curve onto the clips that are playing right now (called by automation.js while you edit)
+    function refreshAutomation() {
+        if (!isPlaying || !audioCtx || !window.VLAuto) return;
+        const nowT = playStartOffset + (audioCtx.currentTime - playStartCtx);
+        const ct = audioCtx.currentTime;
+        activeGains.forEach((a) => {
+            const clipEnd = a.clip.start + a.clip.duration;
+            if (nowT >= clipEnd) return;
+            try { a.param.cancelScheduledValues(ct); } catch (_) {}
+            const tFrom = Math.max(nowT, a.clip.start);
+            window.VLAuto.schedule(a.param, a.lane, a.base, tFrom, clipEnd, ct + (tFrom - nowT));
+        });
     }
 
     function scheduleFrom(offset, gainValue) {
@@ -660,6 +720,11 @@
                 gain.gain.value = g * levelLin;
                 src.connect(gain);
                 gain.connect(ctx.destination);
+                if (window.VLAuto && window.VLAuto.has(lane)) {
+                    const tFrom = Math.max(offset, clip.start);
+                    window.VLAuto.schedule(gain.gain, lane, g * levelLin, tFrom, clipEnd, startAt + (tFrom - offset));
+                }
+                activeGains.push({ param: gain.gain, lane, clip, base: g * levelLin });
 
                 if (offset <= clip.start) {
                     const when = startAt + (clip.start - offset);
@@ -701,6 +766,10 @@
         tick();
     }
 
+    function pauseTransport() {
+        if (isPlaying) play();
+    }
+
     function hardStop() {
         stopSources();
         isPlaying = false;
@@ -716,7 +785,7 @@
         if (!isPlaying || !audioCtx) return;
         playhead = playStartOffset + (audioCtx.currentTime - playStartCtx);
         const dur = totalDuration();
-        if (playhead >= dur) {
+        if (playhead >= dur && !isRecording) {          // never cut off a take because the beat ended
             if (els.trLoop?.checked) {
                 playhead = 0;
                 scheduleFrom(0);
@@ -803,6 +872,8 @@
         const micSrc = audioCtx.createMediaStreamSource(mediaStream);
         micSrc.connect(analyser);
         runMeter();
+        // live waveform in the armed lane + dB readout (studioui.js)
+        if (window.VLRecWave) window.VLRecWave.start({ ctx: audioCtx, stream: mediaStream, laneId: recLaneId, startOffset: recStartOffset, pxPerSec: pxPerSec(), getPlayhead: () => playhead, drawRuler });
 
         mediaRecorder.start(50);
         isRecording = true;
@@ -961,6 +1032,7 @@
 
     function cleanupRecStream() {
         stopMeter();
+        if (window.VLRecWave) window.VLRecWave.stop();
         if (mediaStream) {
             mediaStream.getTracks().forEach((t) => t.stop());
             mediaStream = null;
@@ -973,6 +1045,7 @@
         const data = new Uint8Array(analyser.frequencyBinCount);
         const loop = () => {
             if (!analyser) return;
+            if (window.VLRecWave && window.VLRecWave.active) { meterRaf = requestAnimationFrame(loop); return; }   // studioui.js draws the meter
             analyser.getByteTimeDomainData(data);
             let peak = 0;
             for (let i = 0; i < data.length; i++) {
@@ -1012,6 +1085,7 @@
             src.buffer = clip.buffer;
             const gain = offline.createGain();
             gain.gain.value = gLin;
+            if (window.VLAuto && window.VLAuto.has(lane)) window.VLAuto.schedule(gain.gain, lane, gLin, Math.max(0, clip.start), clip.start + clip.duration, Math.max(0, clip.start));
             src.connect(gain);
             gain.connect(offline.destination);
             src.start(Math.max(0, clip.start));
@@ -1098,10 +1172,45 @@
             if (!clip.buffer) continue;
             const src = leadCtx.createBufferSource();
             src.buffer = clip.buffer;
-            src.connect(leadCtx.destination);
+            if (window.VLAuto && window.VLAuto.has(mainLane)) {
+                // the lead as it sounds in this mix, including the volume rides you drew
+                const lg = leadCtx.createGain();
+                window.VLAuto.schedule(lg.gain, mainLane, 1, Math.max(0, clip.start), clip.start + clip.duration, Math.max(0, clip.start));
+                src.connect(lg); lg.connect(leadCtx.destination);
+            } else src.connect(leadCtx.destination);
             src.start(Math.max(0, clip.start));
         }
         return leadCtx.startRendering();
+    }
+
+    /** The whole Studio mix as you hear it (beat + every lane with its level and automation) as a stereo buffer. */
+    async function renderMix() {
+        const sr = beat.buffer?.sampleRate || lanes.find((l) => l.clips[0]?.buffer)?.clips[0].buffer.sampleRate || 44100;
+        let dur = beat.duration || 0;
+        lanes.forEach((l) => l.clips.forEach((c) => { dur = Math.max(dur, c.start + c.duration); }));
+        if (dur <= 0) return null;
+        const offline = new OfflineAudioContext(2, Math.max(1, Math.ceil(dur * sr)), sr);
+        if (beat.buffer) {
+            const b = offline.createBufferSource();
+            b.buffer = beat.buffer; b.connect(offline.destination); b.start(0);
+        }
+        const mainDb = mainReferenceDb();
+        lanes.forEach((lane) => {
+            if (lane.muted) return;
+            const resolved = resolveLaneGain(lane, mainDb);
+            if (resolved.key === "mute" || resolved.lin <= 0) return;
+            lane.clips.forEach((clip) => {
+                if (!clip.buffer) return;
+                const src = offline.createBufferSource();
+                src.buffer = clip.buffer;
+                const gain = offline.createGain();
+                gain.gain.value = resolved.lin;
+                if (window.VLAuto && window.VLAuto.has(lane)) window.VLAuto.schedule(gain.gain, lane, resolved.lin, Math.max(0, clip.start), clip.start + clip.duration, Math.max(0, clip.start));
+                src.connect(gain); gain.connect(offline.destination);
+                src.start(Math.max(0, clip.start));
+            });
+        });
+        return offline.startRendering();
     }
 
     async function renderCompositeVocal() {
@@ -1124,7 +1233,9 @@
         active.forEach((l) => l.clips.forEach((c) => { dur = Math.max(dur, c.start + c.duration); }));
         if (mainLane) mainLane.clips.forEach((c) => { dur = Math.max(dur, c.start + c.duration); });
         const length = Math.max(1, Math.ceil(dur * sr));
-        const offline = new OfflineAudioContext(1, length, sr);
+        // Stereo only when an FX Rack effect made a clip stereo (widener, doubler...). Plain mono sessions render exactly as before.
+        const wantStereo = active.some((l) => l.clips.some((c) => c.buffer && c.buffer.numberOfChannels > 1));
+        const offline = new OfflineAudioContext(wantStereo ? 2 : 1, length, sr);
 
         const report = [];
         const mainDb = mainReferenceDb();
@@ -1171,6 +1282,7 @@
                 src.buffer = buf;
                 const gain = offline.createGain();
                 gain.gain.value = gLin;
+                if (window.VLAuto && window.VLAuto.has(lane)) window.VLAuto.schedule(gain.gain, lane, gLin, Math.max(0, clip.start), clip.start + buf.duration, Math.max(0, clip.start));
                 src.connect(gain);
                 gain.connect(offline.destination);
                 src.start(Math.max(0, clip.start));
@@ -1207,8 +1319,11 @@
 
     function audioBufferToWav(buffer) {
         const sr = buffer.sampleRate;
-        const samples = buffer.getChannelData(0);
-        const dataLength = samples.length * 2;
+        const nch = Math.min(2, buffer.numberOfChannels);
+        const chans = [];
+        for (let c = 0; c < nch; c++) chans.push(buffer.getChannelData(c));
+        const frames = chans[0].length;
+        const dataLength = frames * 2 * nch;
         const ab = new ArrayBuffer(44 + dataLength);
         const view = new DataView(ab);
         const writeStr = (o, s) => {
@@ -1220,17 +1335,19 @@
         writeStr(12, "fmt ");
         view.setUint32(16, 16, true);
         view.setUint16(20, 1, true);
-        view.setUint16(22, 1, true);
+        view.setUint16(22, nch, true);
         view.setUint32(24, sr, true);
-        view.setUint32(28, sr * 2, true);
-        view.setUint16(32, 2, true);
+        view.setUint32(28, sr * 2 * nch, true);
+        view.setUint16(32, 2 * nch, true);
         view.setUint16(34, 16, true);
         writeStr(36, "data");
         view.setUint32(40, dataLength, true);
         let off = 44;
-        for (let i = 0; i < samples.length; i++, off += 2) {
-            const s = Math.max(-1, Math.min(1, samples[i]));
-            view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        for (let i = 0; i < frames; i++) {
+            for (let c = 0; c < nch; c++, off += 2) {
+                const s = Math.max(-1, Math.min(1, chans[c][i]));
+                view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+            }
         }
         return new Blob([ab], { type: "audio/wav" });
     }
@@ -1364,10 +1481,13 @@
             addLane,
             loadBeatFile,
             importAudioFiles,
-            lanes,
-            beat,
+            // getters, because lanes / beat get replaced (delete lane, load a new beat)
+            get lanes() { return lanes; },
+            get beat() { return beat; },
             sendToPipeline,
-            MAX_LANES
+            MAX_LANES,
+            // used by the FX Rack (fxrack.js)
+            api: { renderLanes, updateTotals, refreshRoles, ensureCtx, status, pause: pauseTransport, drawRuler, pxPerSec, timelineWidth, totalDuration, renderMix, refreshAutomation, getPlayhead: () => playhead, isPlaying: () => isPlaying }
         };
     }
 

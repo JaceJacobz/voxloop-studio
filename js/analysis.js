@@ -1152,7 +1152,7 @@ if (typeof module !== "undefined") {
             // Ignore sub-bass and extremely high frequencies.
             if (
                 frequency < 110 ||
-                frequency > 2000
+                frequency > 1500
             ) {
                 continue;
             }
@@ -1340,110 +1340,62 @@ if (typeof module !== "undefined") {
     }
 
     // --------------------------------------------------------
-    // Find the best matching key.
+    // Find the key.
+    //
+    // What matters for tuning and for fitting a vocal to a beat is WHICH SEVEN NOTES the music uses, not what the tonic is
+    // called: F major, D minor and G dorian are the same seven notes, so the vocal must be pulled to the same notes. So the
+    // first question is "which of the 12 seven-note sets fits best?" (the notes in the set against the notes outside it).
+    // Only then is the tonic named (major or minor, the two readings of that same set).
+    //
+    // (Before, the major and minor profile of every root were ranked against each other, and "confidence" was the gap to
+    // the runner-up. The runner-up is nearly always the relative major/minor, which is the same notes, so a correct reading
+    // scored low, while a reading one note wrong scored high.)
     // --------------------------------------------------------
+    const MAJOR_STEPS = [0, 2, 4, 5, 7, 9, 11];
+    const setScore = (root) => {
+        let inside = 0, outside = 0;
+        const inSet = new Array(12).fill(false);
+        for (const d of MAJOR_STEPS) inSet[(root + d) % 12] = true;
+        for (let pc = 0; pc < 12; pc++) { if (inSet[pc]) inside += chroma[pc]; else outside += chroma[pc]; }
+        return { root, score: inside - outside, inSet };
+    };
+    const sets = [];
+    for (let root = 0; root < 12; root++) sets.push(setScore(root));
+    sets.sort((x, y) => y.score - x.score);
+    const bestSet = sets[0], runnerUp = sets[1];
+    const margin = bestSet.score - runnerUp.score;
 
-    let bestScore = -Infinity;
-    let secondBestScore = -Infinity;
+    // The one note that the two best sets disagree about (they are a fifth apart, so they differ by a single note)
+    let contested = null;
+    for (let pc = 0; pc < 12; pc++) if (bestSet.inSet[pc] !== runnerUp.inSet[pc]) { contested = contested === null ? pc : contested; }
 
-    let bestRoot = 0;
-    let bestScale = "Major";
+    // Name the tonic: the major reading (root of the set) or the minor reading (its 6th degree), whichever fits better
+    const asMajor = rotate(majorProfile, bestSet.root);
+    const minorRoot = (bestSet.root + 9) % 12;
+    const asMinor = rotate(minorProfile, minorRoot);
+    const majorFit = correlation(chroma, asMajor), minorFit = correlation(chroma, asMinor);
+    const isMinor = minorFit > majorFit;
+    const tonic = isMinor ? minorRoot : bestSet.root;
 
-    for (let root = 0; root < 12; root++) {
+    // Honest confidence: how much better the best set is than the next one. A margin of ~0.12 of the total tonal energy
+    // (the single contested note carries about that much) is a clear reading.
+    const confidence = Math.max(0, Math.min(1, margin / 0.12));
 
-        const rotatedMajor = [];
-        const rotatedMinor = [];
-
-        for (let i = 0; i < 12; i++) {
-
-            rotatedMajor.push(
-                majorProfile[
-                    (i - root + 12) % 12
-                ]
-            );
-
-            rotatedMinor.push(
-                minorProfile[
-                    (i - root + 12) % 12
-                ]
-            );
-
-        }
-
-        const majorScore =
-            correlation(
-                chroma,
-                rotatedMajor
-            );
-
-        const minorScore =
-            correlation(
-                chroma,
-                rotatedMinor
-            );
-
-        const candidates = [
-            {
-                score: majorScore,
-                scale: "Major"
-            },
-            {
-                score: minorScore,
-                scale: "Minor"
-            }
-        ];
-
-        for (const candidate of candidates) {
-
-            if (candidate.score > bestScore) {
-
-                secondBestScore = bestScore;
-
-                bestScore =
-                    candidate.score;
-
-                bestRoot = root;
-                bestScale = candidate.scale;
-
-            } else if (
-                candidate.score >
-                secondBestScore
-            ) {
-
-                secondBestScore =
-                    candidate.score;
-
-            }
-
-        }
-
+    function rotate(profile, root) {
+        const out = [];
+        for (let i = 0; i < 12; i++) out.push(profile[(i - root + 12) % 12]);
+        return out;
     }
 
-    // --------------------------------------------------------
-    // Confidence is based on how clearly the winning key
-    // separates itself from the second-best candidate.
-    // --------------------------------------------------------
-
-    const separation =
-        Math.max(
-            0,
-            bestScore - secondBestScore
-        );
-
-    const confidence =
-        Math.max(
-            0,
-            Math.min(
-                1,
-                separation / 0.20
-            )
-        );
-
     return {
-        key: noteNames[bestRoot],
-        scale: bestScale,
+        key: noteNames[tonic],
+        scale: isMinor ? "Minor" : "Major",
         confidence,
-        score: bestScore
+        score: bestSet.score,
+        margin,
+        mask: bestSet.inSet,                              // the seven notes (true = in the key)
+        contestedNote: contested,                         // the note the runner-up set would change (only matters when confidence is low)
+        chroma: Array.from(chroma)
     };
 }
 

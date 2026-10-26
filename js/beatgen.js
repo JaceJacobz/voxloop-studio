@@ -480,11 +480,28 @@ function buildHook(t, degrees, cpb, bars, style) {
   return { bars, notes };
 }
 
-// Pre-chorus: one long rising note per bar, held on a chord tone (builds tension)
+// Pre-chorus: a calm line on chord tones that sets up the chorus. It used to climb one step higher every
+// bar, so every pre-chorus sounded the same. Now it picks a different shape each time, and none of them climb.
 function buildPreHook(degrees, cpb, bars) {
+  const shape = pick(["hold", "sway", "fall", "pairs", "question"]);
+  const top = randomInt(6, 8);
   const notes = [];
   for (let b = 0; b < bars; b++) {
-    notes.push({ bar: b, step: 0, len: STEPS_PER_BAR, n: nearestChordTone(7 + Math.min(b, 3), slotDegree(degrees, cpb, b, 0)) });
+    const degree = slotDegree(degrees, cpb, b, 0);
+    const tone = offset => nearestChordTone(top + offset, degree);
+    if (shape === "hold") {
+      notes.push({ bar: b, step: 0, len: STEPS_PER_BAR, n: tone(0) });
+    } else if (shape === "sway") {
+      notes.push({ bar: b, step: 0, len: STEPS_PER_BAR, n: tone([0, -1, 0, -2][b % 4]) });
+    } else if (shape === "fall") {
+      notes.push({ bar: b, step: 0, len: STEPS_PER_BAR, n: tone(-Math.min(b, 3)) });
+    } else if (shape === "pairs") {
+      notes.push({ bar: b, step: 0, len: 8, n: tone(0) });
+      notes.push({ bar: b, step: 8, len: 8, n: tone(-1 - (b % 2)) });
+    } else {
+      notes.push({ bar: b, step: 0, len: 6, n: tone(0) });
+      notes.push({ bar: b, step: 8, len: 4, n: tone(b % 2 ? -2 : 1) });
+    }
   }
   return { bars, notes };
 }
@@ -515,11 +532,12 @@ function pickSound(t) {
 
 // ---------- Humanizing ----------
 // How hard one hit is played (0.1 to 1).
-function humanVelocity(probability, cfg, step) {
+function humanVelocity(probability, cfg, step, rnd) {
+  const rand = rnd || Math.random;
   let v = cfg.velocity;
   if (cfg.accent) v *= cfg.accent[step];          // loud/soft pattern
   if (probability < 0.5) v *= cfg.ghost;          // unlikely hits are ghost notes
-  v += randomBetween(-cfg.variation, cfg.variation);
+  v += -cfg.variation + rand() * 2 * cfg.variation;
   return Math.min(1, Math.max(0.1, v));
 }
 
@@ -527,7 +545,10 @@ function humanVelocity(probability, cfg, step) {
 // WHICH steps play. Called every bar so no two bars feel identical.
 //   template : a resolved template (or a genre name)
 //   probOverrides : { track: [16 probabilities] } used to tell ghost notes from normal hits
-function humanizeTracks(templateOrGenre, tracks, probOverrides) {
+// `rnd` (optional) is a seeded generator: with one, the same bar is always played the same way,
+// which is what lets the download match what you heard. Without one it is random every time.
+function humanizeTracks(templateOrGenre, tracks, probOverrides, rnd) {
+  const rand = rnd || Math.random;
   const template = typeof templateOrGenre === "string" ? resolveTemplate(templateOrGenre) : templateOrGenre;
   const loose = template.looseness || 1;
   const velocities = {};
@@ -537,10 +558,10 @@ function humanizeTracks(templateOrGenre, tracks, probOverrides) {
     const probabilities = (probOverrides && probOverrides[trackName]) || template.tracks[trackName];
     const cfg = template.humanize[trackName];
     velocities[trackName] = tracks[trackName].map((hit, step) =>
-      hit ? humanVelocity(probabilities[step], cfg, step) : 0
+      hit ? humanVelocity(probabilities[step], cfg, step, rand) : 0
     );
     offsets[trackName] = probabilities.map(() =>
-      randomBetween(-cfg.timingMs, cfg.timingMs) * loose / 1000
+      (-cfg.timingMs + rand() * 2 * cfg.timingMs) * loose / 1000
     );
   });
 
@@ -597,7 +618,10 @@ function finishView(beat, t, p) {
 
   const probs = Object.assign({}, p.probs);
   probs.lead = tracks.lead.map(h => (h ? 1 : 0));
-  const human = humanizeTracks(t, tracks, probs);
+  // Strength and timing are seeded by the beat and the bar number: every bar feels a little different
+  // from the one before, but bar 17 is the same every time it plays (live, looped, or in the download).
+  const feelRng = seededRandom(((beat.seed || 1) ^ Math.imul((p.barNumber || 0) + 7, 0x9E3779B1)) >>> 0);
+  const human = humanizeTracks(t, tracks, probs, feelRng);
 
   // Section energy: verses are played a little softer than choruses
   if (p.dyn && p.dyn !== 1) {
@@ -616,6 +640,7 @@ function finishView(beat, t, p) {
     chord: p.c1, chord2: p.c2,
     leadNotes: p.lead ? p.lead.midi : zeros16(), leadExtra: Boolean(p.leadExtra),
     pluckNotes, doubles: p.doubles || {}, fx: p.fx || {},
+    voicing: p.voicing || 0, strumDown: p.strumDown !== false, bassTones: p.bassTones || null,
     kind: p.kind || null, label: p.label || "", sec: p.sec || null,
     sectionIndex: p.sectionIndex === undefined ? -1 : p.sectionIndex,
     velocities: human.velocities, offsets: human.offsets
@@ -677,9 +702,45 @@ function songBarView(beat, bar) {
     isFill = true;
   }
 
-  // Riser during the last 2 bars before the next section; impact + crash on the chorus
-  if (rules.riser && hasNext && b === Math.max(0, n - 2)) fx.riser = Math.min(2, n);
+  // Impact + crash on the first bar of a chorus (the old rising noise riser is gone)
   if (isFirst && sec.kind === "chorus") { fx.impact = true; fx.crash = true; tracks.kick[0] = present.kick ? 1 : 0; }
+
+  // ---- Variation: no two bars, and no two passes of the same section, are quite alike ----
+  // Which time this section has come round (0 = the first verse, 1 = the second verse, ...)
+  const pass = beat.sections.slice(0, at.index).filter(s => s.kind === sec.kind).length;
+  const oddBar = b % 2 === 1;
+  const phraseEnd = b % 4 === 3;                       // the end of a 4-bar phrase changes the most
+  let bassTones = null;
+  if (!build && !isFill) {
+    const keep = phraseEnd ? 0.80 : oddBar ? 0.92 : 0.97;                        // chance an off-beat hit stays
+    const more = (phraseEnd ? 0.8 : oddBar ? 0.45 : 0.15) + 0.2 * Math.min(pass, 2) / 2;   // how many "maybe" hits join in
+    ["hat", "openhat", "shaker", "perc", "rim", "bell", "pluck", "logdrum"].forEach(name => {
+      if (!present[name]) return;
+      const base = tracks[name], maybe = pattern.probs[name] || [];
+      const varied = base.map((hit, s) => hit ? ((s % 4 === 0 || rng() < keep) ? 1 : 0) : (rng() < (maybe[s] || 0) * more ? 1 : 0));
+      if (varied.some(Boolean)) tracks[name] = varied;
+    });
+    if (present.kick && phraseEnd) {                   // an extra, off-beat kick now and then
+      const maybe = pattern.probs.kick || [];
+      [3, 7, 10, 11, 14].forEach(s => { if (!tracks.kick[s] && rng() < (maybe[s] || 0) * 0.6) tracks.kick[s] = 1; });
+    }
+    if (present.bass) {                                // the bass walks at the end of a phrase
+      const live = beat.bassTones.map((tone, s) => (tracks.bass[s] ? s : -1)).filter(s => s >= 0);
+      if (live.length) {
+        bassTones = beat.bassTones.slice();
+        const last = live[live.length - 1];
+        if (phraseEnd && live.length >= 2) {
+          bassTones[last] = ["fifth", "octave", "third"][Math.floor(rng() * 3)];
+          if (rng() < 0.5) bassTones[live[live.length - 2]] = "fifth";
+        } else if (oddBar && rng() < 0.35) {
+          bassTones[last] = "octave";
+        }
+      }
+    }
+  }
+  // Keys change voicing from bar to bar and alternate their strum direction
+  const voicing = (b % 4 === 2 ? 1 : 0) + (pass % 2);
+  const strumDown = b % 2 === 0;
 
   // Hat rolls (trap hats): some steps get a quick double or triplet
   const doubles = {};
@@ -699,9 +760,14 @@ function songBarView(beat, bar) {
     else if (sec.kind === "outro" && b < 2) hook = beat.hooks.chorus;
     if (hook) {
       lead = { midi: zeros16(), dur: zeros16() };
-      hook.notes.filter(note => note.bar === b % hook.bars).forEach(note => {
+      const barNotes = hook.notes.filter(note => note.bar === b % hook.bars);
+      const lastBarOfHook = (b % hook.bars) === hook.bars - 1;
+      barNotes.forEach((note, i) => {
+        let degree = note.n;
+        // The second time round, the end of the phrase answers the first time instead of repeating it
+        if (sec.kind === "chorus" && pass > 0 && lastBarOfHook && i < barNotes.length - 1 && rng() < 0.7) degree += pass % 2 ? 1 : -1;
         tracks.lead[note.step] = 1;
-        lead.midi[note.step] = leadMidi(beat.key, note.n);
+        lead.midi[note.step] = leadMidi(beat.key, degree);
         lead.dur[note.step] = note.len;
       });
       leadExtra = sec.final && b >= 4;              // the last time round the hook is doubled an octave up
@@ -710,6 +776,7 @@ function songBarView(beat, bar) {
 
   return finishView(beat, t, {
     tracks, probs, present, c1, c2, lead, leadExtra, doubles, fx, isFill, build,
+    voicing, strumDown, bassTones,
     phraseBar: b, bars: n, barNumber: bar, dyn: rules.dyn,
     kind: sec.kind, label: sec.label, sec: rules.sec, sectionIndex: at.index
   });

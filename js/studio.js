@@ -1346,6 +1346,179 @@ function createStudioEngine() {
     }
 
     // ---------------------------------------------------------
+    // 2b. Calm: sibilance and strain judged against FIXED targets
+    //
+    // The de-esser and the strain control above compare a take with ITSELF (they act when the highs jump above the
+    // take's own typical level). A voice that is harsh all the way through never jumps above its own average, so it
+    // was reported as "nothing to fix" and went on to pitch correction and mastering, which only make it louder.
+    //
+    // This stage compares the voice with what a smooth vocal looks like: the "s" band (5 kHz up) may not be louder than a
+    // set distance under the voice's body, judged against the vowels around it (so a natural "s" is still an "s"), and
+    // the strain band (2.5-4.8 kHz) may not push past a set distance over the body. Only the band that is too loud is
+    // turned down, only while it is too loud, and by no more than a few dB. A smooth vocal is left alone.
+    //
+    //   amount 0..1 scales how far it goes (0 = off, 1 = firm). Targets are in dB relative to the body (0.3-2 kHz).
+    // ---------------------------------------------------------
+
+    function calmVoice(channels, sr, options) {
+        const o = Object.assign({ amount: 0.9, sibTargetDb: -13, presTargetDb: -17, maxSibCutDb: 8, maxPresCutDb: 5, ratio: 8 }, options || {});
+        const result = { applied: false, sibMaxDb: 0, presMaxDb: 0, sibPct: 0, presPct: 0, channels };
+        if (!(o.amount > 0)) return result;
+        const n = channels[0].length;
+
+        // A band of the voice, with NO phase shift: the filter is run forward and then backward, so the shifts cancel.
+        // That matters because the cut is made by subtracting a part of this band from the voice: a band that is
+        // phase-shifted would not line up with the voice and would barely cancel it.
+        const bandOf = (x, hpHz, lpHz) => {
+            const pass = (y) => {
+                y = runCascade(y, [design.highpass(hpHz, sr), design.highpass(hpHz, sr)]);
+                if (lpHz) y = runCascade(y, [design.lowpass(lpHz, sr), design.lowpass(lpHz, sr)]);
+                return y;
+            };
+            const forward = pass(x);
+            forward.reverse();
+            const back = pass(forward);
+            back.reverse();
+            return back;
+        };
+        const sib = channels.map((x) => bandOf(x, 3800, 0));          // everything above ~4 kHz: the "s" and the harsh top
+        const pres = channels.map((x) => bandOf(x, 2300, 3700));        // the strain / edge region
+        const body = channels.map((x) => bandOf(x, 300, 2000));
+
+        // energy per 3 ms hop (6 ms window), summed over channels
+        const hop = Math.max(1, Math.round(0.003 * sr)), win = hop * 2;
+        const frames = Math.floor((n - win) / hop);
+        if (frames < 100) return result;
+        const energy = (bands) => {
+            const e = new Float64Array(frames);
+            for (let f = 0; f < frames; f++) {
+                let sum = 0;
+                for (const b of bands) for (let i = f * hop, end = i + win; i < end; i++) sum += b[i] * b[i];
+                e[f] = sum / win;
+            }
+            return e;
+        };
+        const eSib = energy(sib), ePres = energy(pres), eBody = energy(body);
+
+        // the loudest the body gets within +-150 ms: "s" and consonants are judged against the vowels next to them
+        const span = Math.round(0.15 / (hop / sr));
+        const ref = new Float64Array(frames);
+        let bodyMax = 0;
+        for (let f = 0; f < frames; f++) if (eBody[f] > bodyMax) bodyMax = eBody[f];
+        for (let f = 0; f < frames; f++) {
+            let m = 0;
+            for (let k = Math.max(0, f - span), e = Math.min(frames - 1, f + span); k <= e; k++) if (eBody[k] > m) m = eBody[k];
+            ref[f] = m;
+        }
+        const gate = bodyMax * Math.pow(10, -4.5);          // ignore the silence between phrases
+        const slope = 1 - 1 / o.ratio;
+        const maxSib = o.maxSibCutDb * o.amount, maxPres = o.maxPresCutDb * o.amount;
+        const wantSib = new Float32Array(frames), wantPres = new Float32Array(frames);
+        let sibActive = 0, presActive = 0, live = 0;
+        const sibSeen = [], presSeen = [];
+        for (let f = 0; f < frames; f++) {
+            if (ref[f] < gate) continue;
+            live++;
+            const sibDb = 10 * Math.log10((eSib[f] + 1e-20) / (ref[f] + 1e-20));
+            sibSeen.push(sibDb);
+            const sibExcess = sibDb - o.sibTargetDb;
+            if (sibExcess > 0) { wantSib[f] = Math.min(maxSib, sibExcess * slope * o.amount); if (wantSib[f] > 0.5) sibActive++; }
+            // strain: only on voiced frames (the body is actually loud), against the body right here
+            if (eBody[f] > bodyMax * Math.pow(10, -3)) {
+                const presDb = 10 * Math.log10((ePres[f] + 1e-20) / (eBody[f] + 1e-20));
+                presSeen.push(presDb);
+                const presExcess = presDb - o.presTargetDb;
+                if (presExcess > 0) { wantPres[f] = Math.min(maxPres, presExcess * slope * o.amount); if (wantPres[f] > 0.5) presActive++; }
+            }
+        }
+        if (!live) return result;
+        const median = (a) => { if (!a.length) return null; const b = a.slice().sort((p, q) => p - q); return b[b.length >> 1]; };
+        result.sibMedianDb = median(sibSeen);          // where this voice sits (smooth voices: about -18 / -23)
+        result.presMedianDb = median(presSeen);
+        result.sibPct = 100 * sibActive / live;
+        result.presPct = 100 * presActive / live;
+
+        // smooth the gain: quick to turn down, slower to let go (no clicks, no pumping)
+        const smooth = (want, attackMs, releaseMs) => {
+            const dt = hop / sr, a = 1 - Math.exp(-dt / (attackMs / 1000)), r = 1 - Math.exp(-dt / (releaseMs / 1000));
+            const out = new Float32Array(frames);
+            let g = 0;
+            for (let f = 0; f < frames; f++) { g += (want[f] > g ? a : r) * (want[f] - g); out[f] = g; }
+            return out;
+        };
+        const gSib = smooth(wantSib, 3, 45), gPres = smooth(wantPres, 5, 80);
+        for (let f = 0; f < frames; f++) {
+            if (gSib[f] > result.sibMaxDb) result.sibMaxDb = gSib[f];
+            if (gPres[f] > result.presMaxDb) result.presMaxDb = gPres[f];
+        }
+        result.applied = result.sibMaxDb > 0.7 || result.presMaxDb > 0.7;
+        if (!result.applied) return result;
+
+        // per-sample gain by interpolating between the frame centres, then: out = x - (1 - g) * band
+        const lin = (db) => Math.pow(10, -db / 20);
+        const out = channels.map((x, c) => {
+            const y = new Float32Array(x);
+            for (let f = 0; f < frames; f++) {
+                const centre = f * hop + win / 2, next = centre + hop;
+                const s0 = lin(gSib[f]), s1 = lin(gSib[Math.min(frames - 1, f + 1)]);
+                const p0 = lin(gPres[f]), p1 = lin(gPres[Math.min(frames - 1, f + 1)]);
+                for (let i = centre; i < next && i < n; i++) {
+                    const t = (i - centre) / hop;
+                    y[i] -= (1 - (s0 + (s1 - s0) * t)) * sib[c][i] + (1 - (p0 + (p1 - p0) * t)) * pres[c][i];
+                }
+            }
+            return y;
+        });
+        result.channels = out;
+        return result;
+    }
+
+    // ---------------------------------------------------------
+    // 2c. How bright is a finished mix? (and a gentle fix when it is too bright)
+    //
+    // "Top vs body": the 4-9 kHz band against the 0.3-3 kHz band, over the parts that are actually playing. Smooth
+    // mixes sit around -15 dB or lower; a mix that reads -10 or higher has a harsh, hissy top. (The old listen pass looked at
+    // the energy above one 6 kHz filter and acted only above 22%, which no real mix ever reaches.)
+    // ---------------------------------------------------------
+
+    function measureTop(channels, sr) {
+        const n = channels[0].length;
+        const mono = new Float32Array(n);
+        for (const ch of channels) for (let i = 0; i < n; i++) mono[i] += ch[i] / channels.length;
+        const band = (hp, lp) => runCascade(runCascade(mono, [design.highpass(hp, sr), design.highpass(hp, sr)]), [design.lowpass(lp, sr), design.lowpass(lp, sr)]);
+        const hi = band(4000, 9000), mid = band(300, 3000);
+        const win = Math.round(0.05 * sr), frames = Math.floor(n / win);
+        const ratios = [];
+        let loudest = 0;
+        const eMid = new Float64Array(frames), eHi = new Float64Array(frames);
+        for (let f = 0; f < frames; f++) {
+            let a = 0, b = 0;
+            for (let i = f * win, e = i + win; i < e; i++) { a += mid[i] * mid[i]; b += hi[i] * hi[i]; }
+            eMid[f] = a / win; eHi[f] = b / win;
+            if (eMid[f] > loudest) loudest = eMid[f];
+        }
+        for (let f = 0; f < frames; f++) if (eMid[f] > loudest * 1e-3) ratios.push(10 * Math.log10((eHi[f] + 1e-20) / (eMid[f] + 1e-20)));
+        if (ratios.length < 10) return { medianDb: null, p90Db: null, frames: ratios.length };
+        ratios.sort((p, q) => p - q);
+        return { medianDb: ratios[ratios.length >> 1], p90Db: ratios[Math.floor(ratios.length * 0.9)], frames: ratios.length };
+    }
+
+    // Ease the top end if the mix is too bright: a broad dip around 6 kHz, at most 3.5 dB, only as much as it is over
+    function calmMixTop(channels, sr, options) {
+        const o = Object.assign({ triggerDb: -12.5, targetDb: -14, maxCutDb: 3.5, strength: 0.8 }, options || {});
+        const m = measureTop(channels, sr);
+        const result = { applied: false, cutDb: 0, medianDb: m.medianDb, channels };
+        if (m.medianDb === null || m.medianDb <= o.triggerDb) return result;
+        const cut = Math.min(o.maxCutDb, (m.medianDb - o.targetDb) * o.strength);
+        if (cut < 0.4) return result;
+        const k1 = design.peaking(6300, -cut, 0.7, sr), k2 = design.highshelf ? design.highshelf(10500, -cut * 0.5, sr) : null;
+        result.channels = channels.map((x) => { let y = runBiquad(x, k1); if (k2) y = runBiquad(y, k2); return y; });
+        result.applied = true;
+        result.cutDb = cut;
+        return result;
+    }
+
+    // ---------------------------------------------------------
     // The vocal polish pipeline (high-pass -> multiband -> breaths ->
     // de-ess -> auto-EQ -> phrase evening -> phrase gate).
     // No heavy spectral denoise here — that often adds "static".
@@ -1446,6 +1619,21 @@ function createStudioEngine() {
             report.push("Checked for strained moments: none that needed work.");
         }
 
+        // Calm: harshness measured against fixed targets (see calmVoice), so a voice that is harsh all through is not skipped
+        let calm = { applied: false };
+        if (o.calm !== false && o.deEss) {
+            calm = calmVoice(ch, sr, typeof o.calm === "object" ? o.calm : { amount: typeof o.calm === "number" ? o.calm : 0.9 });
+            if (calm.applied) {
+                ch = calm.channels;
+                const parts = [];
+                if (calm.sibMaxDb > 0.7) parts.push(`harsh \"s\" / top end by up to ${calm.sibMaxDb.toFixed(1)} dB (${calm.sibPct.toFixed(0)}% of the singing)`);
+                if (calm.presMaxDb > 0.7) parts.push(`a pushed, edgy tone around 3 kHz by up to ${calm.presMaxDb.toFixed(1)} dB (${calm.presPct.toFixed(0)}% of the singing)`);
+                report.push(`Calmed ${parts.join(" and ")}, only while it was too sharp, so it stays smooth after tuning and mastering.`);
+            } else {
+                report.push("Checked the vocal against smooth-voice targets (\"s\" and edge): already smooth.");
+            }
+        }
+
         if (o.phraseEven !== false) {
             const peOpts = Object.assign({}, o.phraseEvenOpts || {});
             if (o.quietTake) {
@@ -1469,7 +1657,7 @@ function createStudioEngine() {
                     : `Checked the gaps between phrases: already tight.`));
         }
 
-        return { channels: ch, deEss: de, eq, strain, resonance, report };
+        return { channels: ch, deEss: de, eq, strain, resonance, calm, report };
     }
 
     function finishVocal(channels, options) {
@@ -2168,7 +2356,7 @@ function createStudioEngine() {
 
     return {
         fft, design, biquadMagDb, runBiquad, runCascade,
-        highPass, deEss, deStrain, deResonate, tidyLowEnd, bandSpectrum, planEq, applyEq, saturate,
+        highPass, deEss, calmVoice, measureTop, calmMixTop, deStrain, deResonate, tidyLowEnd, bandSpectrum, planEq, applyEq, saturate,
         prepareVocal, finishVocal,
         makeReverbIR, makeEcho, duckCurve, applyDuck, levelBelowVocal,
         glue, limiter, truePeakDb, master,

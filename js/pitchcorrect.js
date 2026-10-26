@@ -21,9 +21,15 @@
 function createTuneEngine() {
 
     const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    // Besides major and minor, the modes music (and the Beat Lab) actually uses. A dorian beat has one note that
+    // natural minor does not (the 6th), and a tuner that only knew "minor" would pull a singer's 6th down to the wrong note.
     const SCALES = {
         major: [0, 2, 4, 5, 7, 9, 11],
-        minor: [0, 2, 3, 5, 7, 8, 10]
+        minor: [0, 2, 3, 5, 7, 8, 10],
+        dorian: [0, 2, 3, 5, 7, 9, 10],
+        mixolydian: [0, 2, 4, 5, 7, 9, 10],
+        lydian: [0, 2, 4, 6, 7, 9, 11],
+        phrygian: [0, 1, 3, 5, 7, 8, 10]
     };
 
     // ---------------------------------------------------------

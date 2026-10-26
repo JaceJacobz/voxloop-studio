@@ -1,0 +1,218 @@
+/* =========================================================
+   Voxloop Studio — UI polish (loads after style.css)
+   1. Workspace tabs (Beat Lab / Studio / Pipeline) are peers, not a step flow
+   2. Live recording waveform + level meter
+   3. Playhead line through the lanes
+   4. Studio toolbar tidy
+   ========================================================= */
+
+/* ---------- 1. workspace tabs ---------- */
+.mode-switch {
+    align-self: stretch;
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    padding: 0;
+    min-width: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+}
+
+.mode-btn {
+    position: relative;
+    flex: none;
+    height: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+    font: 600 14px/1 var(--font);
+    letter-spacing: 0.005em;
+}
+
+.mode-btn .mode-ico { flex: none; opacity: 0.85; }
+
+.mode-btn::after {
+    content: "";
+    position: absolute;
+    left: 10px; right: 10px; bottom: -1px;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+    background: transparent;
+    transition: background 0.15s;
+}
+
+.mode-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.035); }
+
+.mode-btn.is-active { background: transparent; color: var(--text); }
+.mode-btn.is-active .mode-ico { color: var(--accent-hi); opacity: 1; }
+.mode-btn.is-active::after { background: var(--accent); }
+
+.mode-btn:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -3px; border-radius: 8px; }
+
+/* Simple / Pro is a setting, not a workspace: make it smaller and quieter so the two pills no longer look alike */
+.ux-switch { background: transparent; border-color: var(--line); padding: 2px; }
+.ux-btn { height: 26px; font-size: 12px; padding: 0 10px; }
+
+@media (min-width: 640px) {
+    .mode-switch { flex: none; min-width: 0; }
+    .mode-btn { padding: 0 18px; }
+}
+
+/* small phones: only the open tab keeps its name, the others are icons */
+@media (max-width: 520px) {
+    .mode-btn { padding: 0 11px; gap: 6px; }
+    .mode-btn:not(.is-active) .mode-label { display: none; }
+}
+
+/* ---------- 2. live recording ---------- */
+.studio-clip.is-live {
+    background: rgba(255, 84, 104, 0.10);
+    border: 1px solid var(--rec);
+    box-shadow: 0 0 0 0 rgba(255, 84, 104, 0.45);
+    animation: liveGlow 1.4s ease-in-out infinite;
+    cursor: default;
+}
+.studio-clip.is-live .live-wave {
+    position: absolute;
+    left: 0; top: 0;
+    height: 100%;
+    max-width: none;
+    image-rendering: auto;
+}
+.studio-clip .live-tag {
+    top: 4px; left: 8px;
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    background: rgba(17, 15, 24, 0.82);
+    color: var(--rec);
+    font-size: 10.5px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.studio-clip .live-tag.is-clip { background: var(--rec); color: #fff; }
+.studio-clip.is-live.is-finishing { animation: none; opacity: 0.65; }
+.studio-clip.is-live.is-finishing .live-tag { color: var(--text-2); }
+
+@keyframes liveGlow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 84, 104, 0.40); }
+    50% { box-shadow: 0 0 0 4px rgba(255, 84, 104, 0); }
+}
+
+.studio-lane.is-recording-lane { background: rgba(255, 84, 104, 0.09); }
+.studio-lane.is-recording-lane .studio-lane-head { box-shadow: inset 3px 0 0 var(--rec); }
+
+/* recorded clips use the same bar waveform as the live one */
+.studio-clip .clip-wave { opacity: 1; }
+
+/* level meter with dB readout */
+.tr-meter { position: relative; }
+.tr-meter-peak {
+    position: absolute; top: -1px; bottom: -1px; left: 0;
+    width: 2px; margin-left: -1px;
+    background: #fff; opacity: 0;
+    transition: opacity 0.15s;
+}
+.tr-db {
+    flex: none;
+    min-width: 62px;
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.tr-db.is-warm { color: var(--warn); }
+.tr-db.is-hot { color: var(--rec); font-weight: 700; }
+
+body.is-live-rec .tr-meter { width: 120px; height: 10px; border-radius: 5px; }
+body.is-live-rec .tr-meter-peak { opacity: 0.9; }
+body.is-live-rec .tr-meter-fill { transition: none; }
+
+/* ---------- 3. playhead line through the lanes ---------- */
+.studio-playline {
+    position: absolute;
+    top: 0; left: 0;
+    width: 2px;
+    z-index: 1;
+    background: var(--accent-hi);
+    opacity: 0.85;
+    pointer-events: none;
+    box-shadow: 0 0 0 1px rgba(168, 148, 255, 0.15);
+}
+body.is-live-rec .studio-playline { background: var(--rec); box-shadow: none; }
+.studio-lane-track { z-index: 0; }
+.studio-lane-head { z-index: 3; }
+
+/* ---------- 4. studio toolbar ---------- */
+@media (min-width: 720px) {
+    .studio-toolbar { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+    .studio-beat-slot { flex: 1 1 220px; }
+    .studio-toolbar-actions { display: flex; flex-wrap: wrap; flex: 2 1 420px; justify-content: flex-end; gap: 8px; }
+    .studio-select { width: auto; min-width: 150px; }
+    .studio-tool-btn { min-height: 40px; padding: 0 14px; }
+}
+
+/* ---------- 5. volume automation rows ---------- */
+.lane-btn-auto { font-weight: 700; }
+.lane-btn-auto.has-auto { color: var(--accent-hi); border-color: var(--accent-line); box-shadow: inset 0 -2px 0 var(--accent); }
+.lane-btn-auto.is-on { background: var(--accent); color: #fff; border-color: var(--accent-strong); }
+
+.studio-auto-row { min-height: 104px; background: rgba(124, 92, 252, 0.045); border-top: 1px dashed var(--line-strong); }
+.studio-auto-row .auto-head { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; align-items: flex-start; }
+.auto-meta { display: flex; flex-direction: column; min-width: 0; }
+.auto-meta strong { font-size: 13px; }
+.auto-meta small { color: var(--muted); font-size: 11px; }
+.auto-btns { display: flex; flex-wrap: wrap; gap: 4px; }
+.auto-btns button {
+    border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text-2);
+    font: inherit; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--r-pill); cursor: pointer;
+}
+.auto-btns button:hover { border-color: var(--accent-line); color: var(--text); }
+.auto-btns .is-ai { color: var(--accent-hi); border-color: var(--accent-line); }
+.auto-snap { font-size: 11px; color: var(--muted); display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+.auto-track { background: transparent; height: 104px; }
+.auto-canvas { display: block; touch-action: none; cursor: crosshair; }
+
+/* ---------- 6. reference & versions ---------- */
+.rf-name-input {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
+    font: inherit; font-size: 13px; padding: 7px 10px; min-width: 150px; flex: 1 1 150px; max-width: 240px;
+}
+.rf-list { display: grid; gap: 6px; margin-bottom: 12px; }
+.rf-src { display: flex; align-items: stretch; gap: 6px; }
+.rf-src-main {
+    flex: 1; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer;
+    background: var(--surface-2); color: var(--text); font: inherit; font-size: 13.5px;
+    border: 1px solid var(--line-strong); border-radius: var(--r-card); padding: 10px 12px;
+}
+.rf-src.is-on .rf-src-main { border-color: var(--accent); background: var(--accent-soft); }
+.rf-name { flex: 1; min-width: 0; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rf-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--accent); }
+.rf-dot.rf-ref { background: var(--warn); }
+.rf-dot.rf-mix { background: var(--vocal); }
+.rf-stale { font-style: normal; color: var(--warn); font-size: 11px; font-weight: 600; }
+.rf-del { width: 34px; border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: var(--r-card); cursor: pointer; }
+.rf-player { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.rf-time { color: var(--text-2); font-size: 12.5px; font-variant-numeric: tabular-nums; margin-left: auto; }
+.rf-strip, .rf-tone { display: block; width: 100%; border: 1px solid var(--line-strong); border-radius: var(--r-card); background: var(--surface-2); }
+.rf-strip { height: 64px; cursor: pointer; touch-action: none; }
+.rf-tone { height: 170px; margin-top: 8px; }
+.rf-section { margin-top: 16px; }
+.rf-tips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.rf-tips li { position: relative; padding-left: 22px; color: var(--text-2); font-size: 13px; line-height: 1.45; }
+.rf-tips li::before { position: absolute; left: 0; }
+.rf-fix { margin-left: 6px; padding: 4px 10px; font-size: 12px; }
+
+/* ---------- 7. Auto: vibe, vocal line, intensity, tappable extras ---------- */
+.fx-vibe { margin: 14px 0 4px; padding: 10px 14px; border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--r-card); font-size: 13px; color: var(--text); }
+.fx-vocalline { margin: 6px 0 0; font-size: 12.5px; color: var(--vocal); }
+.fx-intens { display: flex; align-items: center; gap: 10px; margin: 8px 0 2px; font-size: 13px; color: var(--text-2); flex-wrap: wrap; }
+button.fx-zone { cursor: pointer; font: inherit; font-size: 12px; font-weight: 650; }
+button.fx-zone:hover { border-color: var(--vocal); }

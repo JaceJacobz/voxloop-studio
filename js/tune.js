@@ -83,10 +83,13 @@ document.addEventListener("DOMContentLoaded", () => {
         if (key && key.key) {
             rootSelect.value = String(NOTE_NAMES.indexOf(key.key));
             scaleSelect.value = key.scale.toLowerCase();
-            keyNote.textContent = `Detected from the beat · ${Math.round(key.confidence * 100)}% confidence`;
+            keyNote.textContent = key.source === "Beat Lab"
+                ? "From the Beat Lab · exact"
+                : `Detected from the beat · ${Math.round(key.confidence * 100)}% confidence`;
 
             // Moving a whole vocal is a big step, so only default it on when the key reading is trustworthy.
-            const sure = key.confidence >= 0.6;
+            // (Confidence is now the margin between the best seven-note set and the runner-up: wrong readings score under 0.2.)
+            const sure = key.confidence >= 0.45;
             autoKeyBox.checked = sure;
             autoNote.textContent = sure ? "" : "Off for now because the beat's key reading is not certain. Check the key above, then tick this.";
         } else {
@@ -413,7 +416,8 @@ document.addEventListener("DOMContentLoaded", () => {
         // Scale notes as guide lines
         const o = lastResult.options;
         const ref = o.refCents / 100;
-        const degrees = o.scale === "minor" ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
+        const MODES = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10], dorian: [0, 2, 3, 5, 7, 9, 10], mixolydian: [0, 2, 4, 5, 7, 9, 10], lydian: [0, 2, 4, 6, 7, 9, 11], phrygian: [0, 1, 3, 5, 7, 8, 10] };
+        const degrees = MODES[o.scale] || MODES.major;
         g.font = "11px system-ui, sans-serif";
         g.textBaseline = "middle";
 

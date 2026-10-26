@@ -132,7 +132,7 @@ const TEMPLATES = {
   // =====================================================================
   afrobeats: {
     name: "Afrobeats",
-    styleOrder: ["afropop"],
+    styleOrder: ["smooth", "afropop"],
 
     logdrum: { tones: [0, 0, 1, 2] },            // chord tone: 0 root, 1 third, 2 fifth
     // How long pitched notes ring, in 16th-note steps (fixed = always, max = up to)
@@ -226,6 +226,67 @@ const TEMPLATES = {
     },
 
     styles: {
+      // ---- Smooth Afrobeats: warm, bouncy, melodic (the Wizkid / Burna Boy / Tems lane) ----
+      // The feel comes from the "3-3-2" count: kicks, rim and keys land on steps 0, 3, 6 | 8, 11, 14 instead of
+      // straight on the beat, the congas play the 3-2 clave (0, 3, 6, 10, 12), the backbeat is a snare layered
+      // with a clap, and the hats and shaker swing. Underneath: a round (not harsh) bass and a warm Rhodes.
+      smooth: {
+        name: "Smooth Afrobeats",
+        bpm: [94, 106], swing: 0.17, looseness: 1,
+        scales: ["minor", "dorian", "minor", "major"],
+        progressions: {
+          minor:  [[0,5,2,6], [0,6,5,6], [0,3,5,6], [0,6], [0,5,6,4]],
+          dorian: [[0,3,0,3], [0,6,3,0], [0,3,6,3]],
+          major:  [[0,4,5,3], [0,5,3,4], [0,3,4,3], [0,4,1,4]]
+        },
+        chorusProgressions: {
+          minor:  [[5,6,0,0], [3,5,6,0], [5,2,6,0], [3,6,0,0]],
+          dorian: [[3,6,0,0], [3,0,6,0]],
+          major:  [[3,4,0,5], [5,3,0,4], [3,4,5,0]]
+        },
+        preProgressions: {
+          minor:  [[3,5,6,6], [5,6,5,6], [3,6,3,6]],
+          dorian: [[3,6,3,6]],
+          major:  [[3,4,3,4], [5,3,4,4]]
+        },
+        chordsPerBar: [1],
+        chord: { seventh: 0.6, ninth: 0.3 },
+        bassTones: ["root","root","fifth","octave","root","fifth"],
+        hookStyle: "afro", arp: "up",
+        sidechain: { harmony: 0.25, bass: 0.1, release: 0.2 },        // a soft pump: warm, not punchy
+        gate: { bass: {max: 3}, chords: {max: 2}, pluck: {max: 1}, logdrum: {max: 2} },
+        groove: {
+          // kick: the tresillo (3-3-2) with a few maybe-hits, so no two beats sit the same
+          kick:    V("x..5 ..x. x..4 ..5.", "x... ..x. ..x. ...5", "x..4 ..x. x... ..x5", "x... ..x. ..x. .x.."),
+          // snare + clap together on 2 and 4, with a ghost note leading into the next beat
+          snare:   V(".... x... ...3 x..2", ".... x..2 .... x.3.", ".... x... ..3. x..."),
+          clap:    V(".... x... .... x...", ".... 8... .... x..4"),
+          // rim "tok" on the syncopations
+          rim:     V("..5. .5.. ..5. .5..", "...5 ..5. 5..5 ..5.", ".5.. ..5. .5.. ..5."),
+          hatSparse: V("x.6. x.6. x.6. x.67", "x.x. x.x. x.x. x.x6", "x.5x x.5. x.5x x.5."),
+          hatFull:   V("x6x6 x6x6 x6x6 x6x7", "x6x6 x7x6 x6x6 x7x7", "x5x5 x6x5 x5x5 x6x7"),
+          openhat: V(".... .... ..4. ..7.", ".... .... .... ..8.", "..3. .... ..4. ..6."),
+          shaker:  V("x8x8 x8x8 x8x8 x8x8", "x7x8 x7x8 x7x8 x7x9"),
+          // congas on the 3-2 clave (steps 0, 3, 6, 10, 12) with ghost notes between
+          perc:    V("x..x ..x. ..x. x...", "x..x 4.x. ..x. x.4.", "5..x ..x4 ..x. x..5"),
+          bell:    V("7... ..7. ..7. ....", ".... ..7. .... ..7.", "7..7 .... ..7. ...."),
+          bassExtra: V(".... .... ..4. ..5.", ".... ...4 .... ..5.", ".... .... .... ..6."),
+          logdrum: V(".... ..4. .... ..4.", "...4 .... ..5. ....", ".... .... .... ...5"),
+          // keys: offbeat stabs (verse), then a fuller 3-3-2 comp in the chorus
+          chordsVerse:  V("..8. ..6. ..8. ..5.", "...8 ..6. ...8 ..5.", "..8. ...6 ..8. ...5"),
+          chordsChorus: V("x..8 ..8. ..x. .6..", "x..8 ..x. x..8 ..6.", "..x. x..8 ..x. .8.."),
+          pad:     P("6... .... .... ...."),
+          // plucked "Afro guitar" figure on the same 3-3-2 count
+          pluckVerse:  V("x..5 ..x. 5..5 ..4.", "x... ..x. ..5. 5..5", "5..x ..5. x... ..4."),
+          pluckChorus: V("x..x ..x. x..x ..x.", "x..x ..x. x..5 ..x5", "x..x ..5. x..x ..x.")
+        },
+        sound: {
+          kit: ["soft", "vintage", "punch"], chords: ["rhodes", "darkKeys", "rhodes"], pad: ["warm", "airy"],
+          bass: ["softSub", "sub808"], lead: ["glass", "vibes", "kalimba"], pluck: ["pluckSaw", "kalimba", "bellPluck"]
+        },
+        fx: { reverb: { decay: 2.1, send: 0.26 }, delay: { send: 0.22, feedback: 0.3 } }
+      },
+
       afropop: {
         name: "Afropop",
         bpm: [98, 108], swing: 0.12, looseness: 1,
