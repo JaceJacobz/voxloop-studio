@@ -1643,7 +1643,3 @@ if (typeof window !== "undefined") {
         noteNames: ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     };
 }
-
-if (typeof module !== "undefined") {
-    module.exports = { createTuneEngine };
-}

@@ -793,5 +793,4 @@
     }
 
     root.VLFx = { P, ORDER, NOTE_NAMES, SCALE_OPTS, defaults, withPreset, runChain, runTask, util: { dbLin, linDb, rms, peak, mono, copy, stereo, padTo, bqCoef, bqRun, clamp, mulberry } };
-    if (typeof module !== "undefined") module.exports = root.VLFx;
 })(typeof window !== "undefined" ? window : globalThis);

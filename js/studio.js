@@ -13,9 +13,8 @@
                         harshness, dullness), gently and with hard limits
      4. warmth          a little harmonic saturation, blended in
 
-   Everything lives in createStudioEngine() on plain Float32Arrays so it
-   can be tested in Node. A browser wrapper at the bottom exposes
-   window.VocalVaultStudio.
+   Everything lives in createStudioEngine() on plain Float32Arrays. A
+   browser wrapper at the bottom exposes window.VocalVaultStudio.
    ========================================================= */
 
 function createStudioEngine() {
@@ -2198,9 +2197,11 @@ function createStudioEngine() {
 
         // Cap hat/air lifts — big top boosts make quiet-vocal noise and mic grit
         // obvious once the master raises overall level.
-        if (g.hat > 2.0) g.hat = 2.0;
-        if (g.air > 1.8) g.air = 1.8;
-        if (g.pres > 2.2) g.pres = 2.2;
+        // (caps default to the old fixed values; the Pipeline lowers them for a noisy take or a bright beat)
+        const capHat = o.capHat != null ? o.capHat : 2.0, capAir = o.capAir != null ? o.capAir : 1.8, capPres = o.capPres != null ? o.capPres : 2.2;
+        if (g.hat > capHat) g.hat = capHat;
+        if (g.air > capAir) g.air = capAir;
+        if (g.pres > capPres) g.pres = capPres;
 
         // The target windows assume a balanced pop/club beat. Afrobeats, Amapiano and
         // similar styles carry deliberately heavy sub, log drum and kick, so the engine
@@ -2467,8 +2468,4 @@ if (typeof window !== "undefined") {
     }
 
     window.VocalVaultStudio = { engine, prepareVocal, finishVocal, renderFx, master, enhanceBeat };
-}
-
-if (typeof module !== "undefined") {
-    module.exports = { createStudioEngine };
 }

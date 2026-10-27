@@ -149,6 +149,23 @@ document.addEventListener("DOMContentLoaded", () => {
         const selectiveBox = $("tune-selective");
         const spokenBox = $("tune-spoken");
         const naturalBox = $("tune-natural");
+
+        // Auto: speed, strength, vibrato flattening and how picky "selective" is come from the beat's style and this voice (mixbrain.js)
+        let autoTune = null;
+        const autoTuneBox = $("tune-auto");
+        if (autoTuneBox && autoTuneBox.checked && window.VLMixBrain && window.VLMixBrain.ready() && S.beatBuffer) {
+            try {
+                statusLine.textContent = "Listening to your beat and vocal to set the tuning…";
+                const styleSel = document.getElementById("mix-style");
+                const ctx = await window.VLMixBrain.profile(S, { beat: S.beatBuffer, vocal, styleId: styleSel ? styleSel.value : "auto", key: { rootPc: parseInt(rootSelect.value, 10), scale: scaleSelect.value } });
+                if (ctx) {
+                    autoTune = window.VLMixBrain.tune(ctx);
+                    const setSlider = (el, v) => { el.value = String(v); el.dispatchEvent(new Event("input")); };
+                    setSlider(strengthSlider, autoTune.strength); setSlider(retuneSlider, autoTune.retuneMs); setSlider(flattenSlider, autoTune.flatten);
+                    const why = $("tune-auto-why"); if (why) why.textContent = autoTune.notes.join(" ");
+                }
+            } catch (error) { console.error("Auto tune settings failed, using the sliders as they are:", error); autoTune = null; }
+        }
         const options = {
             rootPc: parseInt(rootSelect.value, 10),
             scale: scaleSelect.value,
@@ -161,8 +178,8 @@ document.addEventListener("DOMContentLoaded", () => {
             autoTranspose: autoKeyBox.checked,
             testDetune: testBox.checked,
             selective: selectiveBox ? selectiveBox.checked : true,
-            selectiveCents: 24,
-            selectiveSoftCents: 52,
+            selectiveCents: autoTune ? autoTune.selectiveCents : 24,
+            selectiveSoftCents: autoTune ? autoTune.selectiveSoftCents : 52,
             spokenSung: spokenBox ? spokenBox.checked : false,
             natural: naturalBox ? naturalBox.checked : true,      // gentle vibrato, quicker arrival on notes, steadier holds
             adaptive: naturalBox ? naturalBox.checked : true      // rawer takes get a stronger, steadier correction

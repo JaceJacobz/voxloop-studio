@@ -224,6 +224,5 @@
         const eng = createGenreEngine(window.VocalVaultFill.engine);
         window.VocalVaultGenre = { detect: eng.detect, engine: eng, LABELS: LABELS };
     }
-    if (typeof module !== "undefined") module.exports = { createGenreEngine: createGenreEngine, LABELS: LABELS };
 
 })(typeof window !== "undefined" ? window : this);

@@ -160,5 +160,3 @@ function exportFileName(beat) {
   const key = beat.key.rootName + (beat.key.scale === "major" ? "maj" : beat.key.scale === "dorian" ? "dor" : "min");
   return `voxloop-beat-${beat.styleName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${beat.bpm}bpm-${key}.wav`;
 }
-
-if (typeof module !== "undefined") module.exports = { encodeAudioBufferWav, exportFileName };

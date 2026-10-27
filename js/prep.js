@@ -748,7 +748,3 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     playAfter.addEventListener("click", () => start("after"));
     stopButton.addEventListener("click", stopPlayback);
 });
-
-if (typeof module !== "undefined") {
-    module.exports = { createDenoiseEngine, createPrepEngine };
-}

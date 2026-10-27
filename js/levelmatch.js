@@ -16,9 +16,9 @@
    4. render    beat + gained vocal, with one master trim so the peak sits
                 at `peakTargetDb` (headroom for mastering; no limiter here).
 
-   Everything lives in createLevelEngine() on plain Float32Arrays, so it
-   can be tested in Node. The browser wrapper at the bottom adapts
-   AudioBuffers and exposes window.VocalVaultLevels.
+   Everything lives in createLevelEngine() on plain Float32Arrays. The
+   browser wrapper at the bottom adapts AudioBuffers and exposes
+   window.VocalVaultLevels.
    ========================================================= */
 
 function createLevelEngine() {
@@ -765,8 +765,4 @@ if (typeof window !== "undefined") {
     if (!window.VocalVaultAutomix) {
         window.VocalVaultAutomix = { process: processLevels };
     }
-}
-
-if (typeof module !== "undefined") {
-    module.exports = { createLevelEngine };
 }

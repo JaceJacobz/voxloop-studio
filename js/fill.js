@@ -978,6 +978,5 @@
         const eng = createFillEngine(window.VocalVaultStudio.engine);
         window.VocalVaultFill = { detectInstruments: eng.detectInstruments, fillMissing: eng.fillMissing, engine: eng };
     }
-    if (typeof module !== "undefined") module.exports = { createFillEngine: createFillEngine };
 
 })(typeof window !== "undefined" ? window : this);

@@ -11,11 +11,12 @@
    ========================================================= */
 
 // ---------------------------------------------------------
-// Pure functions (also used by the tests)
+// Pure functions
 // ---------------------------------------------------------
 
 const LOUDNESS_TARGETS = [
-    { lufs: -14, label: "Streaming / open, −14 LUFS (default — keeps vocal character)" },
+    { lufs: "auto", label: "Auto: set from your beat, style and take (recommended)" },
+    { lufs: -14, label: "Streaming / open, −14 LUFS (keeps vocal character)" },
     { lufs: -12, label: "Balanced, −12 LUFS" },
     { lufs: -10, label: "Punchy, −10 LUFS (hip-hop / trap, tighter limiting)" },
     { lufs: -16, label: "Apple Music / Sound Check, −16 LUFS" },
@@ -92,7 +93,8 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
         o.value = String(t.lufs); o.textContent = t.label;
         targetSelect.appendChild(o);
     });
-    const applyTarget = () => { S.masterTargetLufs = parseFloat(targetSelect.value); };
+    // "Auto" leaves the target empty: the Pipeline works it out from the beat, the style and the take (mixbrain.js)
+    const applyTarget = () => { S.masterTargetLufs = targetSelect.value === "auto" ? null : parseFloat(targetSelect.value); };
     targetSelect.addEventListener("change", applyTarget);
     applyTarget();
 
@@ -230,9 +232,6 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     });
 });
 
-if (typeof module !== "undefined") {
-    module.exports = { encodeWav, matchedGains, LOUDNESS_TARGETS };
-}
 
 /* Style / Polish helpers */
 (function () {
@@ -248,7 +247,7 @@ if (typeof module !== "undefined") {
         const recipe = P.resolve(sel.value, (document.getElementById("mix-polish") || {}).value || "radio");
         const target = document.getElementById("master-target");
         const targetBefore = target ? target.value : null;
-        if (target && recipe.suggestedLufs != null) {
+        if (target && target.value !== "auto" && recipe.suggestedLufs != null) {      // on Auto the target is worked out per song
             const want = String(recipe.suggestedLufs);
             for (const opt of target.options) {
                 if (opt.value === want || opt.value === recipe.suggestedLufs) {

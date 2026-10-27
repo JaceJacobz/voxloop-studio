@@ -73,3 +73,9 @@ Rewritten: `js/fxbrain.js`. Edited: `js/fxrack.js` (vibe line, "I hear" line, in
 - Vocal: pitch range, sung / mixed / rapped, noise, clipping, room sound, and a take-quality score (rough takes get gentler boosts).
 - Every setting is now computed: tune speed, de-ess strength, EQ (target curve + what the beat is crowding), compressor timing (tempo) and makeup, reverb size / amount / colour, widths.
 - Extras are placed from the vocal's pauses and the beat's big moments, with echo time fitted to each pause.
+
+## Step 10 — Pipeline brain + clean-up
+New: `js/mixbrain.js` (loaded after fxbrain.js). Edited: `automix-vv.js`, `studio.js` (enhanceBeat caps are options), `mixui.js`, `tune.js`, `index.html`, plus small comment clean-ups.
+- Mixing and mastering now listen to the beat's vibe and the vocal's quality: compressor settings, the style tables (now only starting points), harshness control (new "Auto" default), level-riding range/speed, space and echo timing, beat-repair caps, master loudness target (new "Auto" default), glue and limiter, and the Tune step ("Auto" tick). A value you pick by hand is always respected. If mixbrain.js is missing, the old behaviour is used.
+- The three-way "light / smooth / full" take handling now blends smoothly instead of flipping at a hard edge.
+- Removed the Node-only test helper (`js/synthvox.js`) and every Node/test hook and comment. (The in-app "Test mode: detune the vocal first" option in the Tune step is a feature, not a test file, and is kept.)

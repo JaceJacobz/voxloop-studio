@@ -1,4 +1,4 @@
-// Auto-mix maths. Pure functions (no audio, no page), so they can be tested on their own.
+// Auto-mix maths. Pure functions (no audio, no page).
 //
 // The idea: listen to how loud each track's hits really are, compare them with the
 // genre's target balance (dB below the kick), and nudge each track's volume until
@@ -81,7 +81,3 @@ function masterTrim({ peaks, rms, mastering, current }) {
   return clamp(AUTOMIX.headroomPeakDb - loudest, -24, 6);
 }
 
-// Lets the same file be tested in Node. Ignored in the browser.
-if (typeof module !== "undefined") {
-  module.exports = { AUTOMIX, levelDb, peakDb, median, balanceTrims, masterTrim };
-}

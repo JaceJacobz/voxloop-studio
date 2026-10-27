@@ -888,9 +888,6 @@ if (typeof window !== "undefined") {
     };
 }
 
-if (typeof module !== "undefined") {
-    module.exports = { detectBpm, findTempoNear };
-}
 // ============================================================
 // BEAT KEY + SCALE DETECTION
 // ============================================================

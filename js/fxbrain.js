@@ -79,26 +79,14 @@
         return p.map((v) => 10 * Math.log10(Math.max(v / tot, 1e-12)));
     }
 
-    // ---------------------------------------------------------------- the beat: tempo, key, sections AND vibe
-    const beatCache = new WeakMap();
-    async function analyzeBeat(buf) {
-        if (!buf) return null;
-        if (beatCache.has(buf)) return beatCache.get(buf);
-        const info = { bpm: null, key: null, sections: [], busy: 0.5, loudDb: -20, source: {}, genreId: "universal", genre: null, bands: null };
-        const known = root.VocalVaultKnownBeat;
-        if (known && known.buffer === buf) {
-            if (known.bpm > 30) { info.bpm = known.bpm; info.source.bpm = "Beat Lab"; }
-            const k = parseKey(known.key); if (k) { info.key = k; info.source.key = "Beat Lab"; }
-        }
-        const A = root.VocalVaultAnalysis;
-        if (A && !info.bpm) { try { const r = await A.analyzeBpm(buf); if (r && r.bpm) { info.bpm = r.bpm; info.source.bpm = "listened"; } } catch (e) { /* ignore */ } }
-        if (A && !info.key) { try { const r = A.detectKey(buf); const k = r && r.key ? parseKey(r.key + " " + r.scale) : null; if (k) { info.key = k; info.source.key = "listened"; info.keyConfidence = r.confidence; } } catch (e) { /* ignore */ } }
-
-        const sr = buf.sampleRate, x = buf.getChannelData(0);
-        const chans = []; for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) chans.push(buf.getChannelData(c));
+    // The beat's vibe from its audio alone (no tempo/key detection): big sections, how full, how bright, how heavy, how much room.
+    // Shared by Studio Auto and the Pipeline so both hear the beat the same way.
+    function vibeOf(chans, sr, bpm) {
+        const info = { sections: [], busy: 0.5, loudDb: -20, bands: null };
+        const x = chans[0];
 
         // bar-by-bar energy → which parts of the song are the big ones
-        const barSec = info.bpm ? (4 * 60) / info.bpm : 2;
+        const barSec = bpm ? (4 * 60) / bpm : 2;
         const bar = Math.max(1, Math.round(barSec * sr)), bars = Math.floor(x.length / bar), lv = [];
         for (let b = 0; b < bars; b++) { let s = 0; const a = b * bar; for (let i = a; i < a + bar; i += 4) s += x[i] * x[i]; lv.push(10 * Math.log10(Math.max(1e-12, s / (bar / 4)))); }
         if (lv.length >= 4) {
@@ -127,20 +115,46 @@
         info.energy = mapc(info.loudDb, -32, -14, 0, 1) * 0.65 + mapc(info.dynamicsDb || 0, 3, 14, 0, 1) * 0.15 + info.busy * 0.2;
         info.space = clamp(1 - 0.55 * info.busy - 0.35 * info.energy - 0.1 * info.lowWeight, 0.08, 1);     // how much room there is for wet effects
 
-        // the Pipeline's own genre sensor, so Studio and Pipeline agree on what the beat is
-        const G = root.VocalVaultGenre;
-        if (G && G.detect) {
-            try {
-                const g = G.detect(chans.map((c) => c.subarray(0, Math.min(c.length, sr * 75))), sr, { bpm: info.bpm || 100 });
-                if (g) { info.genre = { id: g.styleId, label: g.label, confidence: g.confidence, decided: g.decided, sub: g.sub }; if (g.decided) info.genreId = g.sub === "amapiano" ? "amapiano" : g.styleId; }
-            } catch (e) { /* the sensor failing must not stop Auto */ }
-        }
         // a few words a person would use for the beat
         const w = [];
         w.push(info.energy > 0.66 ? "hard-hitting" : info.energy < 0.36 ? "laid-back" : "mid-energy");
         w.push(info.bright > 0.62 ? "bright" : info.bright < 0.36 ? "warm and dark" : "balanced tone");
         w.push(info.busy > 0.66 ? "busy" : info.busy < 0.4 ? "spacious" : "moderately full");
         info.mood = w.join(", ");
+        return info;
+    }
+
+    // The Pipeline's own genre sensor (so Studio and Pipeline agree on what the beat is). Returns null if unsure.
+    function genreOf(chans, sr, bpm) {
+        const G = root.VocalVaultGenre;
+        if (!(G && G.detect)) return null;
+        try {
+            const g = G.detect(chans.map((c) => c.subarray(0, Math.min(c.length, sr * 75))), sr, { bpm: bpm || 100 });
+            if (!g) return null;
+            return { id: g.styleId, label: g.label, confidence: g.confidence, decided: g.decided, sub: g.sub, reasons: g.reasons || [], genreId: g.decided ? (g.sub === "amapiano" ? "amapiano" : g.styleId) : "universal" };
+        } catch (e) { return null; }
+    }
+
+    // ---------------------------------------------------------------- the beat: tempo, key, sections AND vibe
+    const beatCache = new WeakMap();
+    async function analyzeBeat(buf) {
+        if (!buf) return null;
+        if (beatCache.has(buf)) return beatCache.get(buf);
+        const info = { bpm: null, key: null, sections: [], busy: 0.5, loudDb: -20, source: {}, genreId: "universal", genre: null, bands: null };
+        const known = root.VocalVaultKnownBeat;
+        if (known && known.buffer === buf) {
+            if (known.bpm > 30) { info.bpm = known.bpm; info.source.bpm = "Beat Lab"; }
+            const k = parseKey(known.key); if (k) { info.key = k; info.source.key = "Beat Lab"; }
+        }
+        const A = root.VocalVaultAnalysis;
+        if (A && !info.bpm) { try { const r = await A.analyzeBpm(buf); if (r && r.bpm) { info.bpm = r.bpm; info.source.bpm = "listened"; } } catch (e) { /* ignore */ } }
+        if (A && !info.key) { try { const r = A.detectKey(buf); const k = r && r.key ? parseKey(r.key + " " + r.scale) : null; if (k) { info.key = k; info.source.key = "listened"; info.keyConfidence = r.confidence; } } catch (e) { /* ignore */ } }
+
+        const sr = buf.sampleRate;
+        const chans = []; for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) chans.push(buf.getChannelData(c));
+        Object.assign(info, vibeOf(chans, sr, info.bpm));
+        const gen = genreOf(chans, sr, info.bpm);
+        if (gen) { info.genre = gen; info.genreId = gen.genreId; }
         beatCache.set(buf, info);
         return info;
     }
@@ -457,6 +471,5 @@
         return out;
     }
 
-    root.VLBrain = { analyzeBeat, measureVocal, analyzeClip, planProject, parseKey, keyFromNotes, profileVocal, decide, flavourZones, bandProfile, GENRE, describeBeat };
-    if (typeof module !== "undefined") module.exports = root.VLBrain;
+    root.VLBrain = { vibeOf, genreOf, analyzeBeat, measureVocal, analyzeClip, planProject, parseKey, keyFromNotes, profileVocal, decide, flavourZones, bandProfile, GENRE, describeBeat };
 })(typeof window !== "undefined" ? window : globalThis);

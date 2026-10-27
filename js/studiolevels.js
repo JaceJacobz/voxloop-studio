@@ -18,7 +18,7 @@
  *   Auto                 a typical place for this kind of lane (adlib, tag, harmony ...)
  *   Mute
  *
- * Plain functions only, so it can be tested in Node.
+ * Plain functions only.
  */
 (function (root) {
     "use strict";
@@ -130,6 +130,5 @@
 
     const api = { MIX_LEVELS, REL_DB, AUTO_REL_DB, normalizeMode, activeLevel, resolveGain, leadLikeProcessed, frameDb };
     if (typeof window !== "undefined") window.VocalVaultStudioLevels = api;
-    if (typeof module !== "undefined") module.exports = api;
 
 })(typeof window !== "undefined" ? window : this);

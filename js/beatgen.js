@@ -5,10 +5,8 @@
 // a bridge and an outro, each with its own drums, chords and energy. It can still make
 // the old short loop (structure "loop").
 
-// In the browser, TEMPLATES comes from templates.js.
-// In Node (for tests) we load it ourselves.
-const _tpl = typeof TEMPLATES !== "undefined" ? { TEMPLATES, TRACK_GROUPS, STRUCTURES, SECTION_RULES, SECTION_LABELS }
-                                               : require("./templates.js");
+// TEMPLATES comes from templates.js.
+const _tpl = { TEMPLATES, TRACK_GROUPS, STRUCTURES, SECTION_RULES, SECTION_LABELS };
 const _templates = _tpl.TEMPLATES;
 const _groups = _tpl.TRACK_GROUPS;
 const _structures = _tpl.STRUCTURES;
@@ -1010,15 +1008,4 @@ function rebuildHarmony(beat, options = {}) {
 // Song length in seconds
 function songSeconds(beat) {
   return beat.totalBars * STEPS_PER_BAR * 60 / beat.bpm / 4;
-}
-
-// Lets the same file be tested in Node. Ignored in the browser.
-if (typeof module !== "undefined") {
-  module.exports = {
-    generatePattern, rebuildHarmony, rebuildArrangement, rebuildStructure, barView, songBarView, loopBarView,
-    humanizeTracks, buildChord, chordSuffix, midiToName, gateLengths, makeKey, pickKey, progressionLabel,
-    resolveTemplate, makeSections, leadMidi, songSeconds, seededRandom, probsForKind,
-    roll, randomInt, randomBetween, humanVelocity,
-    SCALES, STEPS_PER_BAR
-  };
 }

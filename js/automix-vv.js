@@ -116,18 +116,20 @@ function createVocalChain(audioCtx, mixParams, options) {
   // 2. Serial Compression - Stage 1 (Fast Peak Catcher)
   const peakComp = audioCtx.createDynamicsCompressor();
   peakComp.threshold.value = mixParams.peakThresh;
-  peakComp.knee.value = 4;
-  peakComp.ratio.value = 6;
-  peakComp.attack.value = 0.005;  // 5ms
-  peakComp.release.value = 0.050; // 50ms
+  // (the numbers come from the vocal and the song's tempo via mixbrain.js; the old fixed values are the fallback)
+  const ch = mixParams.chain;
+  peakComp.knee.value = ch ? ch.peak.knee : 4;
+  peakComp.ratio.value = ch ? ch.peak.ratio : 6;
+  peakComp.attack.value = ch ? ch.peak.attack : 0.005;
+  peakComp.release.value = ch ? ch.peak.release : 0.050;
 
   // 3. Serial Compression - Stage 2 (Smooth Leveler)
   const levelerComp = audioCtx.createDynamicsCompressor();
   levelerComp.threshold.value = mixParams.levelerThresh;
-  levelerComp.knee.value = 12;
-  levelerComp.ratio.value = 2.5;
-  levelerComp.attack.value = 0.030;  // 30ms
-  levelerComp.release.value = 0.200; // 200ms
+  levelerComp.knee.value = ch ? ch.leveler.knee : 12;
+  levelerComp.ratio.value = ch ? ch.leveler.ratio : 2.5;
+  levelerComp.attack.value = ch ? ch.leveler.attack : 0.030;
+  levelerComp.release.value = ch ? ch.leveler.release : 0.200;
 
   if (hpf) hpf.connect(peakComp);
   peakComp.connect(levelerComp);
@@ -319,7 +321,7 @@ const signed = (v) => (v >= 0 ? "+" : "") + v.toFixed(1);
  * Rough / already-wet / noisy vocals get almost no reverb. Clean dry vocals get more.
  * Dense beats also push space down so the vocal stays clear.
  */
-function measureSpaceBudget(placedChannels, beatChannels, sr, bpm) {
+function measureSpaceBudget(placedChannels, beatChannels, sr, bpm, vibe) {
 
   const mono = placedChannels.length === 1
     ? placedChannels[0]
@@ -371,7 +373,10 @@ function measureSpaceBudget(placedChannels, beatChannels, sr, bpm) {
     beatMean = Math.sqrt(s / Math.max(1, c));
   }
   const beatDb = 20 * Math.log10(Math.max(beatMean, 1e-9));
-  const denseBeat = beatDb > -22;
+  // How crowded the beat is where the voice lives. With the beat's vibe this is the real mid-band crowding (0..1);
+  // without it, the old overall-loudness guess is used.
+  const crowd = vibe && typeof vibe.busy === "number" ? vibe.busy : null;
+  const denseBeat = crowd != null ? crowd > 0.62 : beatDb > -22;
 
   // Score 0 = needs to stay dry, 1 = can take normal space
   let dryness = 1;
@@ -380,8 +385,9 @@ function measureSpaceBudget(placedChannels, beatChannels, sr, bpm) {
   if (linger > 4) dryness -= 0.35;           // already rings after phrases
   else if (linger > 2.5) dryness -= 0.2;
   if (noiseDb > -40) dryness -= 0.2;         // absolute floor is high
-  if (denseBeat) dryness -= 0.15;
-  if (bpm > 140) dryness -= 0.1;
+  if (crowd != null) dryness -= 0.22 * crowd;
+  else if (denseBeat) dryness -= 0.15;
+  dryness -= 0.1 * Math.max(0, Math.min(1, ((bpm || 0) - 110) / 50));      // fast songs get less space, gradually
   dryness = Math.max(0, Math.min(1, dryness));
 
   // Map dryness → effect amounts (higher belowDb = quieter effect)
@@ -393,7 +399,7 @@ function measureSpaceBudget(placedChannels, beatChannels, sr, bpm) {
   const useRoom = dryness > 0.35;
   const roomBelowDb = Math.round(20 + (1 - dryness) * 10);
   const roomRt60 = 0.28 + dryness * 0.22;
-  const midDuckDb = denseBeat ? 1.6 : 1.2;
+  const midDuckDb = crowd != null ? 0.9 + 1.1 * crowd : (denseBeat ? 1.6 : 1.2);
   const duckDepth = 0.45 + (1 - dryness) * 0.2;
   const harmonyBelowDb = Math.round(9 + (1 - dryness) * 6);
 
@@ -616,29 +622,40 @@ function applyAdaptiveRecipe(recipe, assessment, balanceMode) {
 
   const path = (assessment && assessment.path) || "full";
 
-  if (path === "light") {
-    r.eq.presenceDb = Math.min(r.eq.presenceDb != null ? r.eq.presenceDb : 1, 0.7);
-    r.eq.airDb = Math.min(r.eq.airDb != null ? r.eq.airDb : 1.2, 0.9);
-    r.eq.boostStrength = Math.min(r.eq.boostStrength != null ? r.eq.boostStrength : 0.4, 0.28);
-    r.presenceDb = r.eq.presenceDb;
-    r.airDb = r.eq.airDb;
-    r.sat = { drive: Math.min(r.sat.drive, 1.3), mix: Math.min(r.sat.mix, 0.06) };
-    r.compressTightenDb = (r.compressTightenDb || 0) * 0.45;
-    r.vocalAboveBeatDb = Math.min(r.vocalAboveBeatDb != null ? r.vocalAboveBeatDb : 0.8, 0.4);
-    r._adaptiveNote = "Light path: this take was already loud/pushed — less hype so strain stays natural.";
-  } else if (path === "smooth") {
-    r.eq.presenceDb = Math.max(r.eq.presenceDb != null ? r.eq.presenceDb : 1, 1.0);
-    r.eq.airDb = Math.min(Math.max(r.eq.airDb != null ? r.eq.airDb : 1.2, 1.0), 1.6);
-    r.presenceDb = r.eq.presenceDb;
-    r.airDb = r.eq.airDb;
-    r.sat = { drive: Math.min(r.sat.drive, 1.4), mix: Math.min(r.sat.mix, 0.09) };
-    r.compressTightenDb = Math.max(r.compressTightenDb || 0, 1.8);
-    r._levelerExtraDb = 2.5;
-    r.vocalAboveBeatDb = r.vocalAboveBeatDb != null ? r.vocalAboveBeatDb : 0.8;
-    r._adaptiveNote = "Smooth path: take sounded raw/uneven — more evening, gentle polish (not more grit).";
-  } else {
-    r._adaptiveNote = "Full path: balanced polish for this take.";
-  }
+  // How hot/pushed and how raw/uneven the take is, 0..1. These used to flip a three-way switch at a hard edge
+  // (a take just under the line got none of the care, one just over got all of it). Now they blend smoothly:
+  // the extremes behave exactly as the old "light" and "smooth" paths.
+  const lerp = (a, b, u) => a + (b - a) * u;
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  const hot = assessment && assessment.hotScore != null ? clamp01((assessment.hotScore - 0.25) / 0.35) : (path === "light" ? 1 : 0);
+  const rawW = (assessment && assessment.rawScore != null ? clamp01((assessment.rawScore - 0.2) / 0.3) : (path === "smooth" ? 1 : 0)) * (1 - hot);
+  const num = (v, d) => (v != null ? v : d);
+
+  let pres = num(r.eq.presenceDb, 1), air = num(r.eq.airDb, 1.2), boost = num(r.eq.boostStrength, 0.4);
+  pres = lerp(pres, Math.min(pres, 0.7), hot);
+  pres = lerp(pres, Math.max(pres, 1.0), rawW);
+  air = lerp(air, Math.min(air, 0.9), hot);
+  air = lerp(air, Math.min(Math.max(air, 1.0), 1.6), rawW);
+  boost = lerp(boost, Math.min(boost, 0.28), hot);
+  r.eq.presenceDb = r.presenceDb = Math.round(pres * 100) / 100;
+  r.eq.airDb = r.airDb = Math.round(air * 100) / 100;
+  r.eq.boostStrength = Math.round(boost * 100) / 100;
+  let drive = lerp(r.sat.drive, Math.min(r.sat.drive, 1.3), hot);
+  drive = lerp(drive, Math.min(drive, 1.4), rawW);
+  let satMix = lerp(r.sat.mix, Math.min(r.sat.mix, 0.06), hot);
+  satMix = lerp(satMix, Math.min(satMix, 0.09), rawW);
+  r.sat = { drive, mix: satMix };
+  let tighten = lerp(r.compressTightenDb || 0, (r.compressTightenDb || 0) * 0.45, hot);
+  tighten = lerp(tighten, Math.max(tighten, 1.8), rawW);
+  r.compressTightenDb = tighten;
+  if (rawW > 0) r._levelerExtraDb = 2.5 * rawW;
+  if (hot > 0) r.vocalAboveBeatDb = lerp(num(r.vocalAboveBeatDb, 0.8), Math.min(num(r.vocalAboveBeatDb, 0.8), 0.4), hot);
+  else if (rawW > 0) r.vocalAboveBeatDb = num(r.vocalAboveBeatDb, 0.8);
+
+  if (hot >= 0.5) r._adaptiveNote = "Light path: this take was already loud/pushed (" + Math.round(hot * 100) + "% pushed) — less hype so strain stays natural.";
+  else if (rawW >= 0.5) r._adaptiveNote = "Smooth path: take sounded raw/uneven (" + Math.round(rawW * 100) + "% raw) — more evening, gentle polish (not more grit).";
+  else if (hot > 0.15 || rawW > 0.15) r._adaptiveNote = "Full path, eased " + (hot > rawW ? "toward lighter (" + Math.round(hot * 100) + "% pushed)" : "toward smoother (" + Math.round(rawW * 100) + "% raw)") + ": balanced polish for this take.";
+  else r._adaptiveNote = "Full path: balanced polish for this take.";
 
   if (balanceMode === "closer") {
     r.vocalAboveBeatDb = Math.min(r.vocalAboveBeatDb, 0.2) - 0.3;
@@ -685,10 +702,21 @@ async function processAutomix(state, options) {
   const assessment = assessVocalTake(vocal);
   const _stackEarly = !!(state.studioStack && state.studioStack.leadReference && state.studioStack.extras > 0 &&
     Math.abs(state.studioStack.leadReference.duration - vocal.duration) < 0.02);
-  if (_stackEarly && assessment.path === "smooth") assessment.path = "full";   // uneven on purpose: soft intro, lower adlibs
+  if (_stackEarly && assessment.path === "smooth") { assessment.path = "full"; assessment.rawScore = 0; }   // uneven on purpose: soft intro, lower adlibs
   const balanceMode = (opt.balanceMode || (typeof document !== "undefined" && document.getElementById("mix-balance") && document.getElementById("mix-balance").value) || "balanced");
   if (recipe) {
     recipe = applyAdaptiveRecipe(recipe, assessment, balanceMode);
+  }
+
+  // Listen to the beat's vibe and the vocal's quality, and let them move every number (mixbrain.js).
+  // The style table above is only the starting point.
+  let brain = null;
+  const MB = window.VLMixBrain;
+  if (MB && MB.ready()) {
+    try {
+      brain = await MB.profile(state, { beat, vocal, genreInfo, styleId });
+      if (brain && recipe) recipe = MB.adaptRecipe(recipe, brain);
+    } catch (e) { console.error("Mix brain failed, using the plain style numbers:", e); brain = null; }
   }
 
   // Studio lanes: Studio mode also sent the lead on its own. Then the lanes' levels are deliberate (a soft intro, adlibs set a
@@ -698,6 +726,7 @@ async function processAutomix(state, options) {
     Math.abs(state.studioStack.leadReference.duration - vocal.duration) < 0.02) ? state.studioStack : null;
 
   const first = calculateAutoMixParams(vocal, beat, metadata);
+  if (brain) first.chain = MB.chain(brain);
 
   // No level-matching module: fall back to one fixed balance.
   if (!Levels) return renderFixedMix(vocal, beat, offset, first);
@@ -713,9 +742,13 @@ async function processAutomix(state, options) {
       lines.push("Listened to the beat, but it did not clearly match one style, so the Universal style was used. You can pick a style yourself if you know it.");
     }
   }
+  if (brain) {
+    lines.push(`What I hear: the beat is ${brain.vibeText}. The vocal is a ${brain.vocalText}.` + (brain.prof.qualityNotes.length ? ` Take quality: ${brain.prof.qualityNotes.join(", ")}.` : ""));
+  }
   if (recipe) {
     lines.push(`Style: ${recipe.styleLabel} · Polish: ${recipe.polishLabel} — ${recipe.blurb}`);
     if (recipe._adaptiveNote) lines.push(recipe._adaptiveNote);
+    if (recipe._vibeNotes && recipe._vibeNotes.length) lines.push(...recipe._vibeNotes);
   } else {
     lines.push(assessment.path === "light"
       ? "Light processing: take already sounded pushed."
@@ -728,6 +761,7 @@ async function processAutomix(state, options) {
   let working = vocal;
   let params = first;
   let strainStrength = 0;     // 0..1, set by the vocal polish: how much strain was found in the take
+  let harshAuto = null;       // set when the harshness control is on Auto
   if (polish) {
     setStatus("Cleaning up and balancing the vocal…");
     await nextFrame();
@@ -739,7 +773,10 @@ async function processAutomix(state, options) {
       standard: { amount: 0.9 },                                                                         // targets -13 / -17 (see calmVoice)
       firm: { amount: 1, sibTargetDb: -16, presTargetDb: -20, maxSibCutDb: 10, maxPresCutDb: 7 }          // bright or strained voices
     };
-    prepOpts.calm = CALM[opt.harshness] !== undefined ? CALM[opt.harshness] : CALM.standard;
+    // "Auto" (the default) matches the harshness control to this voice and this beat; the other choices stay exactly as they were
+    harshAuto = (brain && (opt.harshness === "auto" || opt.harshness == null)) ? MB.harshness(brain) : null;
+    if (harshAuto) lines.push(harshAuto.note);
+    prepOpts.calm = harshAuto ? harshAuto.calm : (CALM[opt.harshness] !== undefined ? CALM[opt.harshness] : CALM.standard);
     if (recipe) prepOpts.eq = recipe.eq;
     if (studioStack) prepOpts.phraseEven = false;      // it would lift the soft lanes and lower the lead toward each other
     const prepared = Studio.prepareVocal(vocal, prepOpts);
@@ -747,7 +784,7 @@ async function processAutomix(state, options) {
     working = prepared.buffer;
     strainStrength = (prepared.details && prepared.details.strain && prepared.details.strain.strength) || 0;
     // compressor settings follow the vocal as it is NOW (after the de-esser and EQ)
-    params = Object.assign(calculateAutoMixParams(working, beat, metadata), { hpfCutoff: first.hpfCutoff });
+    params = Object.assign(calculateAutoMixParams(working, beat, metadata), { hpfCutoff: first.hpfCutoff, chain: first.chain });
   } else {
     lines.push(`Cleaned rumble below ${Math.round(first.hpfCutoff)} Hz.`);
   }
@@ -773,6 +810,7 @@ async function processAutomix(state, options) {
   await nextFrame();
   let finished = await renderVocalChain(working, params, { highpass: !polish });
   lines.push("Evened out loud and quiet words with two-stage compression.");
+  if (params.chain && params.chain.notes) lines.push(...params.chain.notes);
   if (polish) {
     // strained takes get less saturation: it adds harmonics exactly where the voice is already harsh
     let warmOpts = recipe ? { sat: recipe.sat } : undefined;
@@ -827,6 +865,13 @@ async function processAutomix(state, options) {
       maxGainDb: 6
     });
   }
+  // Level riding is set from the beat and the take. A value you changed yourself in the level panel is never overridden.
+  if (brain) {
+    const lv = MB.levels(brain), dflt = Levels.defaults || {};
+    levelOptions.maxGainDb = lv.options.maxGainDb;
+    Object.keys(lv.options).forEach((k) => { if (k !== "maxGainDb" && (levelOptions[k] === undefined || levelOptions[k] === dflt[k])) levelOptions[k] = lv.options[k]; });
+    lines.push(lv.note);
+  }
   const vocalChannels = channelsOf(finished).map((c) => engine.resample(c, finished.sampleRate, sr));
   let beatChannels = channelsOf(beat);
 
@@ -834,7 +879,8 @@ async function processAutomix(state, options) {
   if (Studio && opt.beatEnhance !== false && Studio.engine && Studio.engine.enhanceBeat) {
     setStatus("Balancing the beat (kick, chords, hats)…");
     await nextFrame();
-    const enhOpts = recipe ? { strength: recipe.beatEnhanceStrength } : undefined;
+    let enhOpts = recipe ? { strength: recipe.beatEnhanceStrength } : undefined;
+    if (brain) enhOpts = Object.assign({}, enhOpts || {}, MB.enhanceCaps(brain));
     const enh = Studio.engine.enhanceBeat(beatChannels, sr, enhOpts);
     beatChannels = enh.channels;
     lines.push(...enh.report);
@@ -915,7 +961,7 @@ async function processAutomix(state, options) {
     const placed = engine.placeVocal(vocalChannels, sr, plan, Math.ceil(plan.totalSec * sr));
 
     // ---- Listen: how much space can this vocal take before it gets rough? ----
-    space = measureSpaceBudget(placed, beatChannels, sr, state.beatBpm);
+    space = measureSpaceBudget(placed, beatChannels, sr, state.beatBpm, brain && brain.vibe);
     if (recipe) {
       space = Object.assign({}, space);
       space.reverbBelowDb = Math.max(8, (space.reverbBelowDb || 16) + recipe.reverbBelowAdd);
@@ -943,9 +989,14 @@ async function processAutomix(state, options) {
     lines.push(space.reason);
 
     // the echo repeats on a musical fraction of the beat when the tempo is known
-    const synced = Fx ? Fx.echoTime(state.beatBpm) : null;
+    let synced = Fx ? Fx.echoTime(state.beatBpm) : null;
+    if (brain) {
+      const e = MB.echo(brain, synced);      // pick the note length whose repeats finish inside this singer's pauses
+      if (e && e.sec) { synced = Object.assign({}, synced || {}, { sec: e.sec, label: e.label }); if (e.note) lines.push(e.note); }
+    }
     // and the reverb tail shortens with the tempo: long tails smear fast music and make it feel slow
-    const tail = Fx ? Fx.reverbTime(state.beatBpm) : null;
+    let tail = Fx ? Fx.reverbTime(state.beatBpm) : null;
+    if (tail && brain) tail = MB.reverbTail(brain, tail);
     const fxOptions = {
       reverbBelowDb: space.reverbBelowDb,
       echoBelowDb: space.echoBelowDb,
@@ -1076,8 +1127,12 @@ async function processAutomix(state, options) {
   if (opt.master) {
     setStatus("Mastering…");
     await nextFrame();
-    const target = typeof state.masterTargetLufs === "number" ? state.masterTargetLufs : -12;
-    const m = Studio.master(channels, sr, { targetLufs: target });
+    // A loudness target you picked is used as it is. On "Auto" the target is worked out from the beat, the style and the take.
+    const mbs = brain ? MB.master(brain) : null;
+    const userTarget = Number.isFinite(state.masterTargetLufs) ? state.masterTargetLufs : null;
+    const target = userTarget != null ? userTarget : (mbs ? mbs.targetLufs : -12);
+    if (mbs) lines.push(...(userTarget != null ? mbs.notes.slice(1) : mbs.notes));
+    const m = Studio.master(channels, sr, Object.assign({ targetLufs: target }, mbs ? { glueOpts: mbs.glueOpts, maxLimiterDb: mbs.maxLimiterDb } : {}));
     channels = m.channels;
     masterInfo = m.report;
     if (masterInfo.lowEnd && masterInfo.lowEnd.length) lines.push(...masterInfo.lowEnd);
@@ -1172,7 +1227,7 @@ async function processAutomix(state, options) {
   setStatus("Checking the mix…");
   await nextFrame();
   {
-    const qc = listenAndCorrect(channels, sr, opt.harshness);
+    const qc = listenAndCorrect(channels, sr, harshAuto ? harshAuto.level : (opt.harshness === "auto" ? "standard" : opt.harshness));
     channels = qc.channels;
     lines.push(...qc.report);
   }

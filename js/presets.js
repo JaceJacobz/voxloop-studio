@@ -4,7 +4,7 @@
  *
  * READ THIS BEFORE EDITING A NUMBER. Several knobs are capped downstream, so a value above the cap does nothing
  * and two styles that "ask" for different amounts end up identical. The numbers below are chosen to sit INSIDE the
- * range the engine really honours (checked by test_presets.js):
+ * range the engine really honours:
  *
  *   presenceDb          studio.js planEq: min(presence, 1.6) x 0.85 is what reaches 3.2 kHz.        range 0 .. 1.6
  *   airDb               studio.js planEq: min(air, 1.5) x 0.75 is the high shelf.                    range 0 .. 1.5

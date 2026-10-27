@@ -223,7 +223,3 @@ function createFxPlusEngine(studio) {
 if (typeof window !== "undefined" && window.VocalVaultStudio) {
     window.VocalVaultFxPlus = { engine: createFxPlusEngine(window.VocalVaultStudio.engine) };
 }
-
-if (typeof module !== "undefined") {
-    module.exports = { createFxPlusEngine };
-}

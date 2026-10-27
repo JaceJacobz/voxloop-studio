@@ -735,11 +735,3 @@ const TEMPLATES = {
     }
   }
 };
-
-// Lets the same file be tested in Node. Ignored in the browser.
-if (typeof module !== "undefined") {
-  module.exports = {
-    TEMPLATES, TRACK_ORDER, TRACK_GROUPS, TRACK_LABELS, TRACK_GROUP_LABELS,
-    ROOT_LABELS, SCALE_LABELS, TONAL_TRACKS, STRUCTURES, SECTION_LABELS, SECTION_RULES, P, V
-  };
-}

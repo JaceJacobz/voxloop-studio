@@ -58,7 +58,7 @@
         function balanceBeat(beatChannels, vocalMono, sr, options) {
 
             const o = Object.assign({ preset: "balanced" }, options || {});
-            const P = o.custom || PRESETS[o.preset];            // o.custom: {gapDb, maxDb} (used by the tests)
+            const P = PRESETS[o.preset];
             const none = (why) => ({ channels: beatChannels, applied: false, report: why ? [why] : [], info: { skipped: why || "off" } });
             if (!P) return none(null);
 
@@ -133,7 +133,7 @@
             // buried instrument, it is leakage (a kick's tail, a snare's body), and lifting it would only add noise.
             const bH = (sh / nSing > 1e-12 && gapH < 22) ? clamp(gapH - P.gapDb, 0, P.maxDb) : 0;
             const bP = (sp / nSing > 1e-12 && gapP < 24) ? clamp(gapP - gapDrums, 0, maxDrums) : 0;
-            const info = { preset: o.custom ? "custom" : o.preset, melodicGapDb: gapH, drumsGapDb: gapP, melodicBoostDb: bH, drumsBoostDb: bP, targetGapDb: P.gapDb, singingPct: 100 * nSing / frames };
+            const info = { preset: o.preset, melodicGapDb: gapH, drumsGapDb: gapP, melodicBoostDb: bH, drumsBoostDb: bP, targetGapDb: P.gapDb, singingPct: 100 * nSing / frames };
             const minLift = o.minLiftDb != null ? o.minLiftDb : 0.3;        // lifts smaller than this are not worth a pass
             if (bH < minLift && bP < minLift) {
                 return { channels: beatChannels, applied: false, info,
@@ -200,6 +200,5 @@
         const eng = createBalanceEngine(window.VocalVaultStudio.engine);
         window.VocalVaultBalance = { balanceBeat: eng.balanceBeat, PRESETS: eng.PRESETS, engine: eng };
     }
-    if (typeof module !== "undefined") module.exports = { createBalanceEngine: createBalanceEngine, PRESETS: PRESETS };
 
 })(typeof window !== "undefined" ? window : this);
