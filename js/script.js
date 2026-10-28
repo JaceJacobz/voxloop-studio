@@ -2227,6 +2227,9 @@ function showVocalTempo() {
                 const harshness = document.getElementById("mix-calm")
                     ? document.getElementById("mix-calm").value
                     : "standard";
+                const resonance = document.getElementById("mix-resonance")
+                    ? document.getElementById("mix-resonance").value
+                    : "off";
                 if (!window.VocalVaultAutomix || !window.VocalVaultAutomix.process) {
                     throw new Error("Automix engine not loaded (check automix.js / presets.js script tags).");
                 }
@@ -2239,7 +2242,8 @@ function showVocalTempo() {
                     polishLevel,
                     balanceMode,
                     fillInstruments,
-                    harshness
+                    harshness,
+                    resonance
                 });
 
                 if (autoMixStatus) autoMixStatus.textContent = "Automix complete!";

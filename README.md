@@ -74,8 +74,8 @@ Rewritten: `js/fxbrain.js`. Edited: `js/fxrack.js` (vibe line, "I hear" line, in
 - Every setting is now computed: tune speed, de-ess strength, EQ (target curve + what the beat is crowding), compressor timing (tempo) and makeup, reverb size / amount / colour, widths.
 - Extras are placed from the vocal's pauses and the beat's big moments, with echo time fitted to each pause.
 
-## Step 10 — Pipeline brain + clean-up
-New: `js/mixbrain.js` (loaded after fxbrain.js). Edited: `automix-vv.js`, `studio.js` (enhanceBeat caps are options), `mixui.js`, `tune.js`, `index.html`, plus small comment clean-ups.
-- Mixing and mastering now listen to the beat's vibe and the vocal's quality: compressor settings, the style tables (now only starting points), harshness control (new "Auto" default), level-riding range/speed, space and echo timing, beat-repair caps, master loudness target (new "Auto" default), glue and limiter, and the Tune step ("Auto" tick). A value you pick by hand is always respected. If mixbrain.js is missing, the old behaviour is used.
-- The three-way "light / smooth / full" take handling now blends smoothly instead of flipping at a hard edge.
-- Removed the Node-only test helper (`js/synthvox.js`) and every Node/test hook and comment. (The in-app "Test mode: detune the vocal first" option in the Tune step is a feature, not a test file, and is kept.)
+## Step 11 — Resonance (shimmer layer)
+New: `js/resonance.js` (loaded after fxrack-dsp.js). Edited: `js/fxrack-dsp.js` (VL Resonance plugin, harmonize task), `js/fxbrain.js` + `js/fxrack.js` (Studio Auto option), `js/automix-vv.js` + `js/script.js` + `index.html` (Pipeline option), `css/ui-polish.css`.
+- A quiet layer under the lead: a natural double (~15–35 ms, drifting a few cents), one soft echo that never repeats, and a ghost harmony (octave, or a third/fifth in the key).
+- Every number is calculated from the beat (tempo, fullness, brightness, energy, genre) and the vocal (sung/rapped, range, take quality). Auto can decide not to add it (rapped vocal, very full beat, rough take) and says why.
+- Pipeline: Mix panel → Resonance (shimmer): Off (default) / Auto / Subtle / Natural / Bold. Studio: the VL Resonance plugin, and "Shimmer layer" under Auto's optional extras.

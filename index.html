@@ -801,6 +801,17 @@
                 <span class="info-tip"><button type="button" class="info-tip-btn" aria-label="About polish" aria-expanded="false"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7 6.2v3.6M7 4.2h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><span class="info-tip-panel" role="tooltip">How hard the polish pushes clarity, warmth, and evening of the vocal.</span></span>
             </div>
             <div class="mix-option">
+                <label for="mix-resonance">Resonance (shimmer)</label>
+                <select id="mix-resonance">
+                    <option value="off" selected>Off</option>
+                    <option value="auto">Auto: only if it suits this song</option>
+                    <option value="subtle">Subtle</option>
+                    <option value="natural">Natural</option>
+                    <option value="bold">Bold</option>
+                </select>
+                <small class="mix-option-note">A quiet layer under the voice that makes it sound sung twice: a natural double, one soft echo that never repeats, and a faint harmony. Every setting is calculated from your beat and vocal.</small>
+            </div>
+            <div class="mix-option">
                 <label for="mix-calm">Harshness control</label>
                 <select id="mix-calm">
                     <option value="auto" selected>Auto (matched to your voice and beat)</option>
@@ -1049,6 +1060,7 @@
 <script src="js/studiolevels.js"></script>
 <script src="js/daw.js"></script>
 <script src="js/fxrack-dsp.js"></script>
+<script src="js/resonance.js"></script>
 <script src="js/fxbrain.js"></script>
 <script src="js/mixbrain.js"></script>
 <script src="js/fxrack.js"></script>

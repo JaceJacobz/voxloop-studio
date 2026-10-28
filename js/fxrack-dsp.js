@@ -122,6 +122,10 @@
                 const out = engine.applyShift(a.channels, mono, a.sr, track, sm, { force: false });
                 return { channels: out };
             },
+            harmonize(a) {
+                const r = engine.harmonize(a.channels, a.sr, a.options, function () { });
+                return { channels: r.audio.harmony };
+            },
             shiftConst(a) {
                 const mono = engine.mixDown(a.channels);
                 const track = engine.trackClean(mono, a.sr);
@@ -761,7 +765,49 @@
         }
     };
 
-    const ORDER = ["tune", "pitchedit", "deess", "eq", "comp", "sat", "voice", "doubler", "crowd", "imager", "orbit", "delay", "reverb", "limit"];
+    // ---- Resonance: natural double + one soft echo + ghost harmony (the maths lives in resonance.js, shared with the Pipeline) ----
+    P.resonance = {
+        id: "resonance", name: "VL Resonance", cat: "Space", icon: "✧",
+        blurb: "A shimmer layer under the voice: a natural double, one soft echo that never keeps repeating, and a faint ghost harmony. It sounds like the singer sang it again.",
+        likeA: "Voloco-style resonance",
+        easy: ["amount", "halo"],
+        params: [
+            R("amount", "Shimmer", 0, 200, 1, 100, "%", { easyLabel: "How much shimmer" }),
+            S("halo", "Ghost harmony", ["octave", "third", "fifth", "off"], "octave", { easyLabel: "Ghost harmony" }),
+            R("dblDelay", "Double offset", 10, 45, 1, 20, " ms", {}),
+            R("dblDrift", "Double drift", 0, 15, 0.5, 6, " cents", {}),
+            R("dblBelow", "Double level (dB under voice)", 6, 30, 0.5, 14, " dB", {}),
+            R("echoTime", "Echo time", 40, 220, 1, 100, " ms", {}),
+            R("echoBelow", "Echo level (dB under voice)", 8, 34, 0.5, 18, " dB", {}),
+            R("haloBelow", "Ghost level (dB under voice)", 8, 34, 0.5, 19, " dB", {}),
+            R("tone", "Layer tone (high cut)", 3000, 12000, 100, 7500, " Hz", {})
+        ],
+        presets: {
+            "Default": {}, "Subtle halo": { amount: 65 }, "Airy octave": { halo: "octave", haloBelow: 16 },
+            "Faint chord (third)": { halo: "third" }, "Double + echo only": { halo: "off" }, "Bold": { amount: 150 }
+        },
+        async process(ch, sr, p, env) {
+            const RS = root.VLResonance;
+            if (!RS || !RS.ready() || p.amount <= 0) return { channels: copy(ch) };
+            const shift = -20 * Math.log10(Math.max(p.amount, 1) / 100);        // more shimmer = a smaller "dB under the voice"
+            const params = { dblOn: true, dblDelay: p.dblDelay, dblDrift: p.dblDrift, dblBelow: p.dblBelow + shift, dblLp: p.tone,
+                echoOn: true, echoTime: p.echoTime, echoBelow: p.echoBelow + shift, echoLp: Math.max(2000, p.tone - 700),
+                halo: p.halo, haloBelow: p.haloBelow + shift, haloLp: p.tone, haloHaas: 11 };
+            let halo = null;
+            if (p.halo !== "off") {
+                const key = env && env.key;
+                if (p.halo === "octave" || !key) halo = (await runTask("shiftConst", { channels: ch, sr, cents: 1200 })).channels;
+                else halo = (await runTask("harmonize", { channels: ch, sr, options: { rootPc: key.rootPc, scale: key.scale, refCents: 0, degrees: RS.DEGREES[p.halo] || 2, retuneMs: 25 } })).channels;
+            }
+            const layer = RS.build(ch, sr, params, halo);
+            const n = layer.channels[0].length, dry = ch.length > 1 ? ch : [ch[0], ch[0]];
+            const L = new Float32Array(n), Rr = new Float32Array(n);
+            for (let i = 0; i < n; i++) { L[i] = (i < dry[0].length ? dry[0][i] : 0) + layer.channels[0][i]; Rr[i] = (i < dry[1].length ? dry[1][i] : 0) + layer.channels[1][i]; }
+            return { channels: [L, Rr] };
+        }
+    };
+
+    const ORDER = ["tune", "pitchedit", "deess", "eq", "comp", "sat", "voice", "doubler", "resonance", "crowd", "imager", "orbit", "delay", "reverb", "limit"];
 
     function defaults(id) {
         const pl = P[id], o = {};

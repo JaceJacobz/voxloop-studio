@@ -37,7 +37,7 @@
         pitch: null, snap: "scale",
         beatInfo: null, beatFor: null,
         heard: null,             // findings from "Auto this"
-        plan: null, planStyle: "polished", intensity: "normal", flavors: { doubs: false, tails: false, crowd: false, voice: false, orbit: false, ride: false },
+        plan: null, planStyle: "polished", intensity: "normal", flavors: { doubs: false, tails: false, crowd: false, voice: false, orbit: false, ride: false, resonance: false },
         busyMsg: ""
     };
     try { const v = localStorage.getItem("vl-rack-easy"); if (v != null) st.easy = v === "1"; } catch (e) { /* ignore */ }
@@ -672,7 +672,7 @@
     function renderAuto() {
         const body = $("#fx-body");
         const styles = [["natural", "Natural", "Keeps it sounding like you. Gentle tuning, light space."], ["polished", "Polished", "Radio-ready balance. Tight tuning, clean tone."], ["big", "Big", "Thicker, wider, more reverb. Strong tuning."]];
-        const fl = [["doubs", "Doubles in the big parts of the song"], ["tails", "Echo on the last word of lines"], ["crowd", "Crowd answering back"], ["voice", "Voice-change spice on the final sound"], ["orbit", "Slow stereo movement (headphones)"], ["ride", "Even out phrase loudness with volume automation (Auto-ride)"]];
+        const fl = [["doubs", "Doubles in the big parts of the song"], ["tails", "Echo on the last word of lines"], ["crowd", "Crowd answering back"], ["voice", "Voice-change spice on the final sound"], ["orbit", "Slow stereo movement (headphones)"], ["ride", "Even out phrase loudness with volume automation (Auto-ride)"], ["resonance", "Shimmer layer: natural double + soft echo + ghost harmony (resonance)"]];
         let html = '<div class="fx-auto">' +
             '<p class="fx-lead">Voxloop listens to your beat and each vocal, then adds <b>only what is needed</b>. If something already sounds good it is left alone, and you\'ll see why.</p>' +
             '<div class="fx-styles" role="radiogroup" aria-label="Style">' + styles.map((s) => '<button type="button" role="radio" aria-checked="' + (st.planStyle === s[0]) + '" class="fx-style' + (st.planStyle === s[0] ? " is-on" : "") + '" data-style="' + s[0] + '"><strong>' + s[1] + "</strong><small>" + s[2] + "</small></button>").join("") + "</div>" +
@@ -716,6 +716,7 @@
             if (e.chain.length) html += '<div class="fx-doing"><b>I\'ll add:</b> ' + e.chain.map((c) => '<span class="fx-pill" title="' + esc(c.reason) + '">' + esc(Fx.P[c.type].name) + "</span>").join("") + "</div>" + '<ul class="fx-reasons">' + e.chain.map((c) => "<li><b>" + esc(Fx.P[c.type].name) + ":</b> " + esc(c.reason) + "</li>").join("") + "</ul>";
             else html += '<div class="fx-doing"><b>Nothing needed</b>: this one already sounds good.</div>';
             if (e.extra.length) html += '<div class="fx-doing"><b>Extras (tap one to hear it):</b> ' + e.extra.map((z, zi) => '<button type="button" class="fx-pill alt fx-zone" data-lane="' + i + '" data-zone="' + zi + '" title="' + esc(z.chain[0].reason) + '">' + esc(z.label) + " @ " + fmtT(z.start) + "</button>").join("") + "</div>" + '<ul class="fx-reasons">' + e.extra.map((z) => "<li><b>" + esc(z.label) + ":</b> " + esc(z.chain[0].reason) + "</li>").join("") + "</ul>";
+            if (e.skippedResonance) html += '<div class="fx-doing"><b>Resonance skipped:</b> ' + esc(e.skippedResonance.replace(/^Resonance left off: /, "")) + "</div>";
             if (e.skippedCrowd) html += '<div class="fx-doing"><b>Crowd skipped:</b> it rarely suits this style. Choose "Lots" if you want it anyway.</div>';
             html += '<button type="button" class="fx-btn fx-ghost" data-open="' + i + '">Open in rack to preview</button></div>';
         });

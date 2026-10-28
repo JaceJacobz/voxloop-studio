@@ -388,7 +388,7 @@
     // ---------------------------------------------------------------- flavour placement (only when asked): based on the singing's gaps and the beat's big moments
     const INTENSITY = { subtle: { echo: 0.2, crowd: 1, voice: 1, orbit: 40 }, normal: { echo: 0.4, crowd: 2, voice: 1, orbit: 60 }, lots: { echo: 0.7, crowd: 4, voice: 2, orbit: 80 } };
 
-    function flavourZones(meas, flavors, B, clipStart, clipDur, type, intensity) {
+    function flavourZones(meas, flavors, B, clipStart, clipDur, type, intensity, who) {
         const zones = [], rel = (t) => t - clipStart, inten = INTENSITY[intensity] || INTENSITY.normal;
         const phr = meas.phrases || [];
         if (type !== "main" || !phr.length) return zones;
@@ -443,6 +443,12 @@
                 zones.push({ start: a, end, label: "Voice-change spice", chain: [mkItem("voice", { semi, mode: "character" }, "A quick " + (semi > 0 ? "pitched-up" : "pitched-down") + " chop " + (c.d < 1.5 ? "just before the beat lifts into a big section" : "on the final sound") + ", " + (semi > 0 ? "up because the song is high-energy." : "down because the song is laid-back."))] });
             });
         }
+        if (flavors.resonance && who && who.prof && root.VLResonance) {
+            // the shimmer layer: every number is calculated from this beat and this vocal, and it may decide not to run
+            const rp = root.VLResonance.plan({ vibe: B, prof: who.prof, genreId: B.genreId, bpm: B.bpm, beatMs, key: who.key }, intensity === "subtle" ? "subtle" : intensity === "lots" ? "bold" : "auto");
+            if (rp.use) zones.push({ start: 0, end: clipDur, label: "Resonance (shimmer)", chain: [mkItem("resonance", { amount: 100, halo: rp.params.halo, dblDelay: rp.params.dblDelay, dblDrift: rp.params.dblDrift, dblBelow: rp.params.dblBelow, echoTime: rp.params.echoTime, echoBelow: rp.params.echoBelow, haloBelow: rp.params.haloBelow, tone: rp.params.dblLp }, rp.notes[0])] });
+            else zones.skippedResonance = rp.notes[0];
+        }
         if (flavors.orbit) {
             const rate = Math.round(clamp((B.bpm || 100) / 60 / 16, 0.05, 0.4) * 1000) / 1000;      // one slow lap every four bars
             zones.push({ start: 0, end: clipDur, label: "Slow stereo movement", chain: [mkItem("orbit", { rate, am: 25, fm: 20, rotation: 90, mix: inten.orbit }, "Moves the voice around you once every four bars (" + rate + " Hz) so the motion stays in time with the song.")] });
@@ -463,8 +469,8 @@
                 if (lane.mixLevel === "mute" || lane.muted) continue;
                 const chans = []; for (let c = 0; c < clip.buffer.numberOfChannels; c++) chans.push(clip.buffer.getChannelData(c));
                 const r = await analyzeClip(chans, clip.buffer.sampleRate, { type: lane.type, style: opts.style, beat, beatKeyConfidence: beat.source && beat.source.key === "Beat Lab" ? 1 : 0 });
-                const extra = r.meas ? flavourZones(r.meas, opts.flavors || {}, beat, clip.start, clip.duration, lane.type, opts.intensity) : [];
-                out.lanes.push({ laneId: lane.id, clipId: clip.id, laneName: lane.name, laneType: lane.type, clipName: clip.name, findings: r.findings, chain: r.chain, extra, meas: r.meas, vocal: r.prof ? r.prof.label : "", skippedCrowd: !!extra.skippedCrowd });
+                const extra = r.meas ? flavourZones(r.meas, opts.flavors || {}, beat, clip.start, clip.duration, lane.type, opts.intensity, { prof: r.prof, key: r.key }) : [];
+                out.lanes.push({ laneId: lane.id, clipId: clip.id, laneName: lane.name, laneType: lane.type, clipName: clip.name, findings: r.findings, chain: r.chain, extra, meas: r.meas, vocal: r.prof ? r.prof.label : "", skippedCrowd: !!extra.skippedCrowd, skippedResonance: extra.skippedResonance || "" });
                 if (opts.onProgress) opts.onProgress(lane.name);
             }
         }

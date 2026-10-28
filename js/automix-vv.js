@@ -1069,6 +1069,44 @@ async function processAutomix(state, options) {
         lines.push("Skipped the double: the vocal is already thick or noisy, so width would blur it.");
       }
 
+      // Resonance: a calculated shimmer layer (natural double + one soft echo + ghost harmony). Only when you ask for it.
+      const resMode = opt.resonance || "off";
+      if (resMode !== "off") {
+        const RS = window.VLResonance;
+        if (!RS || !RS.ready() || !brain) {
+          lines.push("Skipped resonance: it needs the mix brain and resonance.js to calculate it.");
+        } else {
+          const rp = RS.plan(brain, resMode);
+          lines.push(...rp.notes);
+          if (rp.use) {
+            setStatus("Building the resonance layer…");
+            await nextFrame();
+            try {
+              let haloPlaced = null;
+              const hp = rp.params;
+              if (hp.halo !== "off") {
+                const Tune2 = window.VocalVaultTune;
+                const keyO = state.tuneOptions || (state.beatKey && state.beatKey.key && Tune2
+                  ? { rootPc: Tune2.noteNames.indexOf(state.beatKey.key), scale: String(state.beatKey.scale).toLowerCase(), refCents: 0 } : null);
+                let hCh;
+                if (hp.halo === "octave" || !keyO || !Tune2 || !Tune2.harmonizeVocal) {
+                  hCh = (await window.VLFx.runTask("shiftConst", { channels: vocalChannels, sr, cents: 1200 })).channels;     // a plain octave up
+                } else {
+                  const h = await Tune2.harmonizeVocal(vocalChannels, sr, Object.assign({}, keyO, { degrees: RS.DEGREES[hp.halo] || 2 }));
+                  hCh = h.audio.harmony;
+                }
+                haloPlaced = engine.placeVocal(hCh, sr, plan, Math.ceil(plan.totalSec * sr));
+              }
+              const layer = RS.build(placed, sr, hp, haloPlaced, { keepLength: true });
+              stems.push(layer.channels);
+            } catch (error) {
+              console.error(error);
+              lines.push("Skipped resonance: it could not be built for this vocal.");
+            }
+          }
+        }
+      }
+
       const dip = Fx.duckBeatMid(beatChannels, Fx.toMono(placed), sr, { depthDb: space.midDuckDb });
       beatForMix = dip.channels;
       lines.push(`Dipped the beat's mids by up to ${Number(dip.depthDb).toFixed(1)} dB around 2 kHz while you sing, so the voice sits in the beat instead of on top of it. This dip leaves the low end alone.`);
