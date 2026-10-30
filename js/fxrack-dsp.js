@@ -300,7 +300,7 @@
 
     // ---- Tune (auto pitch correction) ----
     P.tune = {
-        id: "tune", name: "VL Tune", cat: "Pitch", icon: "♪",
+        id: "tune", name: "VL Tune", cat: "Pitch", icon: "p-tune",
         blurb: "Snaps sung notes to the song's key so nothing sounds off. Low retune speed = fast, obvious tuning.",
         likeA: "Auto-Tune style",
         easy: ["amount", "speed", "key", "scale"],
@@ -345,7 +345,7 @@
 
     // ---- Pitch editor (blob editor: moves per note + pitch variation) ----
     P.pitchedit = {
-        id: "pitchedit", name: "VL Pitch Editor", cat: "Pitch", icon: "◍",
+        id: "pitchedit", name: "VL Pitch Editor", cat: "Pitch", icon: "p-pitchedit",
         blurb: "Grab a note blob and drag it up or down to fix it by hand. The Variation knob calms (or exaggerates) wobble inside notes.",
         likeA: "Melodyne style",
         easy: ["variation"],
@@ -360,7 +360,7 @@
 
     // ---- EQ ----
     P.eq = {
-        id: "eq", name: "VL EQ", cat: "Tone", icon: "∿",
+        id: "eq", name: "VL EQ", cat: "Tone", icon: "p-eq",
         blurb: "Shapes the tone: cut rumble and mud, add presence and air.",
         likeA: "Pro-Q / Parametric EQ style",
         easy: ["hp", "mudG", "presG", "air"],
@@ -407,7 +407,7 @@
 
     // ---- Compressor ----
     P.comp = {
-        id: "comp", name: "VL Comp", cat: "Dynamics", icon: "▤",
+        id: "comp", name: "VL Comp", cat: "Dynamics", icon: "p-comp",
         blurb: "Evens out loud and quiet parts so the vocal stays steady in the mix.",
         likeA: "Pro-C style",
         easy: ["amount"],
@@ -451,7 +451,7 @@
 
     // ---- De-esser ----
     P.deess = {
-        id: "deess", name: "VL De-Esser", cat: "Dynamics", icon: "s̶",
+        id: "deess", name: "VL De-Esser", cat: "Dynamics", icon: "p-deess",
         blurb: "Softens harsh 'S' and 'T' sounds without dulling the whole voice.",
         likeA: "Pro-DS style",
         easy: ["amount"],
@@ -471,7 +471,7 @@
 
     // ---- Saturator ----
     P.sat = {
-        id: "sat", name: "VL Warmth", cat: "Tone", icon: "≋",
+        id: "sat", name: "VL Warmth", cat: "Tone", icon: "p-sat",
         blurb: "Adds gentle analog-style warmth and thickness.",
         likeA: "Saturn style (simple)",
         easy: ["drive"],
@@ -486,7 +486,7 @@
 
     // ---- Limiter ----
     P.limit = {
-        id: "limit", name: "VL Limiter", cat: "Dynamics", icon: "⊤",
+        id: "limit", name: "VL Limiter", cat: "Dynamics", icon: "p-limit",
         blurb: "A safety ceiling so nothing clips. Push the gain to make it louder.",
         likeA: "Pro-L style",
         easy: ["gain"],
@@ -503,7 +503,7 @@
 
     // ---- Stereo imager ----
     P.imager = {
-        id: "imager", name: "VL Imager", cat: "Space", icon: "◐▷",
+        id: "imager", name: "VL Imager", cat: "Space", icon: "p-imager",
         blurb: "Makes a vocal wider (or narrower). Bass stays in the middle so the mix stays solid.",
         likeA: "S1 Stereo Imager style",
         easy: ["width"],
@@ -534,7 +534,7 @@
 
     // ---- Doubler ("chorus doubs") ----
     P.doubler = {
-        id: "doubler", name: "VL Doubler", cat: "Space", icon: "⫽",
+        id: "doubler", name: "VL Doubler", cat: "Space", icon: "p-doubler",
         blurb: "Makes it sound like the singer recorded it twice: thicker and bigger, great for choruses.",
         likeA: "Vocal doubling",
         easy: ["level", "spread"],
@@ -571,7 +571,7 @@
 
     // ---- Crowd (stack many copies) ----
     P.crowd = {
-        id: "crowd", name: "VL Crowd", cat: "Creative", icon: "∷",
+        id: "crowd", name: "VL Crowd", cat: "Creative", icon: "p-crowd",
         blurb: "Stacks many slightly different copies of the vocal to sound like a crowd singing back.",
         likeA: "Crowd / gang vocal stacking",
         easy: ["size", "level"],
@@ -612,7 +612,7 @@
 
     // ---- Reverb ----
     P.reverb = {
-        id: "reverb", name: "VL Hall", cat: "Space", icon: "◌",
+        id: "reverb", name: "VL Hall", cat: "Space", icon: "p-reverb",
         blurb: "Puts the vocal in a room. Keep the lows and harsh highs of the reverb trimmed so the mix stays clean.",
         likeA: "Pro-R style",
         easy: ["mix", "decay"],
@@ -654,7 +654,7 @@
 
     // ---- Echo / delay (with "tail-end throw") ----
     P.delay = {
-        id: "delay", name: "VL Echo", cat: "Space", icon: "⋯",
+        id: "delay", name: "VL Echo", cat: "Space", icon: "p-delay",
         blurb: "Repeats that trail off. 'Enter at' makes the echo only appear near the END of your selection, for tail-end spice.",
         likeA: "Delay + volume automation",
         easy: ["mix", "enter"],
@@ -703,7 +703,7 @@
 
     // ---- Orbit (slow auto-pan / AM / FM movement) ----
     P.orbit = {
-        id: "orbit", name: "VL Orbit", cat: "Creative", icon: "◎",
+        id: "orbit", name: "VL Orbit", cat: "Creative", icon: "p-orbit",
         blurb: "Slowly moves the vocal around the stereo field. Best heard on headphones.",
         likeA: "MondoMod style",
         easy: ["rate", "rotation"],
@@ -741,7 +741,7 @@
 
     // ---- Voice change ----
     P.voice = {
-        id: "voice", name: "VL Voice Change", cat: "Creative", icon: "☄",
+        id: "voice", name: "VL Voice Change", cat: "Creative", icon: "p-voice",
         blurb: "Shifts the pitch of a chopped phrase. 'Same voice' keeps it sounding like you; 'Character' changes the voice itself (chipmunk / deep).",
         likeA: "Sampler pitch / time-stretch",
         easy: ["semi", "mode"],
@@ -767,7 +767,7 @@
 
     // ---- Resonance: natural double + one soft echo + ghost harmony (the maths lives in resonance.js, shared with the Pipeline) ----
     P.resonance = {
-        id: "resonance", name: "VL Resonance", cat: "Space", icon: "✧",
+        id: "resonance", name: "VL Resonance", cat: "Space", icon: "p-resonance",
         blurb: "A shimmer layer under the voice: a natural double, one soft echo that never keeps repeating, and a faint ghost harmony. It sounds like the singer sang it again.",
         likeA: "Voloco-style resonance",
         easy: ["amount", "halo"],

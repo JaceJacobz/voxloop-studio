@@ -2,9 +2,9 @@
  * Voxloop Studio — Volume automation
  *
  * Each vocal lane can have a volume curve drawn over the song (lane.auto.volume = [{ t: seconds, db }]).
- *  - Tap the ∿ button on a lane to open its automation row.
+ *  - Tap the automation button on a lane to open its automation row.
  *  - Tap empty space to add a point, drag to move, double-tap (or right-click / long-press) to delete.
- *  - Fade in / Fade out / ✨ Auto-ride (smooths loud and quiet phrases) / Undo / Clear.
+ *  - Fade in / Fade out / Auto-ride (smooths loud and quiet phrases) / Undo / Clear.
  * The curve is used while the song plays (it updates live as you drag), when the mix is rendered for
  * the reference panel, and when "Send mix to Pipeline" builds the vocal, so what you hear is what is sent.
  *
@@ -105,13 +105,13 @@
             '<span class="lane-color" style="background:' + lane.color + '"></span>' +
             '<div class="auto-meta"><strong>Volume</strong><small>' + esc(lane.name) + "</small></div>" +
             '<div class="auto-btns">' +
-            '<button type="button" data-a="fadein">Fade in</button>' +
-            '<button type="button" data-a="fadeout">Fade out</button>' +
-            '<button type="button" data-a="ride" class="is-ai" title="Evens out loud and quiet phrases">✨ Auto-ride</button>' +
-            '<button type="button" data-a="undo" title="Undo last change">↶</button>' +
-            '<button type="button" data-a="clear">Clear</button>' +
+            '<button type="button" data-a="fadein" title="Fade in" aria-label="Fade in">' + VLI("fadein", 14) + '<span class="btn-label"> Fade in</span></button>' +
+            '<button type="button" data-a="fadeout" title="Fade out" aria-label="Fade out">' + VLI("fadeout", 14) + '<span class="btn-label"> Fade out</span></button>' +
+            '<button type="button" data-a="ride" class="is-ai" title="Auto-ride: evens out loud and quiet phrases" aria-label="Auto-ride">' + VLI("sparkle", 14) + '<span class="btn-label"> Auto-ride</span></button>' +
+            '<button type="button" data-a="undo" title="Undo last change" aria-label="Undo last change">' + VLI("undo", 14) + '</button>' +
+            '<button type="button" data-a="clear" title="Clear" aria-label="Clear">' + VLI("trash", 14) + '<span class="btn-label"> Clear</span></button>' +
             '</div>' +
-            '<label class="auto-snap"><input type="checkbox" data-a="snap" checked> Snap to beat</label>' +
+            '<label class="auto-snap" title="Snap points to the beat"><input type="checkbox" data-a="snap" checked>' + VLI("snap", 14) + '<span class="btn-label"> Snap to beat</span></label>' +
             "</div>" +
             '<div class="studio-lane-track auto-track" style="min-width:' + W + 'px"><canvas class="auto-canvas" width="' + W + '" height="' + ROW_H + '"></canvas></div>';
         laneRow.parentNode.insertBefore(row, laneRow.nextSibling);
@@ -170,7 +170,7 @@
 
         row.querySelector(".auto-btns").addEventListener("click", (e) => {
             const a = e.target.dataset && e.target.dataset.a; if (!a) return;
-            if (a === "clear") { if (!has(lane)) return; snapshot(lane); lane.auto.volume = []; changed(lane, redraw); status("Volume automation cleared (↶ to undo)"); }
+            if (a === "clear") { if (!has(lane)) return; snapshot(lane); lane.auto.volume = []; changed(lane, redraw); status("Volume automation cleared (press Undo to bring it back)"); }
             else if (a === "undo") { if (!lane.autoUndo || !lane.autoUndo.length) { status("Nothing to undo"); return; } lane.auto = { volume: JSON.parse(lane.autoUndo.pop()) }; changed(lane, redraw); }
             else if (a === "fadein") {
                 snapshot(lane); const s = laneStart(lane), len = Math.min(1.2, (laneEnd(lane) - s) / 4);
@@ -280,7 +280,7 @@
         list.sort((a, b) => a.t - b.t).forEach((q) => { const prev = dedup[dedup.length - 1]; if (prev && Math.abs(prev.t - q.t) < 0.02) prev.db = Math.abs(q.db) > Math.abs(prev.db) ? q.db : prev.db; else dedup.push({ t: Math.round(q.t * 1000) / 1000, db: q.db }); });
         lane.auto.volume = dedup;
         changed(lane, redraw);
-        status("Auto-ride: raised " + up + " quiet phrase" + (up === 1 ? "" : "s") + " and dipped " + down + " loud one" + (down === 1 ? "" : "s") + " (of " + rides.length + "). ↶ to undo.");
+        status("Auto-ride: raised " + up + " quiet phrase" + (up === 1 ? "" : "s") + " and dipped " + down + " loud one" + (down === 1 ? "" : "s") + " (of " + rides.length + "). Press Undo to revert.");
     }
 
     // ------------------------------------------------------------------ hooking into the lanes
@@ -296,7 +296,7 @@
             const btns = laneRow.querySelector(".lane-btns");
             if (btns && !btns.querySelector('[data-act="autoview"]')) {
                 const b = document.createElement("button");
-                b.type = "button"; b.className = "lane-btn lane-btn-auto"; b.dataset.act = "autoview"; b.textContent = "∿";
+                b.type = "button"; b.className = "lane-btn lane-btn-auto"; b.dataset.act = "autoview"; b.innerHTML = VLI("automation", 16);
                 b.title = "Volume automation: draw volume changes over the song";
                 b.setAttribute("aria-label", "Volume automation for " + lane.name);
                 b.addEventListener("click", () => { lane.autoOpen = !lane.autoOpen; if (api().renderLanes) api().renderLanes(); });

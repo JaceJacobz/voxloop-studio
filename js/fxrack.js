@@ -4,7 +4,7 @@
  *  1. Drag across part of a vocal clip to SELECT it (tap a clip = the whole clip)
  *  2. Pick plugins (or a one-tap "recipe"), tweak, and hear a looping LIVE PREVIEW over the beat
  *  3. Apply → the effect is baked into just that part of the clip (undo any time)
- *  4. ✨ Auto: Voxloop listens to the vocal + beat and only adds what is actually needed
+ *  4. Auto: Voxloop listens to the vocal + beat and only adds what is actually needed
  *
  * Needs: fxrack-dsp.js (VLFx), fxbrain.js (VLBrain, optional), daw.js (VocalVaultDAW bridge).
  */
@@ -82,16 +82,16 @@
             '  <div class="fx-sel" id="fx-sel-info"></div>' +
             '  <div class="fx-head-btns">' +
             '    <div class="fx-seg" role="group" aria-label="Easy or Pro"><button type="button" data-mode="easy">Easy</button><button type="button" data-mode="pro">Pro</button></div>' +
-            '    <button type="button" class="fx-x" id="fx-close" aria-label="Close FX rack">✕</button>' +
+            '    <button type="button" class="fx-x" id="fx-close" aria-label="Close FX rack">' + VLI("close", 16) + '</button>' +
             '  </div>' +
             '</div>' +
             '<div class="fx-tabs" role="tablist">' +
             '  <button type="button" data-tab="chain" role="tab">Effects</button>' +
             '  <button type="button" data-tab="pitch" role="tab">Pitch editor</button>' +
-            '  <button type="button" data-tab="auto" role="tab">✨ Auto</button>' +
+            '  <button type="button" data-tab="auto" role="tab">' + VLI("sparkle", 14) + ' Auto</button>' +
             '</div>' +
             '<div class="fx-pvbar" id="fx-pvbar">' +
-            '  <button type="button" class="fx-btn fx-play" id="fx-play">▶ Preview</button>' +
+            '  <button type="button" class="fx-btn fx-play" id="fx-play">' + VLI("play", 15) + ' Preview</button>' +
             '  <div class="fx-seg fx-ab" role="group" aria-label="Compare"><button type="button" data-ab="dry">Original</button><button type="button" data-ab="fx">With effects</button></div>' +
             '  <label class="fx-chk"><input type="checkbox" id="fx-beat" checked> Beat</label>' +
             '  <span class="fx-busy" id="fx-busy" hidden>working…</span>' +
@@ -99,9 +99,9 @@
             '</div>' +
             '<div class="fx-body" id="fx-body"></div>' +
             '<div class="fx-foot" id="fx-foot">' +
-            '  <button type="button" class="fx-btn fx-apply" id="fx-apply">Apply to selection</button>' +
-            '  <button type="button" class="fx-btn" id="fx-undo">Undo last</button>' +
-            '  <button type="button" class="fx-btn fx-ghost" id="fx-revert">Back to original clip</button>' +
+            '  <button type="button" class="fx-btn fx-apply" id="fx-apply">' + VLI("check", 15) + ' <span class="btn-label">Apply to selection</span></button>' +
+            '  <button type="button" class="fx-btn" id="fx-undo" title="Undo last" aria-label="Undo last">' + VLI("undo", 15) + ' <span class="btn-label">Undo last</span></button>' +
+            '  <button type="button" class="fx-btn fx-ghost" id="fx-revert" title="Back to the original clip" aria-label="Back to the original clip">' + VLI("rewind", 15) + ' <span class="btn-label">Back to original clip</span></button>' +
             '</div>';
         const transport = $(".studio-transport", layout);
         layout.insertBefore(panel, transport || null);
@@ -121,10 +121,10 @@
         const box = $(".studio-toolbar-actions");
         if (!box || $("#fx-open-btn")) return;
         const b1 = document.createElement("button");
-        b1.type = "button"; b1.id = "fx-open-btn"; b1.className = "secondary-button studio-tool-btn"; b1.textContent = "🎛 FX Rack";
+        b1.type = "button"; b1.id = "fx-open-btn"; b1.className = "secondary-button studio-tool-btn"; b1.innerHTML = VLI("rack", 18) + '<span class="btn-label">FX Rack</span>'; b1.setAttribute("aria-label", "FX Rack");
         b1.title = "Pick a part of a vocal, add plugins, and hear it live before you commit";
         const b2 = document.createElement("button");
-        b2.type = "button"; b2.id = "fx-auto-btn"; b2.className = "secondary-button studio-tool-btn fx-auto-btn"; b2.textContent = "✨ Auto-produce";
+        b2.type = "button"; b2.id = "fx-auto-btn"; b2.className = "secondary-button studio-tool-btn fx-auto-btn"; b2.innerHTML = VLI("sparkle", 18) + '<span class="btn-label">Auto-produce</span>'; b2.setAttribute("aria-label", "Auto-produce");
         b2.title = "Voxloop listens to your vocals and beat and only adds what's needed";
         box.insertBefore(b2, box.firstChild); box.insertBefore(b1, box.firstChild);
         b1.addEventListener("click", () => { if (st.open && st.tab !== "auto") closeRack(); else openRack("chain"); });
@@ -258,14 +258,14 @@
         let recOpts = '<option value="">Quick start…</option>' + RECIPES.map((r, i) => '<option value="' + i + '">' + esc(r[0]) + "</option>").join("");
 
         let html = '<div class="fx-addrow"><select id="fx-recipe" aria-label="Quick start">' + recOpts + '</select><select id="fx-add" aria-label="Add plugin">' + addOpts + "</select>" +
-            '<button type="button" class="fx-btn fx-ghost" id="fx-whole">Select whole clip</button></div>';
+            '<button type="button" class="fx-btn fx-ghost" id="fx-whole" title="Select the whole clip" aria-label="Select the whole clip">' + VLI("wave", 15) + ' <span class="btn-label">Select whole clip</span></button></div>';
         html += '<div id="fx-recipe-tip" class="fx-tip" hidden></div>';
         if (st.heard) html += '<div class="fx-heard"><strong>What I heard</strong><ul>' + st.heard.map((f) => '<li class="' + (f.ok ? "ok" : "warn") + '">' + esc(f.text) + "</li>").join("") + "</ul></div>";
-        if (!st.chain.length) html += '<div class="fx-empty">No plugins yet. Pick a <b>Quick start</b>, add a plugin, or press <b>✨ Auto</b> and let Voxloop decide what this part needs.</div>';
+        if (!st.chain.length) html += '<div class="fx-empty">No plugins yet. Pick a <b>Quick start</b>, add a plugin, or press <b>Auto</b> and let Voxloop decide what this part needs.</div>';
         html += '<div class="fx-chain" id="fx-chain">';
         st.chain.forEach((pl, i) => { html += cardHtml(pl, i); });
         html += "</div>";
-        html += '<div class="fx-autoone"><button type="button" class="fx-btn fx-auto" id="fx-auto-one">✨ Auto: what does this part need?</button></div>';
+        html += '<div class="fx-autoone"><button type="button" class="fx-btn fx-auto" id="fx-auto-one">' + VLI("sparkle", 15) + ' Auto: what does this part need?</button></div>';
         body.innerHTML = html;
 
         $("#fx-add").addEventListener("change", (e) => { if (e.target.value) addPlugin(e.target.value); });
@@ -300,10 +300,10 @@
         });
         const presets = Object.keys(def.presets || {});
         return '<div class="fx-card' + (pl.bypass ? " is-bypassed" : "") + '" data-i="' + i + '">' +
-            '<div class="fx-card-h"><button type="button" class="fx-pow" data-act="bypass" aria-label="Turn on or off" title="On / off">' + (pl.bypass ? "○" : "●") + "</button>" +
-            '<div class="fx-card-t"><strong>' + esc(def.icon + " " + def.name) + "</strong>" + (st.easy ? "" : '<small>' + esc(def.likeA) + "</small>") + "</div>" +
+            '<div class="fx-card-h"><button type="button" class="fx-pow" data-act="bypass" aria-label="Turn on or off" title="On / off">' + VLI("power", 14) + "</button>" +
+            '<div class="fx-card-t"><strong>' + VLI(def.icon, 16) + " " + esc(def.name) + "</strong>" + (st.easy ? "" : '<small>' + esc(def.likeA) + "</small>") + "</div>" +
             '<select class="fx-preset" data-act="preset" aria-label="Preset"><option value="">Preset…</option>' + presets.map((p) => "<option>" + esc(p) + "</option>").join("") + "</select>" +
-            '<div class="fx-card-b"><button type="button" data-act="up" title="Move earlier">↑</button><button type="button" data-act="down" title="Move later">↓</button><button type="button" data-act="del" title="Remove">✕</button></div></div>' +
+            '<div class="fx-card-b"><button type="button" data-act="up" title="Move earlier" aria-label="Move earlier">' + VLI("up", 14) + '</button><button type="button" data-act="down" title="Move later" aria-label="Move later">' + VLI("down", 14) + '</button><button type="button" data-act="del" title="Remove" aria-label="Remove">' + VLI("close", 14) + '</button></div></div>' +
             (st.easy ? '<p class="fx-blurb">' + esc(def.blurb) + "</p>" : "") +
             (pl.reason ? '<p class="fx-why">Why: ' + esc(pl.reason) + "</p>" : "") +
             '<div class="fx-params">' + rows + "</div></div>";
@@ -402,10 +402,10 @@
         const nodes = [v];
         if (bb) { const b = ctx.createBufferSource(); b.buffer = bb; b.loop = true; b.loopEnd = L; const bg = ctx.createGain(); bg.gain.value = 0.85; b.connect(bg); bg.connect(ctx.destination); b.start(t0, off); nodes.push(b); }
         st.pv = { ctx, nodes, t0, off, L };
-        $("#fx-play").textContent = "■ Stop preview"; $("#fx-play").classList.add("is-on");
+        $("#fx-play").innerHTML = VLI("stop", 15) + " Stop preview"; $("#fx-play").classList.add("is-on");
     }
     function stopVoice() { if (st.pv) { st.pv.nodes.forEach((n) => { try { n.stop(); } catch (e) { /* ignore */ } }); st.pv = null; } }
-    function stopPreview() { stopVoice(); const p = $("#fx-play"); if (p) { p.textContent = "▶ Preview"; p.classList.remove("is-on"); } }
+    function stopPreview() { stopVoice(); const p = $("#fx-play"); if (p) { p.innerHTML = VLI("play", 15) + " Preview"; p.classList.remove("is-on"); } }
     function restartPreview() {
         if (!st.pv || !st.out) return;
         const pos = ((st.pv.ctx.currentTime - st.pv.t0) + st.pv.off) % st.pv.L;
@@ -567,7 +567,7 @@
         return Math.round(m);
     }
 
-    const PV = { pxSec: 150, gutter: 40, H: 300, lo: 0, hi: 0, rowH: 10, blobs: [], drag: null };
+    const PV = { pxSec: 150, gutter: 40, H: (window.innerWidth <= 720 ? 210 : 300), lo: 0, hi: 0, rowH: 10, blobs: [], drag: null };
     function drawPitch(P) {
         const cv = $("#fx-pitch"); if (!cv) return;
         const wrap = $("#fx-pitch-wrap");
@@ -673,13 +673,13 @@
         const body = $("#fx-body");
         const styles = [["natural", "Natural", "Keeps it sounding like you. Gentle tuning, light space."], ["polished", "Polished", "Radio-ready balance. Tight tuning, clean tone."], ["big", "Big", "Thicker, wider, more reverb. Strong tuning."]];
         const fl = [["doubs", "Doubles in the big parts of the song"], ["tails", "Echo on the last word of lines"], ["crowd", "Crowd answering back"], ["voice", "Voice-change spice on the final sound"], ["orbit", "Slow stereo movement (headphones)"], ["ride", "Even out phrase loudness with volume automation (Auto-ride)"], ["resonance", "Shimmer layer: natural double + soft echo + ghost harmony (resonance)"]];
-        let html = '<div class="fx-auto">' +
+        let html = '<div class="fx-auto-pane">' +
             '<p class="fx-lead">Voxloop listens to your beat and each vocal, then adds <b>only what is needed</b>. If something already sounds good it is left alone, and you\'ll see why.</p>' +
             '<div class="fx-styles" role="radiogroup" aria-label="Style">' + styles.map((s) => '<button type="button" role="radio" aria-checked="' + (st.planStyle === s[0]) + '" class="fx-style' + (st.planStyle === s[0] ? " is-on" : "") + '" data-style="' + s[0] + '"><strong>' + s[1] + "</strong><small>" + s[2] + "</small></button>").join("") + "</div>" +
             '<details class="fx-flav"' + (Object.values(st.flavors).some(Boolean) ? " open" : "") + "><summary>Optional extras (style, not needs)</summary>" +
             fl.map((f) => '<label class="fx-chk"><input type="checkbox" data-flav="' + f[0] + '"' + (st.flavors[f[0]] ? " checked" : "") + "> " + f[1] + "</label>").join("") +
             '<div class="fx-intens"><span>How much:</span><div class="fx-seg" id="fx-intens" role="group" aria-label="How much">' + [["subtle", "Subtle"], ["normal", "Normal"], ["lots", "Lots"]].map((i) => '<button type="button" data-int="' + i[0] + '" class="' + (st.intensity === i[0] ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div></details>" +
-            '<button type="button" class="fx-btn fx-auto" id="fx-listen">✨ Listen & make a plan</button> <span class="fx-busy" id="fx-plan-busy" hidden></span>' +
+            '<button type="button" class="fx-btn fx-auto" id="fx-listen">' + VLI("sparkle", 15) + ' Listen & make a plan</button> <span class="fx-busy" id="fx-plan-busy" hidden></span>' +
             '<div id="fx-plan"></div></div>';
         body.innerHTML = html;
         $$(".fx-style", body).forEach((b) => b.addEventListener("click", () => { st.planStyle = b.dataset.style; renderAuto(); }));
@@ -771,7 +771,7 @@
             status("Auto-produce done on " + done + " clip" + (done === 1 ? "" : "s") + ". Select a clip to fine-tune or undo.");
             st.plan = null; st.out = null; st.pitch = null;
             renderAuto();
-            $("#fx-plan").innerHTML = '<div class="fx-done">✓ Done. Press play to listen. Tap a clip to tweak or undo its effects.</div>';
+            $("#fx-plan").innerHTML = '<div class="fx-done">' + VLI("check", 15) + ' Done. Press play to listen. Tap a clip to tweak or undo its effects.</div>';
         } catch (err) { console.warn(err); status("Auto-produce stopped: " + (err.message || err)); }
         busy.hidden = true; btn.disabled = false;
     }

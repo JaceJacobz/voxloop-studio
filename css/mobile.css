@@ -1,0 +1,285 @@
+/* =========================================================
+   Voxloop Studio — phone layout (loads last)
+   Goal: feel like a mobile DAW (BandLab style): small controls, icons instead of words,
+   slim tracks so the timeline gets the screen, panels as bottom sheets.
+   ========================================================= */
+
+/* icons drawn by icons.js */
+.ico { display: inline-block; vertical-align: -0.2em; flex: none; }
+button .ico { pointer-events: none; }
+
+/* the Pipeline's bottom "Continue" bar steps aside while the real button is on screen (index.html script) */
+.pipeline-sticky-cta { transition: transform 0.18s ease, opacity 0.18s ease; }
+.pipeline-sticky-cta.is-covered { transform: translateY(120%); opacity: 0; pointer-events: none; }
+
+@media (max-width: 720px) {
+
+    :root {
+        --bar-h: 46px;
+        --tl-pad: 8px;
+        --lane-head: 104px;
+        --wave-h: 44px;
+        --transport-h: 92px;
+    }
+
+    body { font-size: 14px; }
+
+    /* ---------- top bar ---------- */
+    .top-bar { gap: 4px; padding-left: 8px; padding-right: 8px; }
+    .top-bar .brand-btn, .top-bar .logo-btn, .top-bar > button:first-child { width: 32px; height: 32px; min-width: 32px; padding: 0; }
+    .top-bar img, .top-bar .logo-mark { width: 20px; height: 20px; }
+    .mode-btn { padding: 0 9px; gap: 6px; font-size: 13px; }
+    .mode-btn .mode-ico { width: 17px; height: 17px; }
+    .ux-switch { padding: 1px; }
+    .ux-btn { height: 24px; font-size: 11px; padding: 0 8px; }
+
+    /* ---------- studio: toolbar becomes one slim icon strip ---------- */
+    .studio-toolbar { padding: 6px var(--tl-pad) 4px; gap: 6px; }
+    .studio-beat-slot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .studio-label { display: none; }
+    .studio-file-name { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #studio-load-beat { flex: none; }
+    .studio-toolbar-actions {
+        display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; overflow-y: hidden;
+        -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 2px 0 4px;
+    }
+    .studio-toolbar-actions::-webkit-scrollbar { display: none; }
+    .studio-tool-btn {
+        flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+        height: 36px; min-height: 36px; min-width: 40px; padding: 0 10px; font-size: 12.5px; border-radius: 10px;
+    }
+    .studio-toolbar-actions .studio-tool-btn .btn-label { display: none; }                    /* icons only: names are in the tooltips */
+    .studio-beat-slot .studio-tool-btn .btn-label { display: inline; }                       /* "Load beat" keeps its word */
+    .studio-select { flex: none; height: 36px; min-height: 36px; width: auto; min-width: 104px; font-size: 12.5px; padding: 0 28px 0 10px; border-radius: 10px; }
+    .studio-send { padding: 0 12px; }
+    .studio-send .btn-ico { width: 16px; height: 16px; }
+
+    /* ---------- studio: slim timeline ---------- */
+    .studio-ruler-head { padding: 0 8px; font-size: 11px; }
+    .studio-ruler-scroll { height: 24px; }
+    .studio-ruler-scroll canvas { height: 24px; }
+    .studio-lane { min-height: 58px; }
+    .studio-lane-track { min-height: 58px; }
+    .studio-clip { top: 4px; bottom: 4px; border-radius: 7px; }
+    .studio-clip span { top: 2px; left: 6px; font-size: 10px; }
+    .studio-lane-head { padding: 5px 6px; gap: 3px 4px; align-content: center; }
+    .lane-meta { min-width: 0; flex: 1 1 60px; }
+    .lane-name-input { font-size: 12px; height: 22px; padding: 0 4px; }
+    .lane-meta small { display: none; font-size: 10px; }
+    .studio-lane.is-open .lane-meta small { display: block; }
+    .lane-btns { display: flex; gap: 4px; width: 100%; }
+    .lane-btn { width: 28px; height: 28px; min-width: 28px; padding: 0; border-radius: 8px; display: inline-grid; place-items: center; }
+    .lane-btn svg { width: 15px; height: 15px; }
+    .lane-btn[data-act="arm"].is-on { color: var(--rec); border-color: var(--rec); background: rgba(255, 84, 104, 0.12); }
+    /* the rest of the lane controls live behind "more" */
+    .studio-lane .lane-level-wrap { display: none; }
+    .studio-lane .lane-btn[data-act="autoview"], .studio-lane .lane-btn[data-act="del"] { display: none; }
+    .studio-lane.is-open .lane-level-wrap { display: flex; flex-direction: column; width: 100%; order: 5; gap: 3px; }
+    .studio-lane.is-open .lane-btn[data-act="autoview"], .studio-lane.is-open .lane-btn[data-act="del"] { display: inline-grid; }
+    .studio-lane.is-open .lane-level-select, .studio-lane.is-open .lane-harmony-select { height: 28px; font-size: 12px; }
+    .studio-auto-row { min-height: 96px; }
+    .studio-auto-row .auto-head { padding: 6px; }
+    .auto-btns button { font-size: 10.5px; padding: 3px 7px; }
+
+    /* the first-run guide */
+    .studio-empty { padding: 14px 16px; }
+    .studio-empty-title { font-size: 16px; margin-bottom: 8px; }
+    .studio-guide li { font-size: 13px; padding: 3px 0; }
+
+    /* ---------- studio: transport in two slim rows ---------- */
+    .studio-transport {
+        display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto;
+        align-items: center; gap: 2px 10px;
+        padding: 6px var(--tl-pad) calc(6px + env(safe-area-inset-bottom, 0px));
+        min-height: var(--transport-h);
+    }
+    .transport-left { grid-column: 1; grid-row: 1; display: flex; gap: 8px; }
+    .tr-btn { width: 38px; height: 38px; }
+    .tr-btn svg { width: 16px; height: 16px; }
+    .tr-play { width: 44px; height: 44px; }
+    .transport-center { display: contents; }
+    #tr-time-current { grid-column: 2; grid-row: 1; font-size: 13px; justify-self: start; }
+    #tr-time-total { display: none; }
+    .tr-scrub-wrap { grid-column: 1 / -1; grid-row: 2; width: 100%; padding: 0; height: 22px; display: flex; align-items: center; }
+    .transport-right { grid-column: 3; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+    .tr-readout { display: flex; align-items: center; gap: 4px; }
+    .tr-opts { gap: 5px; }
+    .tr-status, .tr-count { display: none; }
+    .tr-meter { width: 28px; height: 6px; }
+    .tr-db { min-width: 0; font-size: 11px; }
+    body.is-live-rec .tr-meter { width: 64px; height: 8px; }
+    /* loop / count-in / raw mic become three small round toggles */
+    .tr-opts { display: flex; gap: 6px; }
+    .tr-opts label {
+        position: relative; font-size: 0; width: 32px; height: 32px; padding: 0; border-radius: 50%;
+        display: grid; place-items: center; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--muted); cursor: pointer;
+    }
+    .tr-opts label input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+    .tr-opts label::before { content: ""; width: 17px; height: 17px; background: currentColor; -webkit-mask: var(--ic) center / contain no-repeat; mask: var(--ic) center / contain no-repeat; }
+    .tr-opts label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hi); }
+    .tr-loop { --ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 4l3 3-3 3M20 7H8a4 4 0 0 0-4 4M7 20l-3-3 3-3M4 17h12a4 4 0 0 0 4-4'/%3E%3C/svg%3E"); }
+    .tr-countin:nth-of-type(2) { --ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 3h6l3 18H6zM12 17l4-9'/%3E%3C/svg%3E"); }
+    .tr-countin:nth-of-type(3) { --ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='3.5' width='6' height='10.5' rx='3'/%3E%3Cpath d='M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.8M8.8 20.8h6.4'/%3E%3C/svg%3E"); }
+
+    /* ---------- FX rack and Reference: bottom sheets above the transport ---------- */
+    .fx-rack {
+        position: fixed; left: 0; right: 0; bottom: var(--transport-h); z-index: 60;
+        margin: 0; max-height: 52vh; border-radius: 16px 16px 0 0; border-bottom: 0;
+        box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.55);
+    }
+    .fx-rack::before { content: ""; display: block; width: 36px; height: 4px; margin: 6px auto 0; border-radius: 2px; background: var(--line-strong); flex: none; }
+    .fx-head { padding: 6px 10px 4px; gap: 6px; }
+    .fx-sel { font-size: 12px; }
+    .fx-range { font-size: 11.5px; }
+    .fx-tabs { padding: 0 8px; }
+    .fx-tabs button { padding: 7px 10px; font-size: 12.5px; }
+    .fx-pvbar { padding: 6px 10px; gap: 6px 8px; }
+    .fx-btn { padding: 6px 10px; font-size: 12px; border-radius: 9px; }
+    .fx-seg button { padding: 5px 10px; font-size: 12px; }
+    .fx-body { padding: 8px 10px; }
+    .fx-foot { padding: 6px 10px; gap: 6px; }
+    .fx-chain { grid-template-columns: 1fr; gap: 8px; }
+    .fx-card { padding: 8px 10px 10px; }
+    .fx-card-t strong { font-size: 13px; }
+    .fx-blurb { font-size: 11.5px; margin: 6px 0 0; }
+    .fx-p { grid-template-columns: minmax(78px, 34%) 1fr 52px; font-size: 12px; gap: 6px; }
+    .fx-addrow select { font-size: 12px; padding: 6px 8px; }
+    .fx-status { display: none; }
+    .fx-lead, .fx-tip { font-size: 12px; }
+    .fx-style small { display: none; }
+    .rf-src-main { padding: 8px 10px; font-size: 12.5px; }
+    .rf-strip { height: 52px; }
+    .rf-tone { height: 140px; }
+    /* keep room above the sheet so clips can still be selected */
+    #studio-lanes { padding-bottom: 8px; }
+
+    /* ---------- Pipeline on a phone ---------- */
+    .pipeline-progress { display: none; }                  /* the step rail already says where you are */
+    .step-rail { padding-top: 6px; }
+    .step-rail-item { font-size: 11px; }
+    #app-container section, #app-container .card, .step-card { padding-left: 16px; padding-right: 16px; }
+    #app-container h2 { font-size: 22px; line-height: 1.15; }
+    #app-container h3 { font-size: 16px; }
+    .upload-card, .drop-zone { padding: 12px; }
+    .primary-button { min-height: 44px; font-size: 15px; }
+    .pipeline-sticky-cta { padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); }
+    .pipeline-sticky-cta #sticky-cta-label { display: none; }
+
+    /* ---------- phone fixes, round 2 ---------- */
+    /* transport toggles: perfectly centred icons, smaller scrub handle */
+    .tr-opts label { display: flex; align-items: center; justify-content: center; }
+    .tr-opts label::before { flex: none; }
+    #tr-scrub { height: 22px; }
+    #tr-scrub::-webkit-slider-thumb { width: 16px; height: 16px; }
+    #tr-scrub::-moz-range-thumb { width: 16px; height: 16px; }
+
+    /* panel header on one line */
+    .fx-head { flex-wrap: nowrap; align-items: center; }
+    .fx-sel { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fx-sel .fx-chip, .rf-panel .fx-head .fx-hint { display: none; }
+    .fx-head-btns { flex: none; gap: 6px; }
+    .fx-x { width: 28px; height: 28px; display: inline-grid; place-items: center; padding: 0; }
+    .fx-seg button { padding: 4px 10px; }
+    .fx-rack { max-height: 56vh; }
+
+    /* tools row: two selects side by side, whole-clip as an icon */
+    .fx-addrow { flex-wrap: nowrap; gap: 6px; }
+    .fx-addrow select { flex: 1 1 0; min-width: 0; }
+    #fx-whole { flex: none; padding: 6px 9px; }
+    #fx-whole .btn-label, #fx-undo .btn-label, #fx-revert .btn-label { display: none; }
+    .fx-foot { flex-wrap: nowrap; }
+    .fx-foot .fx-apply { flex: 1 1 auto; justify-content: center; }
+    .fx-foot .fx-btn { display: inline-flex; align-items: center; gap: 6px; justify-content: center; }
+    .fx-pvbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .fx-pvbar > * { flex: none; }
+
+    /* the pitch note view comes first, controls underneath */
+    #fx-body { display: flex; flex-direction: column; }
+    #fx-body .fx-pitch-wrap { order: -1; margin-bottom: 8px; }
+    #fx-body .fx-pitch-top { order: 1; gap: 8px; margin-bottom: 4px; }
+    #fx-body .fx-pitch-top > .fx-chip { order: -1; }
+    .fx-p-inline { grid-template-columns: auto minmax(90px, 1fr) 40px; }
+    .fx-p-inline > span:first-child { max-width: 96px; font-size: 11px; line-height: 1.2; }
+
+    /* reference panel */
+    .rf-name-input { font-size: 12px; height: 34px; padding: 0 8px; min-width: 120px; }
+    .rf-list { gap: 5px; margin-bottom: 8px; }
+
+    /* lane controls inside the "more" menu fit the narrow head */
+    .studio-lane.is-open .lane-level-wrap { min-width: 0; }
+    .studio-lane.is-open .lane-level-select, .studio-lane.is-open .lane-harmony-select { width: 100%; max-width: 100%; min-width: 0; }
+    .studio-lane.is-open .lane-level-label { font-size: 10px; }
+    .studio-lane.is-open .lane-auto-hint { font-size: 10px; line-height: 1.3; }
+
+    /* volume automation row: a compact icon grid */
+    .studio-auto-row { min-height: 100px; }
+    .studio-auto-row .auto-head { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px; }
+    .auto-meta { width: 100%; flex-direction: row; align-items: baseline; gap: 6px; }
+    .auto-meta strong { font-size: 12px; }
+    .auto-meta small { display: none; }
+    .auto-btns { gap: 4px; width: 100%; }
+    .auto-btns button, .auto-snap {
+        width: 28px; height: 28px; padding: 0; border-radius: 8px; display: inline-grid; place-items: center;
+        border: 1px solid var(--line-strong); background: var(--surface-2);
+    }
+    .auto-btns .btn-label, .auto-snap .btn-label { display: none; }
+    .auto-snap { position: relative; color: var(--muted); }
+    .auto-snap input { position: absolute; inset: 0; opacity: 0; margin: 0; }
+    .auto-snap:has(input:checked) { color: var(--accent-hi); border-color: var(--accent); background: var(--accent-soft); }
+    .auto-track, .auto-canvas { height: 100px; }
+
+    #fx-body > * { flex: none; }
+    .fx-styles { grid-template-columns: repeat(3, 1fr); }
+    .fx-style { padding: 8px 10px; }
+    .studio-lane.is-open .lane-btns { flex-wrap: wrap; }
+    .auto-btns { gap: 3px; }
+    .auto-btns button, .auto-snap { width: 26px; height: 26px; }
+    /* sheet parts keep their height; only the body scrolls */
+    .fx-head, .fx-tabs, .fx-pvbar, .fx-foot { flex: none; }
+    .fx-pvbar { min-height: 46px; align-items: center; }
+    .fx-pvbar .fx-btn { white-space: nowrap; }
+
+    /* plugin card header on one line */
+    .fx-card-h { flex-wrap: nowrap; gap: 6px; }
+    .fx-card-t { flex: 1 1 0; min-width: 0; }
+    .fx-card-t strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+    .fx-card-t small { display: none; }
+    .fx-preset { flex: none; width: 88px; font-size: 11px; padding: 4px 4px; }
+    .fx-card-b { flex: none; gap: 2px; }
+    .fx-card-b button { width: 24px; height: 24px; display: inline-grid; place-items: center; padding: 0; }
+    .fx-pow { width: 26px; height: 26px; display: inline-grid; place-items: center; padding: 0; flex: none; }
+
+    /* ---------- Beat Lab: never wider than the screen ---------- */
+    .beatlab-layout { width: 100%; max-width: 100vw; min-width: 0; box-sizing: border-box; padding: 0.75rem 0.75rem 3rem; gap: 0.75rem; }
+    .beatlab-layout > * { min-width: 0; max-width: 100%; }
+    .beatlab-hero { padding: 1rem; }
+    .beatlab-title { font-size: 1.5rem; }
+    .beatlab-lead { font-size: 0.9rem; }
+    .beatlab-hero-actions { flex-wrap: wrap; flex-shrink: 1; width: 100%; }
+    .beatlab-hero-actions > * { flex: 1 1 40%; min-width: 0; }
+    .beatlab-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; align-items: end; }
+    .beatlab-toolbar .field, .beatlab-toolbar select, .beatlab-toolbar input { min-width: 0; width: 100%; box-sizing: border-box; }
+    .panel-card { padding: 0.9rem; border-radius: 12px; }
+    .beatlab-row { grid-template-columns: minmax(0, 1fr); }
+    .beatlab-row > * { min-width: 0; }
+    .beatlab-controls input[type="range"] { min-width: 0; width: 100%; }
+    .beatlab-controls .slider { flex-wrap: nowrap; min-width: 0; }
+
+    /* ---------- Pipeline options a little tighter ---------- */
+    .mix-option { margin-bottom: 12px; }
+    .mix-option label { font-size: 13px; }
+    .mix-option select { min-height: 42px; font-size: 14px; }
+    .mix-option-note { font-size: 11.5px; }
+}
+
+/* very small phones */
+@media (max-width: 380px) {
+    .mode-btn:not(.is-active) .mode-label { display: none; }
+    .studio-tool-btn { min-width: 36px; padding: 0 8px; }
+    .tr-opts label { width: 28px; height: 28px; }
+}
+
+/* the red record dot and the clipping warning inside the live recording tag */
+.rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--rec); vertical-align: 0; margin-right: 2px; animation: recBlink 1s steps(2, jump-none) infinite; }
+.live-clip { color: #fff; margin-left: 4px; }
+@keyframes recBlink { 0% { opacity: 1; } 50% { opacity: 0.35; } }

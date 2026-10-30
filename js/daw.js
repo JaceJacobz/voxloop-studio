@@ -492,8 +492,8 @@
                 harmHtml +
                 "</div>" +
                 '<div class="lane-btns">' +
-                '<button type="button" class="lane-btn' + (lane.armed ? " is-on" : "") + '" data-act="arm" title="Arm for record">R</button>' +
-                '<button type="button" class="lane-btn" data-act="del" title="Delete lane">×</button>' +
+                '<button type="button" class="lane-btn' + (lane.armed ? " is-on" : "") + '" data-act="arm" title="Arm for record" aria-label="Arm for record">' + (window.VLI ? VLI("record", 14) : "R") + '</button>' +
+                '<button type="button" class="lane-btn" data-act="del" title="Delete lane" aria-label="Delete lane">' + (window.VLI ? VLI("trash", 15) : "×") + '</button>' +
                 "</div></div>" +
                 '<div class="studio-lane-track"></div>';
 

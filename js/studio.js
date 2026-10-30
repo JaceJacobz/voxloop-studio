@@ -1061,7 +1061,7 @@ function createStudioEngine() {
 
         const o = Object.assign({
             depthDb: 7, minDepthDb: 1.5, snrFloorDb: 14, snrSlope: 0.45,
-            holdSec: 0.15, preOpenSec: 0.05, minGapSec: 0.25, attackSec: 0.006, releaseSec: 0.15
+            holdSec: 0.25, preOpenSec: 0.05, minGapSec: 0.25, attackSec: 0.006, releaseSec: 0.35
         }, options || {});
         const n = channels[0].length, hop = Math.max(1, Math.round(0.01 * sr)), frames = Math.ceil(n / hop);
         const none = { channels, applied: false };
@@ -1647,7 +1647,7 @@ function createStudioEngine() {
         }
 
         if (o.gate !== false) {
-            const g = phraseGate(ch, sr);
+            const g = phraseGate(ch, sr, o.gateOpts);
             ch = g.channels;
             report.push(g.applied
                 ? `Quieted gaps between phrases by ${g.depthDb} dB (cuts hiss/static in the silences)` + (g.depthDb < 6 ? ", gently, because the take sits fairly close to the room noise" : "") + "."
@@ -2467,5 +2467,34 @@ if (typeof window !== "undefined") {
         return { buffer: out, report: r.report, analysis: r.analysis };
     }
 
-    window.VocalVaultStudio = { engine, prepareVocal, finishVocal, renderFx, master, enhanceBeat };
+    // Ambient bloom: a long, dark, wide wash that sits back while the voice is singing and SWELLS after each line, so the room
+    // keeps breathing between phrases instead of dropping to dry silence the instant the singer stops.
+    async function renderBloom(leveled, sr, options) {
+
+        const o = Object.assign({ rt60: 2.6, belowDb: 30, duckDepth: 0.65, swellSec: 0.5, lp: 4500, hp: 350 }, options || {});
+        const n = leveled[0].length, right = leveled[1] || leveled[0];
+        const mono = new Float32Array(n);
+        for (let i = 0; i < n; i++) mono[i] = 0.5 * (leveled[0][i] + right[i]);
+
+        const duck = engine.duckCurve(mono, sr, { depth: o.duckDepth, attackSec: 0.03, releaseSec: o.swellSec });
+        const send = engine.runCascade(mono, [engine.design.highpass(o.hp, sr), engine.design.lowpass(o.lp, sr)]);
+        const total = n + Math.round(Math.min(o.rt60, 5) * sr);
+        const padded = new Float32Array(total); padded.set(send);
+
+        const ctx = new OfflineAudioContext(2, total, sr);
+        const src = ctx.createBufferSource();
+        src.buffer = toBuffer([padded], sr);
+        const conv = ctx.createConvolver();
+        conv.normalize = false;
+        conv.buffer = toBuffer(engine.makeReverbIR(sr, { rt60: o.rt60 }), sr);
+        src.connect(conv); conv.connect(ctx.destination); src.start();
+
+        const rendered = await ctx.startRendering();
+        const wet = [Float32Array.from(rendered.getChannelData(0)), Float32Array.from(rendered.getChannelData(1))];
+        const lv = engine.levelBelowVocal(wet, mono, sr, o.belowDb);
+        const stem = engine.applyDuck(lv.channels, duck, sr).map((x) => x.subarray(0, n));
+        return { channels: stem, gainDb: lv.gainDb };
+    }
+
+    window.VocalVaultStudio = { engine, prepareVocal, finishVocal, renderFx, renderBloom, master, enhanceBeat };
 }

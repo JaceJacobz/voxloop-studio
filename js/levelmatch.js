@@ -727,7 +727,7 @@ if (typeof window !== "undefined") {
                 if (!p.events.length) list.innerHTML = "<li><span>The fader barely moves: the beat and the vocal stay at steady levels.</span></li>";
                 for (const e of p.events) {
                     const li = document.createElement("li");
-                    li.innerHTML = `<b>${fmt(e.startSec)} – ${fmt(e.endSec)}</b><em class="${e.peakDb > 0 ? "up" : "down"}">${e.peakDb > 0 ? "▲" : "▼"} ${sign(e.peakDb)} dB</em><span>${e.peakDb > 0 ? "Vocal raised" : "Vocal lowered"} because ${e.reason}.</span>`;
+                    li.innerHTML = `<b>${fmt(e.startSec)} – ${fmt(e.endSec)}</b><em class="${e.peakDb > 0 ? "up" : "down"}">${(window.VLI ? VLI(e.peakDb > 0 ? "arrowUp" : "arrowDown", 11) : "")} ${sign(e.peakDb)} dB</em><span>${e.peakDb > 0 ? "Vocal raised" : "Vocal lowered"} because ${e.reason}.</span>`;
                     list.appendChild(li);
                 }
             }

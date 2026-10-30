@@ -646,10 +646,10 @@ function updatePitchPlayButton() {
 
     if (!pitchPlayBtn) return;
 
-    pitchPlayBtn.textContent =
+    pitchPlayBtn.innerHTML =
         pitchPlaying
-            ? "⏸ Pause"
-            : "▶ Play";
+            ? VLI("pause", 16) + " Pause"
+            : VLI("play", 16) + " Play";
 }
 
 

@@ -74,8 +74,9 @@ Rewritten: `js/fxbrain.js`. Edited: `js/fxrack.js` (vibe line, "I hear" line, in
 - Every setting is now computed: tune speed, de-ess strength, EQ (target curve + what the beat is crowding), compressor timing (tempo) and makeup, reverb size / amount / colour, widths.
 - Extras are placed from the vocal's pauses and the beat's big moments, with echo time fitted to each pause.
 
-## Step 11 — Resonance (shimmer layer)
-New: `js/resonance.js` (loaded after fxrack-dsp.js). Edited: `js/fxrack-dsp.js` (VL Resonance plugin, harmonize task), `js/fxbrain.js` + `js/fxrack.js` (Studio Auto option), `js/automix-vv.js` + `js/script.js` + `index.html` (Pipeline option), `css/ui-polish.css`.
-- A quiet layer under the lead: a natural double (~15–35 ms, drifting a few cents), one soft echo that never repeats, and a ghost harmony (octave, or a third/fifth in the key).
-- Every number is calculated from the beat (tempo, fullness, brightness, energy, genre) and the vocal (sung/rapped, range, take quality). Auto can decide not to add it (rapped vocal, very full beat, rough take) and says why.
-- Pipeline: Mix panel → Resonance (shimmer): Off (default) / Auto / Subtle / Natural / Bold. Studio: the VL Resonance plugin, and "Shimmer layer" under Auto's optional extras.
+## Step 12 — Phone layout, icons, and the ambience fix
+New: `js/icons.js` (icon set, loaded first), `css/mobile.css` (loaded last). Edited: many small spots (emoji and symbol icons replaced with SVG icons), `index.html`, `js/studioui.js`, `js/automix-vv.js`, `js/studio.js`, `js/mixbrain.js`, `js/fxrack.js`, `js/automation.js`, `js/reference.js`.
+- Phone: Studio is a slim mobile-DAW layout (icon toolbar strip, compact lanes with a "more" menu, one-row transport, FX Rack / Reference as bottom sheets). Beat Lab no longer overflows the screen. The Pipeline's bottom "Continue" bar hides while the in-page Continue button is visible, so it never shows twice.
+- No emoji anywhere: every icon is inline SVG (`VLI("name")`).
+- Mixing and mastering: the quiet-gap cleaner never touches a stretch where the beat is playing and lets go slowly; the phrase gate is shallower and slower (shaped by the beat); new calculated "Ambience between lines" option (default Auto) swells a soft wash after each line so the song keeps breathing when the singer stops.
+- Fixed: the Auto tab's panel was painted solid violet (a class-name clash).

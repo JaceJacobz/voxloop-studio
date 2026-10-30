@@ -240,6 +240,39 @@
         return r2(clamp(tail * Math.sqrt(g.decay / 1.6) * (0.85 + 0.3 * ctx.vibe.space), 0.5, 2.2));
     }
 
+    // ------------------------------------------------------------------ 6c. the gate between phrases: never audible as an on/off step
+    // A gate that is too deep or too fast is the thing that makes a take sound like it "came with noise": the room is there
+    // while you sing and vanishes the instant you stop. So it is shallow on a sparse beat (where there is nothing to hide
+    // behind), only deep when the beat is busy, and it lets go slowly, in time with the music.
+    function gate(ctx) {
+        const { vibe: B, prof, beatMs } = ctx;
+        const depthDb = r1(clamp(lerp(2.5, 7, B.busy) + (prof.quality < 0.6 ? 1.5 : 0), 2, 7));
+        const releaseSec = r2(clamp(beatMs * 0.6 / 1000, 0.3, 0.7));
+        const holdSec = 0.25;
+        return { opts: { depthDb, releaseSec, holdSec }, note: "The gate between lines is limited to " + depthDb + " dB and lets go over about " + Math.round(releaseSec * 1000) + " ms" + (B.busy < 0.4 ? " (kept shallow because the beat is sparse and a deeper gate would be heard)" : B.busy > 0.65 ? " (a bit deeper because the busy beat hides it)" : "") + ", so the room between lines isn't switched off." };
+    }
+
+    // ------------------------------------------------------------------ 6d. ambient bloom: the "ocean" that keeps the song breathing after the singer stops
+    function bloom(ctx, mode) {
+        mode = mode || "auto";
+        const { vibe: B, prof, genreId, beatMs, bpm, meas } = ctx;
+        const G = { rnb: 1.2, afrobeats: 1.0, amapiano: 1.1, universal: 0.9, trap: 0.6, rap: 0.4 }[genreId];
+        const g = G != null ? G : 0.9;
+        if (mode === "auto") {
+            if (g < 0.5 && B.busy > 0.5) return { use: false, notes: ["Ambient bloom left off: this style is kept dry and tight."] };
+            if (B.space < 0.15) return { use: false, notes: ["Ambient bloom left off: the beat is so full that a wash would just blur it."] };
+        }
+        const inten = { subtle: 0.6, natural: 1, rich: 1.6, auto: 1 }[mode] || 1;
+        const wetTake = meas && meas.tailDb != null && meas.tailDb > -24;                 // the take already has its own room sound
+        const f = inten * g * (0.5 + 1.0 * B.space) * (0.7 + 0.3 * prof.quality) * (wetTake ? 0.6 : 1);
+        const belowDb = r1(clamp(22 - 20 * Math.log10(f) + 3 * B.busy, 14, 34));
+        const rt60 = r1(clamp(beatMs * 4 / 1000 * 0.9 * Math.sqrt(clamp(g, 0.8, 1.2)), 1.8, 4.2));      // about a bar of tail
+        const swellSec = r2(clamp(beatMs * 0.9 / 1000, 0.35, 0.8));
+        const lp = Math.round(lerp(5200, 3600, B.bright));
+        return { use: true, options: { rt60, belowDb, duckDepth: 0.65, swellSec, lp, hp: 350 },
+            notes: ["Ambient bloom (" + (mode === "auto" ? "calculated for this song" : mode) + "): a " + rt60 + " s dark wash " + belowDb + " dB under the voice that sits back while you sing and swells up over " + Math.round(swellSec * 1000) + " ms after each line, so the room keeps breathing instead of going dead the instant you stop" + (B.busy > 0.62 ? " (pulled back because the beat is full)" : B.space > 0.7 ? " (a little fuller because the beat has room)" : "") + (wetTake ? "; reduced because the take already has room sound" : "") + "."] };
+    }
+
     // ------------------------------------------------------------------ 7. beat repair caps: a noisy take must not get a brighter beat
     function enhanceCaps(ctx) {
         const { prof, vibe } = ctx, q = prof.quality;
@@ -260,5 +293,5 @@
         return { retuneMs, flatten, strength, selectiveCents: Math.round(lerp(30, 18, raw)), selectiveSoftCents: Math.round(lerp(60, 44, raw)), notes };
     }
 
-    root.VLMixBrain = { ready, profile, chain, adaptRecipe, harshness, levels, master, echo, reverbTail, enhanceCaps, tune, IDEAL_LUFS };
+    root.VLMixBrain = { ready, profile, chain, adaptRecipe, harshness, levels, master, echo, reverbTail, gate, bloom, enhanceCaps, tune, IDEAL_LUFS };
 })(typeof window !== "undefined" ? window : globalThis);

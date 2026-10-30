@@ -46,7 +46,7 @@
         const cv = document.createElement("canvas");
         cv.className = "live-wave"; cv.height = H; cv.width = 64;
         const tag = document.createElement("span");
-        tag.className = "live-tag"; tag.textContent = "● REC";
+        tag.className = "live-tag"; tag.innerHTML = '<i class="rec-dot"></i> REC';
         el.appendChild(cv); el.appendChild(tag);
         track.appendChild(el);
         S.el = el; S.cv = cv; S.tag = tag;
@@ -80,7 +80,7 @@
         // the canvas is allocated in chunks, so scale it until the drawn bars exactly fill the clip
         cv.style.height = "100%";
         cv.style.width = (cv.width / w * 100) + "%";
-        S.tag.textContent = "● REC  " + fmtT(rel) + (S.clips ? "   ⚠ clipping" : "");
+        S.tag.innerHTML = '<i class="rec-dot"></i> REC ' + fmtT(rel) + (S.clips ? ' <span class="live-clip">' + (window.VLI ? VLI("warning", 12) : "") + " clipping</span>" : "");
         S.tag.classList.toggle("is-clip", !!S.clips);
     }
 
@@ -184,7 +184,30 @@
         const x = m ? parseFloat(m[1]) : 0;
         l.style.transform = "translateX(" + (headW + x) + "px)";
     }
+    // On a phone the lane head only shows the essentials (name, record arm, more). "More" opens the rest.
+    const openLanes = new Set();
+    function laneMore() {
+        document.querySelectorAll(".studio-lane[data-lane-id]").forEach((row) => {
+            const id = row.dataset.laneId, btns = row.querySelector(".lane-btns");
+            if (!btns) return;
+            let b = btns.querySelector('[data-act="more"]');
+            if (!b) {
+                b = document.createElement("button");
+                b.type = "button"; b.className = "lane-btn lane-more"; b.dataset.act = "more";
+                b.title = "More lane controls"; b.setAttribute("aria-label", "More lane controls");
+                b.innerHTML = window.VLI ? VLI("dots", 16) : "…";
+                b.addEventListener("click", () => {
+                    if (openLanes.has(id)) openLanes.delete(id); else openLanes.add(id);
+                    row.classList.toggle("is-open", openLanes.has(id)); b.classList.toggle("is-on", openLanes.has(id));
+                });
+                btns.appendChild(b);
+            }
+            row.classList.toggle("is-open", openLanes.has(id)); b.classList.toggle("is-on", openLanes.has(id));
+        });
+    }
+
     function afterRender() {
+        laneMore();
         const host = $("#studio-lanes"); if (!host) return;
         const head = host.querySelector(".studio-lane-head");
         headW = head ? head.offsetWidth : 0;

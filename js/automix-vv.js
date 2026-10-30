@@ -776,6 +776,7 @@ async function processAutomix(state, options) {
     // "Auto" (the default) matches the harshness control to this voice and this beat; the other choices stay exactly as they were
     harshAuto = (brain && (opt.harshness === "auto" || opt.harshness == null)) ? MB.harshness(brain) : null;
     if (harshAuto) lines.push(harshAuto.note);
+    if (brain) { const gt = MB.gate(brain); prepOpts.gateOpts = gt.opts; lines.push(gt.note); }
     prepOpts.calm = harshAuto ? harshAuto.calm : (CALM[opt.harshness] !== undefined ? CALM[opt.harshness] : CALM.standard);
     if (recipe) prepOpts.eq = recipe.eq;
     if (studioStack) prepOpts.phraseEven = false;      // it would lift the soft lanes and lower the lead toward each other
@@ -1107,6 +1108,24 @@ async function processAutomix(state, options) {
         }
       }
 
+      // Ambient bloom: keeps the room breathing after each line (calculated; "Off" skips it)
+      const bloomMode = opt.ambience || "auto";
+      if (bloomMode !== "off" && brain && Studio.renderBloom) {
+        const bp = MB.bloom(brain, bloomMode);
+        lines.push(...bp.notes);
+        if (bp.use) {
+          try {
+            setStatus("Adding the room between the lines…");
+            await nextFrame();
+            const bl = await Studio.renderBloom(placed, sr, bp.options);
+            stems.push(bl.channels);
+          } catch (error) {
+            console.error(error);
+            lines.push("Skipped the ambient bloom (something went wrong building it).");
+          }
+        }
+      }
+
       const dip = Fx.duckBeatMid(beatChannels, Fx.toMono(placed), sr, { depthDb: space.midDuckDb });
       beatForMix = dip.channels;
       lines.push(`Dipped the beat's mids by up to ${Number(dip.depthDb).toFixed(1)} dB around 2 kHz while you sing, so the voice sits in the beat instead of on top of it. This dip leaves the low end alone.`);
@@ -1233,6 +1252,23 @@ async function processAutomix(state, options) {
       }
       rms[f] = Math.sqrt(e / Math.max(1, cnt));
     }
+    // The cleaner is only for stretches where the BEAT is silent too (before the song starts, after it ends, a full stop).
+    // Where the beat is playing, the quiet between lines is the song's room and reverb tail: it is left alone, so the
+    // ambience doesn't vanish the moment the singer stops.
+    const beatRmsF = new Float32Array(frames);
+    {
+      const bch = [];
+      for (let c = 0; c < Math.min(2, beat.numberOfChannels); c++) bch.push(beat.getChannelData(c));
+      for (let f = 0; f < frames; f++) {
+        const a = f * hop, b = Math.min(n, a + hop, bch[0].length);
+        let e = 0, cnt = 0;
+        for (let i = a; i < b; i++) for (const ch of bch) { e += ch[i] * ch[i]; cnt++; }
+        beatRmsF[f] = cnt ? Math.sqrt(e / cnt) : 0;
+      }
+    }
+    const beatSorted = Float32Array.from(beatRmsF).sort();
+    const beatP50 = beatSorted[Math.floor(frames * 0.5)] || 0;
+    const beatSilent = Math.max(beatP50 * 0.02, 3e-5);
     const sorted = Float32Array.from(rms).sort();
     const p05 = sorted[Math.max(0, Math.floor(frames * 0.05))] || 0;
     const p50 = sorted[Math.max(0, Math.floor(frames * 0.5))] || 0;
@@ -1241,12 +1277,12 @@ async function processAutomix(state, options) {
     const thr = Math.max(p05 * 2.2, p50 * 0.025, p90 * 0.008, 1e-7);
     const floorG = 0.06; // ~-24 dB residual instead of -9 dB (was 0.35)
     const openA = 1 - Math.exp(-hop / (0.008 * sr));  // open quick for next line
-    const closeA = 1 - Math.exp(-hop / (0.14 * sr)); // close slow — no grit
+    const closeA = 1 - Math.exp(-hop / (0.40 * sr)); // close slowly: nothing may be heard to switch off
     let g = 1;
     const gain = new Float32Array(n);
     for (let f = 0; f < frames; f++) {
       let want = 1;
-      if (rms[f] < thr) {
+      if (rms[f] < thr && beatRmsF[f] < beatSilent) {
         const ratio = Math.min(1, rms[f] / thr);
         // Smooth curve into the floor (not a hard step)
         want = floorG + (1 - floorG) * (ratio * ratio);

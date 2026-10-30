@@ -557,7 +557,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         preview.frame = requestAnimationFrame(animatePlayhead);
 
-        previewAlignmentButton.textContent = "■ Stop Preview";
+        previewAlignmentButton.innerHTML = VLI("stop", 16) + " Stop Preview";
 
     }
 
@@ -610,7 +610,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // The line goes back to where playback began.
         drawPlayhead(playheadTime);
 
-        previewAlignmentButton.textContent = "▶ Play Preview";
+        previewAlignmentButton.innerHTML = VLI("play", 16) + " Play Preview";
 
     }
 
@@ -2230,6 +2230,9 @@ function showVocalTempo() {
                 const resonance = document.getElementById("mix-resonance")
                     ? document.getElementById("mix-resonance").value
                     : "off";
+                const ambience = document.getElementById("mix-ambience")
+                    ? document.getElementById("mix-ambience").value
+                    : "auto";
                 if (!window.VocalVaultAutomix || !window.VocalVaultAutomix.process) {
                     throw new Error("Automix engine not loaded (check automix.js / presets.js script tags).");
                 }
@@ -2243,7 +2246,8 @@ function showVocalTempo() {
                     balanceMode,
                     fillInstruments,
                     harshness,
-                    resonance
+                    resonance,
+                    ambience
                 });
 
                 if (autoMixStatus) autoMixStatus.textContent = "Automix complete!";

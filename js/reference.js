@@ -289,7 +289,7 @@
         const box = $(".studio-toolbar-actions");
         if (!box || $("#rf-open-btn")) return;
         const b = document.createElement("button");
-        b.type = "button"; b.id = "rf-open-btn"; b.className = "secondary-button studio-tool-btn"; b.textContent = "🎯 Reference";
+        b.type = "button"; b.id = "rf-open-btn"; b.className = "secondary-button studio-tool-btn"; b.innerHTML = VLI("target", 18) + '<span class="btn-label">Reference</span>'; b.setAttribute("aria-label", "Reference");
         b.title = "Compare your mix to a song you like, and to earlier versions of your mix";
         box.insertBefore(b, box.firstChild);
         b.addEventListener("click", () => { R.open ? closePanel() : openPanel(); });
@@ -328,24 +328,24 @@
             return '<div class="rf-src' + (on ? " is-on" : "") + '"><button type="button" class="rf-src-main" data-rf="src" data-id="' + x.id + '" aria-pressed="' + on + '">' +
                 '<span class="rf-dot rf-' + x.kind + '"></span><span class="rf-name">' + esc(x.name) + (x.id === "mix" && stale ? ' <em class="rf-stale">changed, tap Refresh</em>' : "") + "</span>" +
                 '<span class="rf-meta">' + x.lufs.toFixed(1) + " LUFS" + (x.id !== "mix" && R.match && a ? " · " + sgn(md) + " dB to match" : "") + "</span></button>" +
-                (x.kind !== "mix" ? '<button type="button" class="rf-del" data-rf="del" data-id="' + x.id + '" aria-label="Remove ' + esc(x.name) + '">✕</button>' : "") + "</div>";
+                (x.kind !== "mix" ? '<button type="button" class="rf-del" data-rf="del" data-id="' + x.id + '" aria-label="Remove ' + esc(x.name) + '">' + VLI("close", 14) + '</button>' : "") + "</div>";
         };
         const busy = R.busy ? '<span class="fx-busy">working…</span>' : "";
         let html =
             '<div class="fx-head"><div class="fx-sel"><strong>Reference &amp; versions</strong> <span class="fx-hint">Compare at equal loudness, like a pro.</span></div>' +
-            '<div class="fx-head-btns"><button type="button" class="fx-x" data-rf="close" aria-label="Close">✕</button></div></div>' +
+            '<div class="fx-head-btns"><button type="button" class="fx-x" data-rf="close" aria-label="Close">' + VLI("close", 16) + '</button></div></div>' +
             '<div class="fx-pvbar">' +
-            '<button type="button" class="fx-btn" data-rf="ref">📂 Load reference song</button><input type="file" id="rf-file" accept="audio/*" hidden>' +
-            '<button type="button" class="fx-btn" data-rf="save"' + (R.busy ? " disabled" : "") + '>💾 Save version</button>' +
+            '<button type="button" class="fx-btn" data-rf="ref">' + VLI("folder", 15) + ' Load reference song</button><input type="file" id="rf-file" accept="audio/*" hidden>' +
+            '<button type="button" class="fx-btn" data-rf="save"' + (R.busy ? " disabled" : "") + '>' + VLI("save", 15) + ' Save version</button>' +
             '<input type="text" id="rf-vname" class="rf-name-input" placeholder="Version note (optional)" maxlength="40">' +
-            '<button type="button" class="fx-btn fx-ghost" data-rf="refresh"' + (R.busy ? " disabled" : "") + '>↻ Refresh current mix</button>' + busy +
+            '<button type="button" class="fx-btn fx-ghost" data-rf="refresh"' + (R.busy ? " disabled" : "") + '>' + VLI("refresh", 15) + ' Refresh current mix</button>' + busy +
             '<span class="fx-status" id="rf-msg"></span></div><div class="fx-body">';
         if (!R.sources.length) {
             html += '<div class="fx-empty">Load a song you love as a <b>reference</b>, and press <b>Save version</b> whenever you reach a mix you might want to come back to. Then switch between them while they play, all at the same loudness.</div>';
         } else {
             html += '<div class="rf-list">' + R.sources.map(row).join("") + "</div>";
             if (s) {
-                html += '<div class="rf-player"><button type="button" class="fx-btn fx-play' + (R.playing ? " is-on" : "") + '" id="rf-play" data-rf="play">' + (R.playing ? "■ Pause" : "▶ Play") + "</button>" +
+                html += '<div class="rf-player"><button type="button" class="fx-btn fx-play' + (R.playing ? " is-on" : "") + '" id="rf-play" data-rf="play">' + (R.playing ? VLI("pause", 15) + " Pause" : VLI("play", 15) + " Play") + "</button>" +
                     '<label class="fx-chk"><input type="checkbox" id="rf-match"' + (R.match ? " checked" : "") + '> Match loudness</label>' +
                     '<span class="rf-time" id="rf-time">' + fmtT(pos()) + " / " + fmtT(s.buffer.duration) + "</span></div>" +
                     '<canvas id="rf-strip" width="900" height="64" class="rf-strip" aria-label="Click to jump to a spot"></canvas>' +
@@ -370,7 +370,7 @@
         });
         drawStrip(); drawTone();
     }
-    function renderTransport() { const b = $("#rf-play"); if (b) { b.textContent = R.playing ? "■ Pause" : "▶ Play"; b.classList.toggle("is-on", R.playing); } }
+    function renderTransport() { const b = $("#rf-play"); if (b) { b.innerHTML = R.playing ? VLI("pause", 15) + " Pause" : VLI("play", 15) + " Play"; b.classList.toggle("is-on", R.playing); } }
 
     // ------------------------------------------------------------------ boot
     function init() {
