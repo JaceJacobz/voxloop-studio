@@ -1851,29 +1851,54 @@ function createStudioEngine() {
             gains[i] = Math.pow(10, -gr / 20);
         }
 
-        return { channels: channels.map((x) => x.map((v, i) => v * gains[i])), thresholdDb: thr, maxReductionDb: maxGr };
+        // Apply in a single pass; reuse gains buffer only for the envelope
+        const out = channels.map((x) => {
+            const y = new Float32Array(n);
+            for (let i = 0; i < n; i++) y[i] = x[i] * gains[i];
+            return y;
+        });
+        return { channels: out, thresholdDb: thr, maxReductionDb: maxGr };
     }
 
     // Lookahead brickwall limiter. Offline, so the gain is already down
     // when the peak arrives; the result can never exceed the ceiling.
     // Longer release = less pumping / less “crushed mic” texture on vocals.
+    // Memory-conscious: optional preGain multiplies the input while computing
+    // the envelope so callers do not need a full scaled copy. Intermediate
+    // buffers are reused; output is written in place when possible.
     function limiter(channels, sr, ceilingDb, options) {
 
-        const o = Object.assign({ lookaheadSec: 0.008, releaseSec: 0.22 }, options || {});
+        const o = Object.assign({ lookaheadSec: 0.008, releaseSec: 0.22, preGain: 1 }, options || {});
         const ceil = Math.pow(10, ceilingDb / 20), n = channels[0].length, L = Math.max(2, Math.round(o.lookaheadSec * sr));
+        const pre = o.preGain;
 
-        // gain each sample needs on its own
+        // gain each sample needs on its own (after preGain)
         const need = new Float32Array(n);
         let any = false;
         for (let i = 0; i < n; i++) {
             let a = 0;
-            for (const x of channels) { const v = x[i] < 0 ? -x[i] : x[i]; if (v > a) a = v; }
+            for (const x of channels) {
+                let v = x[i] * pre;
+                if (v < 0) v = -v;
+                if (v > a) a = v;
+            }
             need[i] = a > ceil ? ceil / a : 1;
             if (need[i] < 1) any = true;
         }
-        if (!any) return { channels, maxReductionDb: 0 };
+        if (!any) {
+            // still apply preGain if any
+            if (pre !== 1) {
+                const out = channels.map((x) => {
+                    const y = new Float32Array(n);
+                    for (let i = 0; i < n; i++) y[i] = x[i] * pre;
+                    return y;
+                });
+                return { channels: out, maxReductionDb: 0 };
+            }
+            return { channels, maxReductionDb: 0 };
+        }
 
-        // m[j] = min(need[j .. j+L-1])  (sliding minimum)
+        // m[j] = min(need[j .. j+L-1])  (sliding minimum) — reuse need as workspace later
         const m = new Float32Array(n), dq = new Int32Array(n);
         let head = 0, tail = 0;
         for (let i = n - 1; i >= 0; i--) {
@@ -1883,28 +1908,29 @@ function createStudioEngine() {
             m[i] = need[dq[head]];
         }
 
-        // s[i] = average of m over the last L samples: reaches the needed gain
-        // exactly at the peak and never overshoots it.
-        const s = new Float32Array(n);
+        // s[i] = average of m over the last L samples — write into need to free m sooner
         let acc = 0;
         for (let i = 0; i < n; i++) {
             acc += m[i];
             if (i >= L) acc -= m[i - L];
             const count = Math.min(i + 1, L);
-            s[i] = (acc + (L - count)) / L;                 // before the start, the gain is 1
+            need[i] = (acc + (L - count)) / L;                 // before the start, the gain is 1
         }
+        // m and dq are no longer needed; let GC reclaim them after this function
 
         // release: recover slowly toward 1, never above s (so still no overshoot)
+        // apply gain + preGain directly into new (or in-place) channels
         const k = 1 - Math.exp(-1 / (o.releaseSec * sr));
         let g = 1, minG = 1;
-        const gain = new Float32Array(n);
+        const out = channels.map((x) => new Float32Array(n));
         for (let i = 0; i < n; i++) {
-            g = Math.min(s[i], g + k * (1 - g));
-            gain[i] = g;
+            g = Math.min(need[i], g + k * (1 - g));
             if (g < minG) minG = g;
+            const mul = g * pre;
+            for (let c = 0; c < channels.length; c++) out[c][i] = channels[c][i] * mul;
         }
 
-        return { channels: channels.map((x) => x.map((v, i) => v * gain[i])), maxReductionDb: -20 * Math.log10(minG) };
+        return { channels: out, maxReductionDb: -20 * Math.log10(minG) };
     }
 
     // True peak: 4x oversampling with a windowed sinc (catches the peaks
@@ -1984,7 +2010,8 @@ function createStudioEngine() {
         for (let it = 0; it < 6; it++) {
 
             const k = Math.pow(10, gainDb / 20);
-            const lim = limiter(ch.map((x) => x.map((v) => v * k)), sr, o.ceilingDb);
+            // Pass preGain so limiter does not force a full intermediate scaled copy
+            const lim = limiter(ch, sr, o.ceilingDb, { preGain: k });
 
             if (lim.maxReductionDb > limCap) {
                 gainDb -= (lim.maxReductionDb - limCap) + 0.3;
@@ -2010,13 +2037,11 @@ function createStudioEngine() {
         for (let it = 0; it < 3 && tp > o.ceilingDb + 0.05; it++) {
             const over = tp - o.ceilingDb;
             if ((best.limiterDb || 0) >= limCap * 0.85) {
-                // already near the cap: scale the whole mix down, no extra limiting
+                // already near the cap: scale the whole mix down in place, no extra limiting
                 const g = Math.pow(10, -(over + 0.1) / 20);
-                best.channels = best.channels.map((x) => {
-                    const y = new Float32Array(x.length);
-                    for (let i = 0; i < x.length; i++) y[i] = x[i] * g;
-                    return y;
-                });
+                for (const x of best.channels) {
+                    for (let i = 0; i < x.length; i++) x[i] *= g;
+                }
             } else {
                 const lim = limiter(best.channels, sr, o.ceilingDb - over - 0.05);
                 best.channels = lim.channels;
@@ -2024,15 +2049,13 @@ function createStudioEngine() {
             }
             tp = truePeakDb(best.channels);
         }
-        // Final safety: if limiting still over cap, scale down to free headroom
+        // Final safety: if limiting still over cap, scale down in place to free headroom
         if ((best.limiterDb || 0) > limCap + 0.15) {
             const pull = (best.limiterDb - limCap) + 0.2;
             const g = Math.pow(10, -pull / 20);
-            best.channels = best.channels.map((x) => {
-                const y = new Float32Array(x.length);
-                for (let i = 0; i < x.length; i++) y[i] = x[i] * g;
-                return y;
-            });
+            for (const x of best.channels) {
+                for (let i = 0; i < x.length; i++) x[i] *= g;
+            }
             best.limiterDb = limCap;
             tp = truePeakDb(best.channels);
         }
