@@ -301,25 +301,28 @@
     // ---- Tune (auto pitch correction) ----
     P.tune = {
         id: "tune", name: "VL Tune", cat: "Pitch", icon: "p-tune",
-        blurb: "Snaps sung notes to the song's key so nothing sounds off. Low retune speed = fast, obvious tuning.",
+        blurb: "Pulls off-key notes into the song's key. Notes that are already close are left alone (Flex-Tune), so the voice keeps its own movement. Low retune speed + Flex-Tune 0 = the hard, obvious Auto-Tune sound.",
         likeA: "Auto-Tune style",
         easy: ["amount", "speed", "key", "scale"],
         params: [
             R("amount", "Mix", 0, 100, 1, 100, "%", { easyLabel: "How much tuning" }),
-            R("speed", "Retune speed", 1, 300, 1, 25, " ms", { easyLabel: "Natural ← → Robotic", invert: true }),
+            R("speed", "Retune speed", 1, 300, 1, 60, " ms", { easyLabel: "Natural ← → Robotic", invert: true }),
             S("key", "Key", ["auto"].concat(NOTE_NAMES), "auto", { easyLabel: "Song key" }),
             S("scale", "Scale", SCALE_OPTS, "major", { easyLabel: "Major or minor" }),
-            R("flex", "Flex-Tune", 0, 100, 1, 0, "", {}),
-            R("vibrato", "Natural vibrato kept", 0, 1.5, 0.05, 0.5, "", {}),
-            R("humanize", "Humanize", 0, 100, 1, 0, "", {}),
+            // Flex-Tune 0 snaps EVERY note onto the grid (that is the Voloco / T-Pain sound). Above 0, notes closer than
+            // about 0.6 x Flex cents to a scale note are left exactly as sung. 40 = leave anything within ~24 cents.
+            R("flex", "Flex-Tune", 0, 100, 1, 40, "", {}),
+            // This ADDS a synthetic vibrato to held straight notes. It does not "keep" the singer's own (that is Humanize).
+            R("vibrato", "Added vibrato (straight notes)", 0, 1.5, 0.05, 0, "", {}),
+            R("humanize", "Humanize", 0, 100, 1, 40, "", {}),
             R("transpose", "Transpose", -12, 12, 1, 0, " st", {}),
             R("detune", "Detune (A = Hz)", 420, 460, 0.5, 440, " Hz", {})
         ],
         presets: {
             "Default": {},
-            "Natural": { speed: 70, humanize: 60, flex: 25, vibrato: 0.9 },
-            "Modern pop": { speed: 25 },
-            "Hard (T-Pain)": { speed: 3, humanize: 0, flex: 0, vibrato: 0.2 }
+            "Natural": { speed: 80, humanize: 60, flex: 45, vibrato: 0 },
+            "Modern pop": { speed: 30, humanize: 25, flex: 25, vibrato: 0 },
+            "Hard (T-Pain)": { speed: 3, humanize: 0, flex: 0, vibrato: 0 }
         },
         async process(ch, sr, p, env) {
             let rootPc = 0, scale = p.scale, chromatic = false;
@@ -619,7 +622,7 @@
         params: [
             R("mix", "Reverb amount", 0, 100, 1, 25, "%", { easyLabel: "How much reverb" }),
             R("decay", "Space (decay)", 0.3, 6, 0.01, 2.04, " s", { easyLabel: "Room size" }),
-            R("predelay", "Predelay", 0, 200, 1, 63, " ms", { easyLabel: "Keeps the voice clear" }),
+            R("predelay", "Predelay", 0, 200, 1, 30, " ms", { easyLabel: "Keeps the voice clear" }),   // past ~40 ms the room is heard as a separate repeat, not as space
             R("size", "Early reflections", 0, 1, 0.01, 0.5, "", {}),
             R("lowMul", "Bass decay ×", 0.2, 1.8, 0.01, 0.8, "", {}),
             R("highMul", "Treble decay ×", 0.1, 1.2, 0.01, 0.45, "", {}),

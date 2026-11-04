@@ -728,7 +728,7 @@ function createTuneEngine() {
         const k = Math.min(1, Math.max(0, o.strength != null ? o.strength : 1));      // the strength slider scales every one of these
         const att = (o.attackTighten != null ? o.attackTighten : 0.45) * k;
         const endHold = (o.endHold != null ? o.endHold : 0.3) * k;
-        const vibAmt = (o.vibratoAmount != null ? o.vibratoAmount : 0.6) * k;
+        const vibAmt = (o.vibratoAmount != null ? o.vibratoAmount : 0.3) * k;       // ADDS vibrato to held straight notes; a fake wobble reads as "processed", so the default is small
         const out = { vibratoAdded: 0, onsetsTightened: 0, endsHeld: 0, vibratoKept: 0 };
         const linkFrames = Math.ceil(0.06 / hopSec);
 
@@ -1460,7 +1460,7 @@ function createTuneEngine() {
                 o.selectiveCents = lerp(o.selectiveCents, 12, rawness);
                 o.selectiveSoftCents = lerp(o.selectiveSoftCents, 34, rawness);
                 o.flatten = Math.max(o.flatten, 0.30 + 0.30 * rawness);
-                if (o.vibratoAmount == null) o.vibratoAmount = 0.5 + 0.25 * rawness;
+                if (o.vibratoAmount == null) o.vibratoAmount = 0.3 + 0.15 * rawness;
                 if (o.attackTighten == null) o.attackTighten = 0.40 + 0.30 * rawness;     // reach the note sooner
                 if (o.endHold == null) o.endHold = 0.25 + 0.20 * rawness;                  // sag less at the end
                 result.adaptive = { rawness: rawness, within25Pct: sMoved.within25Pct, inKeyPct: sMoved.inKeyPct, selectiveCents: o.selectiveCents, flatten: o.flatten };

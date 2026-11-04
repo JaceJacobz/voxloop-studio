@@ -80,3 +80,14 @@ New: `js/icons.js` (icon set, loaded first), `css/mobile.css` (loaded last). Edi
 - No emoji anywhere: every icon is inline SVG (`VLI("name")`).
 - Mixing and mastering: the quiet-gap cleaner never touches a stretch where the beat is playing and lets go slowly; the phrase gate is shallower and slower (shaped by the beat); new calculated "Ambience between lines" option (default Auto) swells a soft wash after each line so the song keeps breathing when the singer stops.
 - Fixed: the Auto tab's panel was painted solid violet (a class-name clash).
+
+## Step 13 — Less "Voloco", more natural vocals
+Edited: `js/fxrack-dsp.js`, `js/fxbrain.js`, `js/pitchcorrect.js`, `index.html`.
+- Studio VL Tune used to snap EVERY note onto the grid by default (Flex-Tune 0, Humanize 0): on a test vocal ~80% of the singing
+  ended up within 10 cents of a scale note, the same as the "Hard (T-Pain)" preset. Defaults are now retune 60 ms, Flex-Tune 40
+  (notes within ~24 cents are left as sung), Humanize 40. The Hard preset is unchanged.
+- The "Natural vibrato kept" knob actually ADDED a synthetic vibrato to held straight notes. It is now "Added vibrato (straight notes)",
+  default 0 in the rack and in Auto; the Pipeline's "Natural" option adds about half as much as before.
+- Auto (Studio): house retune speeds raised (afrobeats / amapiano / universal 55 ms, rnb 75, rap 50, trap 18), every style uses Flex-Tune,
+  humanize raised. Pipeline Auto follows the same table; the Pipeline retune slider starts at 50 ms.
+- Reverb predelay: Studio default 63 ms -> 30 ms; Auto 18-80 ms -> 16-38 ms (past ~40 ms the room is heard as a separate repeat).

@@ -239,14 +239,18 @@
 
     // ---------------------------------------------------------------- house sound per style: the STARTING point; the measurements then move every number
     const GENRE = {
-        afrobeats: { tune: 28, decay: 1.7, wet: 1.0, comp: 1.0, crowd: 1.0, dbl: 1.0 },
-        amapiano:  { tune: 30, decay: 2.0, wet: 1.1, comp: 0.9, crowd: 1.0, dbl: 1.0 },
-        trap:      { tune: 9,  decay: 1.1, wet: 0.8, comp: 1.25, crowd: 0.8, dbl: 1.1 },
-        rap:       { tune: 35, decay: 0.9, wet: 0.6, comp: 1.3, crowd: 0.9, dbl: 1.1 },
-        rnb:       { tune: 58, decay: 2.4, wet: 1.2, comp: 0.85, crowd: 0.35, dbl: 0.9 },
-        universal: { tune: 30, decay: 1.6, wet: 1.0, comp: 1.0, crowd: 0.7, dbl: 1.0 }
+        // tune = retune speed in ms. Under ~30 ms the correction is audible as "tuned" on every held note (the Voloco sound),
+        // so the house sound sits at 45-75 ms; only trap goes faster, and the "big" style speeds everything up on purpose.
+        afrobeats: { tune: 55, decay: 1.7, wet: 1.0, comp: 1.0, crowd: 1.0, dbl: 1.0 },
+        amapiano:  { tune: 55, decay: 2.0, wet: 1.1, comp: 0.9, crowd: 1.0, dbl: 1.0 },
+        trap:      { tune: 18, decay: 1.1, wet: 0.8, comp: 1.25, crowd: 0.8, dbl: 1.1 },
+        rap:       { tune: 50, decay: 0.9, wet: 0.6, comp: 1.3, crowd: 0.9, dbl: 1.1 },
+        rnb:       { tune: 75, decay: 2.4, wet: 1.2, comp: 0.85, crowd: 0.35, dbl: 0.9 },
+        universal: { tune: 55, decay: 1.6, wet: 1.0, comp: 1.0, crowd: 0.7, dbl: 1.0 }
     };
-    const STYLE_MUL = { natural: { tune: 1.9, wet: 0.85, comp: 0.8, humanize: 55 }, polished: { tune: 1, wet: 1, comp: 1, humanize: 25 }, big: { tune: 0.55, wet: 1.3, comp: 1.2, humanize: 8 } };
+    // flex = Flex-Tune (notes already close to a scale note are left as sung); humanize = how much of the singer's own
+    // in-note movement survives. Flex 0 would snap every note onto the grid, which is what sounds like Voloco.
+    const STYLE_MUL = { natural: { tune: 1.6, wet: 0.85, comp: 0.8, humanize: 65, flex: 45 }, polished: { tune: 1, wet: 1, comp: 1, humanize: 45, flex: 35 }, big: { tune: 0.6, wet: 1.3, comp: 1.2, humanize: 25, flex: 25 } };
     const LABEL = { main: "Main vocal", adlib: "Adlib", tag: "Tag", harmony: "Harmony", other: "Vocal" };
     const r1 = (v) => Math.round(v * 10) / 10, r05 = (v) => Math.round(v * 2) / 2;
 
@@ -272,7 +276,7 @@
                 say(false, "About " + Math.round(100 - w25) + "% of the singing drifts more than a quarter-tone from " + (key ? key.label : "the key") + (V.keyNote || "") + ".");
                 chain.push(mkItem("tune", {
                     key: key ? NOTE[key.rootPc] : "auto", scale: key ? key.scale : "major", speed,
-                    humanize: sm.humanize, flex: style === "natural" ? 20 : 0, amount: prof.delivery === "mixed" ? 85 : 100
+                    humanize: sm.humanize, flex: B.genreId === "trap" ? Math.min(sm.flex, 20) : sm.flex, vibrato: 0, amount: prof.delivery === "mixed" ? 85 : 100
                 }, "Pulls the off-notes into " + (key ? key.label : "the key") + " at " + speed + " ms. " + (speed < 15 ? "That's fast, for the modern tuned sound that suits " + (B.genre ? B.genre.label : "this beat") + "." : speed > 45 ? "That's slow so it still sounds natural." : "A middle setting that keeps it natural but clean.")));
             }
         } else say(true, "I couldn't track enough clear notes to judge the pitch, so I left tuning off.");
@@ -352,7 +356,7 @@
         const decay = clamp(g.decay * tempoScale * (0.7 + 0.5 * B.space), 0.6, 3.2);
         const roleMix = { main: 16, adlib: 28, tag: 26, harmony: 24, other: 20 }[type] || 20;
         const mix = Math.round(clamp(roleMix * g.wet * sm.wet * (0.6 + 0.8 * B.space) * (wet ? 0.4 : 1) * (prof.delivery === "rapped" ? 0.8 : 1), 4, 45));
-        const pre = Math.round(clamp(beatMs / 8, 18, 80));
+        const pre = Math.round(clamp(beatMs / 16, 16, 38));        // a 1/64-1/32 note: past ~40 ms the reverb is heard as a separate repeat
         const lp = Math.round(6200 + (1 - B.bright) * 3300), lowMul = r1(0.7 + 0.25 * B.space);
         chain.push(mkItem("reverb", { decay: Math.round(decay * 100) / 100, predelay: pre, mix, lp, lowMul }, "Hall reverb: " + decay.toFixed(1) + " s because it's " + (B.genre ? B.genre.label + " at " : "") + (B.bpm ? Math.round(B.bpm) + " BPM" : "a typical tempo") + (B.space < 0.4 ? " and the beat is full (kept tight)" : B.space > 0.7 ? " and the beat has lots of room (let it bloom)" : "") + "; " + pre + " ms predelay keeps the words clear; its top is rolled off at " + lp + " Hz to suit a " + (B.bright > 0.6 ? "bright" : B.bright < 0.4 ? "dark" : "balanced") + " beat."));
 
