@@ -494,13 +494,15 @@ function createTuneEngine() {
             voicedFrames: voiced,
             inKeyPct: voiced ? (100 * inKey) / voiced : 0,
             medianCents: voiced ? median(dists) : 0,
+            within10Pct: 100 * within(10),
             within25Pct: 100 * within(25),
             within50Pct: 100 * within(50),
             notes: notes.length,
             notesInKey,
             notesOutOfKey: notes.length - notesInKey,
             noteMedianCents: noteDists.length ? median(noteDists) : 0,
-            noteWithin25: noteDists.filter(d => d <= 25).length
+            noteWithin25: noteDists.filter(d => d <= 25).length,
+            noteWithin10: noteDists.filter(d => d <= 10).length
         };
     }
 
@@ -1423,7 +1425,7 @@ function createTuneEngine() {
 
         const o = Object.assign({
             rootPc: 0, scale: "major", refCents: 0,
-            strength: 1, flatten: 0.35, retuneMs: 30, selective: true, selectiveCents: 24, selectiveSoftCents: 52,
+            strength: 1, flatten: 0.35, retuneMs: 30, selective: true, selectiveCents: 6, selectiveSoftCents: 14,
             spokenSung: false,
             deadzone: 6, maxShift: 150, chromatic: false,
             testDetune: false, seed: 7
@@ -1457,8 +1459,9 @@ function createTuneEngine() {
                 // mostly how far the singing sits from the notes (in key at the semitone level is almost always true)
                 const rawness = 0.4 * c01((78 - sMoved.within25Pct) / 42) + 0.4 * c01((sMoved.medianCents - 8) / 18) + 0.2 * c01((90 - sMoved.inKeyPct) / 40);
                 const lerp = (a, b, t) => a + (b - a) * t;
-                o.selectiveCents = lerp(o.selectiveCents, 12, rawness);
-                o.selectiveSoftCents = lerp(o.selectiveSoftCents, 34, rawness);
+                // A rougher take is pulled a little MORE, never less: the leave-alone zone only widens from 4 to 6 cents (it used to open to 12-34)
+                o.selectiveCents = Math.min(o.selectiveCents, lerp(o.selectiveCents, 6, rawness));
+                o.selectiveSoftCents = Math.min(o.selectiveSoftCents, lerp(o.selectiveSoftCents, 14, rawness));
                 o.flatten = Math.max(o.flatten, 0.30 + 0.30 * rawness);
                 if (o.vibratoAmount == null) o.vibratoAmount = 0.3 + 0.15 * rawness;
                 if (o.attackTighten == null) o.attackTighten = 0.40 + 0.30 * rawness;     // reach the note sooner
@@ -1493,11 +1496,23 @@ function createTuneEngine() {
         const plan = planCorrection(track, notes, o);
 
         progress(0.55, "Retuning");
-        const tuned = applyShift(work, mono, sr, track, plan.shift);
+        let tuned = applyShift(work, mono, sr, track, plan.shift);
+        // Retuning brings the room noise back louder and swishy inside the notes; lower it evenly so the take sounds clean.
+        const cleanDb = o.cleanDb == null ? 3 : o.cleanDb, cleanComb = o.cleanComb == null ? 10 : o.cleanComb;
+        let afterTrack = null;
+        if (cleanDb > 0 || cleanComb > 0) {
+            progress(0.78, "Cleaning the noise");
+            try {
+                afterTrack = trackClean(mixDown(tuned), sr);          // also used for the final check below (cleaning does not move pitch)
+                const cl = cleanNoise(tuned, sr, cleanDb, afterTrack, cleanComb);
+                if (cl.applied) tuned = cl.channels;
+                result.noiseClean = { applied: cl.applied, reason: cl.reason || null, reduceDb: cl.reduceDb || 0, noiseDbfs: cl.noiseDbfs };
+            } catch (e) { result.noiseClean = { applied: false, reason: "error" }; }
+        }
         result.audio.tuned = tuned;
 
         progress(0.85, "Checking the result");
-        const after = trackClean(mixDown(tuned), sr);
+        const after = afterTrack || trackClean(mixDown(tuned), sr);
         result.stats.tuned = measure(after, o);
         result.contours.tuned = Float32Array.from(after.midi);
 
@@ -1516,6 +1531,123 @@ function createTuneEngine() {
 
         progress(1, "Done");
         return result;
+    }
+
+
+    // ---------------------------------------------------------
+    // Noise cleanup after retuning.
+    // Shifting pitch re-spaces short grains of the voice. The room noise riding inside each grain is repeated and re-timed with it, so
+    // it comes back a few dB louder and swishy, but only while the singer sings (between phrases nothing was touched). That reads as
+    // "the singer brought the noise". This learns the noise colour from the quiet gaps and lowers it everywhere, evenly, so the take is
+    // clean in the notes and in the gaps alike. It does nothing when there is no clear gap or the recording is already clean.
+    // ---------------------------------------------------------
+    function cleanNoise(channels, sr, reduceDb, pitchTrack, combDbIn) {
+        const n = channels[0].length, N = 2048, H = 512;
+        reduceDb = Math.max(0, Math.min(24, reduceDb));
+        const combDb = Math.max(0, Math.min(14, combDbIn == null ? 0 : combDbIn));
+        if ((reduceDb < 1 && combDb < 1) || n < N * 8) return { channels: channels, applied: false, reason: "off" };
+        const fft = fftFor(N);
+        const win = new Float64Array(N);
+        for (let i = 0; i < N; i++) win[i] = Math.sqrt(0.5 - 0.5 * Math.cos((2 * Math.PI * (i + 0.5)) / N));      // sqrt-Hann: analysis and synthesis
+        const nFr = Math.floor((n - N) / H) + 1, bins = N / 2 + 1;
+        // analyse the mono mix (one set of gains for every channel keeps the stereo image untouched)
+        const mono = new Float32Array(n);
+        for (let c = 0; c < channels.length; c++) { const x = channels[c]; for (let i = 0; i < n; i++) mono[i] += x[i] / channels.length; }
+        const P = new Float32Array(nFr * bins), E = new Float64Array(nFr);
+        const re = new Float64Array(N), im = new Float64Array(N);
+        const k1 = Math.round(100 * N / sr), k2 = Math.min(bins - 1, Math.round(10000 * N / sr));
+        for (let f = 0; f < nFr; f++) {
+            const o0 = f * H;
+            for (let i = 0; i < N; i++) { re[i] = mono[o0 + i] * win[i]; im[i] = 0; }
+            fft(re, im);
+            let e = 0;
+            for (let k = 0; k < bins; k++) { const pw = re[k] * re[k] + im[k] * im[k]; P[f * bins + k] = pw; if (k >= k1 && k <= k2) e += pw; }
+            E[f] = e;
+        }
+        // noise frames: the quietest 12% (needs a real gap: the loud frames must be far above them)
+        const order = Array.from(E.keys()).sort((a, b) => E[a] - E[b]);
+        const nq = Math.max(6, Math.floor(nFr * 0.12));
+        const loud = E[order[Math.floor(nFr * 0.92)]], quiet = E[order[Math.floor(nq / 2)]];
+        const dr = 10 * Math.log10((loud + 1e-20) / (quiet + 1e-20));
+        const quietDb = 10 * Math.log10(quiet / ((k2 - k1 + 1) * N * N / 4 * 0.5) + 1e-20);      // rough per-bin level, only for the "already clean" test
+        if (dr < 20) return { channels: channels, applied: false, reason: "no clear gap" };
+        const Nn = new Float64Array(bins);
+        for (let q = 0; q < nq; q++) { const f = order[q]; for (let k = 0; k < bins; k++) Nn[k] += P[f * bins + k] / nq; }
+        // smooth the profile across frequency (noise is smooth; a few harmonic leftovers must not be learned)
+        const Ns = new Float64Array(bins);
+        for (let k = 0; k < bins; k++) { let a = 0, c = 0; for (let d = -3; d <= 3; d++) { const kk = k + d; if (kk >= 0 && kk < bins) { a += Nn[kk]; c++; } } Ns[k] = a / c; }
+        // already clean? (noise floor below about -78 dBFS in the band): leave the take alone
+        let nb = 0; for (let k = k1; k <= k2; k++) nb += Ns[k];
+        const noiseRms = Math.sqrt(nb / (N * N * 0.375)) / Math.sqrt(2);
+        if (noiseRms < Math.pow(10, -78 / 20)) return { channels: channels, applied: false, reason: "already clean" };
+
+        const gmin = Math.pow(10, -reduceDb / 20), alpha = 1.5;
+        // the broad noise cut fades out above 5 kHz (gone by 9 kHz): S sounds and air are not noise, and this is where a cut dulls a vocal
+        const gminK = new Float64Array(bins);
+        for (let k = 0; k < bins; k++) { const fk = (k * sr) / N, t = fk < 5000 ? 0 : fk > 9000 ? 1 : (fk - 5000) / 4000; gminK[k] = Math.pow(gmin, 1 - t); }
+        const G = new Float32Array(nFr * bins), Gc = new Float32Array(nFr * bins).fill(1);
+        for (let f = 0; f < nFr; f++) {
+            for (let k = 0; k < bins; k++) {
+                const pw = P[f * bins + k] + 1e-20;
+                const g2 = reduceDb < 1 ? 1 : Math.max(gminK[k] * gminK[k], 1 - (alpha * Ns[k]) / pw);
+                G[f * bins + k] = Math.sqrt(g2);
+            }
+            // Inside a sung note the noise that matters sits BETWEEN the harmonics. The note's own pitch says where the harmonics are,
+            // so the gaps between them are lowered too (never the harmonics themselves). It fades out above ~6 kHz, where the air lives.
+            if (pitchTrack && pitchTrack.midi && combDb > 0) {
+                const ti = Math.min(pitchTrack.midi.length - 1, Math.max(0, Math.round((f * H + N / 2) / pitchTrack.hop)));
+                const m0 = pitchTrack.midi[ti];
+                if (!isNaN(m0)) {
+                    const f0 = 440 * Math.pow(2, (m0 - 69) / 12);
+                    if (f0 > 70 && f0 < 900) {
+                        const binHz = sr / N;
+                        for (let k = Math.round(100 / binHz); k < bins; k++) {
+                            const fk = k * binHz;
+                            if (fk > 8000) break;
+                            const m = Math.max(1, Math.round(fk / f0)), d = Math.abs(fk - m * f0);
+                            const w = 2.4 * binHz + m * f0 * 0.012, t = d <= w ? 0 : d >= 2 * w ? 1 : 0.5 - 0.5 * Math.cos(Math.PI * (d - w) / w);
+                            const air = fk < 3000 ? 1 : Math.max(0, 1 - (fk - 3000) / 3000);
+                            const gv = Math.pow(10, -combDb * air / 20);
+                            const gk = 1 - t * (1 - gv);                                   // 1 on a harmonic, gv between harmonics
+                            Gc[f * bins + k] = gk;
+                        }
+                    }
+                }
+            }
+            // smooth across frequency a little so no single bin flutters ("musical noise")
+            const row = G.subarray(f * bins, (f + 1) * bins), tmp = Float32Array.from(row);
+            for (let k = 1; k < bins - 1; k++) row[k] = 0.25 * tmp[k - 1] + 0.5 * tmp[k] + 0.25 * tmp[k + 1];
+        }
+        // smooth across time: open instantly (never dull a vowel), close slowly (~90 ms) so the noise never "breathes"
+        const rel = Math.exp(-H / (sr * 0.09));
+        for (let k = 0; k < bins; k++) {
+            let g = 1;
+            for (let f = 0; f < nFr; f++) { const t = G[f * bins + k]; g = t > g ? t : rel * g + (1 - rel) * t; G[f * bins + k] = g; }
+        }
+        // look-ahead mirror so a note start is opened before it arrives (a backward pass with the same fast-open rule)
+        for (let k = 0; k < bins; k++) {
+            let g = 1;
+            for (let f = nFr - 1; f >= 0; f--) { const t = G[f * bins + k]; g = t > g ? t : rel * g + (1 - rel) * t; G[f * bins + k] = Math.max(G[f * bins + k], Math.min(g, 1)); }
+        }
+        // the harmonic valley gain is exact for each frame (it follows the pitch), so it is merged after the time smoothing, which would reopen it
+        for (let i = 0; i < G.length; i++) if (Gc[i] < G[i]) G[i] = Gc[i];
+        const outCh = [];
+        for (let c = 0; c < channels.length; c++) {
+            const x = channels[c], y = new Float32Array(n), norm = new Float32Array(n);
+            for (let f = 0; f < nFr; f++) {
+                const o0 = f * H;
+                for (let i = 0; i < N; i++) { re[i] = x[o0 + i] * win[i]; im[i] = 0; }
+                fft(re, im);
+                for (let k = 0; k < bins; k++) { const g = G[f * bins + k]; re[k] *= g; im[k] *= g; if (k > 0 && k < N / 2) { re[N - k] *= g; im[N - k] *= g; } }
+                // inverse FFT via conjugate trick
+                for (let i = 0; i < N; i++) im[i] = -im[i];
+                fft(re, im);
+                for (let i = 0; i < N; i++) { const v = (re[i] / N) * win[i]; y[o0 + i] += v; norm[o0 + i] += win[i] * win[i]; }
+            }
+            for (let i = 0; i < n; i++) y[i] = norm[i] > 1e-3 ? y[i] / norm[i] : x[i];
+            outCh.push(y);
+        }
+        return { channels: outCh, applied: true, reduceDb: reduceDb, gapDynamicDb: dr, noiseDbfs: 20 * Math.log10(noiseRms + 1e-12) };
     }
 
     // ---------------------------------------------------------

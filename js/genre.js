@@ -37,6 +37,106 @@
     };
     const STYLE_OF = { afrobeats: "afrobeats", amapiano: "afrobeats", trap: "trap", rap: "rap", rnb: "rnb", universal: "universal" };
 
+    function tempoFit(bpm, lo, a, b, hi) {
+        // also try half and double time, slightly less trusted
+        return Math.max(trap(bpm, lo, a, b, hi), 0.85 * trap(bpm * 2, lo, a, b, hi), 0.85 * trap(bpm / 2, lo, a, b, hi));
+    }
+
+    // The fingerprints. A pure function of the measured features, so it can be tested without any audio.
+    function classifyFeatures(f) {
+        const { bpm, kickMain, kickSync, backbeat, halfTime, hatDensity, hat16, percDensity, rolls, sustain } = f;
+            // ---------- the fingerprints ----------
+            const S = {};
+            const parts = {};
+            function score(name, items) {
+                let total = 0, wsum = 0; parts[name] = [];
+                for (const [label, w, v] of items) { total += w * v; wsum += w; parts[name].push({ label, w, v }); }
+                S[name] = total / wsum;
+            }
+
+            score("afrobeats", [
+            ["a tempo around " + Math.round(bpm) + " BPM that fits Afrobeats", 0.24, tempoFit(bpm, 84, 95, 114, 126)],
+            ["a syncopated kick", 0.12, trap(kickSync, 0.15, 0.35, 1, 1.01)],
+            ["a kick that is not four-on-the-floor", 0.08, 1 - clamp((kickMain - 0.55) / 0.3, 0, 1)],
+            ["a steady 16th-note shaker", 0.14, trap(hat16, 0.12, 0.3, 1, 1.01)],
+            ["hand percussion (congas, bongos)", 0.16, trap(percDensity, 0.2, 0.38, 1, 1.01)],
+            ["a clap on beats 2 and 4", 0.08, trap(backbeat, 0.1, 0.35, 1, 1.01)],
+            ["a short, plucky bass", 0.10, 1 - clamp((sustain - 0.3) / 0.35, 0, 1)],
+            ["no half-time snare", 0.08, 1 - clamp(halfTime / 0.5, 0, 1)]
+        ]);
+
+        score("amapiano", [
+                ["a tempo around " + Math.round(bpm) + " BPM that fits Amapiano", 0.28, tempoFit(bpm, 102, 108, 116, 122)],
+                ["a soft four-on-the-floor kick", 0.30, trap(kickMain, 0.55, 0.8, 1, 1.01)],
+                ["a steady 16th-note shaker", 0.16, trap(hat16, 0.3, 0.6, 1, 1.01)],
+                ["a sparse clap", 0.10, 1 - clamp((backbeat - 0.4) / 0.4, 0, 1) * 0.5],
+                ["a short, plucky low end (log drum)", 0.10, 1 - clamp((sustain - 0.3) / 0.4, 0, 1)],
+                ["no half-time snare", 0.06, 1 - clamp(halfTime / 0.3, 0, 1)]
+            ]);
+
+            score("trap", [
+                ["a tempo around " + Math.round(bpm) + " BPM (or half of it) that fits trap", 0.24, tempoFit(bpm, 125, 135, 172, 185)],
+                ["fast 16th hats", 0.18, trap(hat16, 0.3, 0.6, 1, 1.01)],
+                ["hat rolls", 0.10, clamp(rolls * 3, 0, 1)],
+                ["a long sustained 808", 0.24, trap(sustain, 0.2, 0.45, 1, 1.01)],
+                ["a half-time snare on beat 3", 0.14, trap(halfTime, 0.05, 0.35, 1, 1.01)],
+                ["a sparse, syncopated kick", 0.10, trap(kickSync, 0.3, 0.55, 1, 1.01)]
+            ]);
+
+            score("rap", [
+                ["a boom-bap tempo around " + Math.round(bpm) + " BPM", 0.24, tempoFit(bpm, 74, 82, 98, 108)],
+                ["a snare on beats 2 and 4", 0.20, trap(backbeat, 0.4, 0.7, 1, 1.01)],
+            ["no hand percussion", 0.08, 1 - clamp((percDensity - 0.3) / 0.2, 0, 1)],
+                ["a kick on the beat with a few pushes", 0.14, trap(kickMain, 0.1, 0.4, 0.9, 1.01)],
+                ["steady 8th-note hats", 0.14, trap(hatDensity, 0.15, 0.35, 0.6, 0.8)],
+                ["no fast 16th hats", 0.12, 1 - clamp((hat16 - 0.25) / 0.4, 0, 1)],
+                ["a short-to-medium bass", 0.10, 1 - clamp((sustain - 0.45) / 0.4, 0, 1)]
+            ]);
+
+            score("rnb", [
+                ["a slow tempo around " + Math.round(bpm) + " BPM", 0.34, tempoFit(bpm, 55, 65, 88, 98)],
+                ["sparse hats", 0.20, trap(hatDensity, -0.01, 0.0, 0.45, 0.65)],
+                ["a soft backbeat", 0.16, trap(backbeat, 0.2, 0.5, 1, 1.01)],
+                ["a sustained low end", 0.18, trap(sustain, 0.15, 0.35, 0.9, 1.01)],
+            ["little hand percussion", 0.10, 1 - clamp((percDensity - 0.3) / 0.25, 0, 1)],
+                ["a relaxed kick", 0.12, trap(kickSync, 0.1, 0.3, 0.7, 0.95)]
+            ]);
+
+            // Tempo is decisive: a style at a tempo it is never played at is cut down hard.
+            const tempoGate = {
+                afrobeats: tempoFit(bpm, 84, 95, 114, 126), amapiano: tempoFit(bpm, 102, 108, 116, 122), trap: tempoFit(bpm, 125, 135, 172, 185),
+                rap: tempoFit(bpm, 74, 82, 98, 108), rnb: tempoFit(bpm, 55, 65, 88, 98)
+            };
+            for (const k in tempoGate) S[k] *= 0.5 + 0.5 * tempoGate[k];
+
+            // A style needs positive evidence, not just the absence of other things: without a 16th-note shaker AND a clap
+            // (Afrobeats) or a shaker AND a four-on-the-floor kick (Amapiano), the score is cut down.
+            const c01 = (x) => clamp(x, 0, 1);
+            // (Afrobeats can show its off-beat drive through the shaker OR the congas, so either one counts as the evidence.)
+        S.afrobeats *= 0.5 + 0.5 * Math.max(c01(hat16 / 0.3), c01(percDensity / 0.4));
+            S.amapiano *= 0.45 + 0.55 * Math.min(c01(hat16 / 0.5), c01(kickMain / 0.7));
+
+            // the fallback: a plain 4/4 pop / dance / anything-else beat
+            S.universal = 0.40 + 0.25 * trap(kickMain, 0.6, 0.85, 1, 1.01) * (1 - clamp(kickSync / 0.5, 0, 1)) + 0.10 * tempoFit(bpm, 96, 105, 130, 140);
+            parts.universal = [{ label: "an ordinary 4/4 groove", w: 1, v: S.universal }];
+
+            // ---------- decide ----------
+            // Afrobeats and Amapiano are one family: how sure we are is judged against the OTHER styles,
+            // then the two are told apart.
+            const fam = { afrobeats: Math.max(S.afrobeats, S.amapiano), trap: S.trap, rap: S.rap, rnb: S.rnb, universal: S.universal };
+            const order = Object.keys(fam).sort((a, b) => fam[b] - fam[a]);
+            const top = order[0], second = order[1];
+            const margin = fam[top] - fam[second];
+            const confidence = clamp(fam[top] * (0.45 + 0.55 * clamp(margin / 0.18, 0, 1)), 0, 1);
+
+            let genre = top, decided = true;
+            if (genre !== "universal" && (fam[top] < 0.58 || margin < 0.06)) { genre = "universal"; decided = false; }
+            if (genre === "afrobeats") genre = S.amapiano > S.afrobeats + 0.02 ? "amapiano" : "afrobeats";
+
+
+        return { genre: genre, decided: decided, runnerUp: second, confidence: confidence, scores: S, parts: parts };
+    }
+
     function createGenreEngine(fillEngine) {
 
         // How often a real hit lands on each of the 16 steps of the bar, over the bars where the groove is playing.
@@ -81,11 +181,6 @@
             return out.length ? mean(out) : 0;
         }
 
-        function tempoFit(bpm, lo, a, b, hi) {
-            // also try half and double time, slightly less trusted
-            return Math.max(trap(bpm, lo, a, b, hi), 0.85 * trap(bpm * 2, lo, a, b, hi), 0.85 * trap(bpm / 2, lo, a, b, hi));
-        }
-
         function detect(beatChannels, sr, options) {
 
             const o = Object.assign({ bpm: 100 }, options || {});
@@ -117,89 +212,8 @@
 
             const f = { bpm, kickMain, kickSync, backbeat, halfTime, hatDensity, hat16, percDensity, rolls, sustain, bars: bars.length };
 
-            // ---------- the fingerprints ----------
-            const S = {};
-            const parts = {};
-            function score(name, items) {
-                let total = 0, wsum = 0; parts[name] = [];
-                for (const [label, w, v] of items) { total += w * v; wsum += w; parts[name].push({ label, w, v }); }
-                S[name] = total / wsum;
-            }
-
-            score("afrobeats", [
-                ["a tempo around " + Math.round(bpm) + " BPM that fits Afrobeats", 0.24, tempoFit(bpm, 84, 95, 114, 126)],
-                ["a syncopated kick", 0.14, trap(kickSync, 0.15, 0.35, 1, 1.01)],
-                ["a kick that is not four-on-the-floor", 0.12, 1 - clamp((kickMain - 0.55) / 0.3, 0, 1)],
-                ["a steady 16th-note shaker", 0.18, trap(hat16, 0.3, 0.6, 1, 1.01)],
-                ["a clap on beats 2 and 4", 0.14, trap(backbeat, 0.2, 0.5, 1, 1.01)],
-                ["a short, plucky bass", 0.10, 1 - clamp((sustain - 0.25) / 0.4, 0, 1)],
-                ["no half-time snare", 0.08, 1 - clamp(halfTime / 0.3, 0, 1)]
-            ]);
-
-            score("amapiano", [
-                ["a tempo around " + Math.round(bpm) + " BPM that fits Amapiano", 0.28, tempoFit(bpm, 102, 108, 116, 122)],
-                ["a soft four-on-the-floor kick", 0.30, trap(kickMain, 0.55, 0.8, 1, 1.01)],
-                ["a steady 16th-note shaker", 0.16, trap(hat16, 0.3, 0.6, 1, 1.01)],
-                ["a sparse clap", 0.10, 1 - clamp((backbeat - 0.4) / 0.4, 0, 1) * 0.5],
-                ["a short, plucky low end (log drum)", 0.10, 1 - clamp((sustain - 0.3) / 0.4, 0, 1)],
-                ["no half-time snare", 0.06, 1 - clamp(halfTime / 0.3, 0, 1)]
-            ]);
-
-            score("trap", [
-                ["a tempo around " + Math.round(bpm) + " BPM (or half of it) that fits trap", 0.24, tempoFit(bpm, 125, 135, 172, 185)],
-                ["fast 16th hats", 0.18, trap(hat16, 0.3, 0.6, 1, 1.01)],
-                ["hat rolls", 0.10, clamp(rolls * 3, 0, 1)],
-                ["a long sustained 808", 0.24, trap(sustain, 0.2, 0.45, 1, 1.01)],
-                ["a half-time snare on beat 3", 0.14, trap(halfTime, 0.05, 0.35, 1, 1.01)],
-                ["a sparse, syncopated kick", 0.10, trap(kickSync, 0.3, 0.55, 1, 1.01)]
-            ]);
-
-            score("rap", [
-                ["a boom-bap tempo around " + Math.round(bpm) + " BPM", 0.24, tempoFit(bpm, 74, 82, 98, 108)],
-                ["a snare on beats 2 and 4", 0.26, trap(backbeat, 0.4, 0.7, 1, 1.01)],
-                ["a kick on the beat with a few pushes", 0.14, trap(kickMain, 0.1, 0.4, 0.9, 1.01)],
-                ["steady 8th-note hats", 0.14, trap(hatDensity, 0.15, 0.35, 0.6, 0.8)],
-                ["no fast 16th hats", 0.12, 1 - clamp((hat16 - 0.25) / 0.4, 0, 1)],
-                ["a short-to-medium bass", 0.10, 1 - clamp((sustain - 0.45) / 0.4, 0, 1)]
-            ]);
-
-            score("rnb", [
-                ["a slow tempo around " + Math.round(bpm) + " BPM", 0.34, tempoFit(bpm, 55, 65, 88, 98)],
-                ["sparse hats", 0.20, trap(hatDensity, -0.01, 0.0, 0.45, 0.65)],
-                ["a soft backbeat", 0.16, trap(backbeat, 0.2, 0.5, 1, 1.01)],
-                ["a sustained low end", 0.18, trap(sustain, 0.15, 0.35, 0.9, 1.01)],
-                ["a relaxed kick", 0.12, trap(kickSync, 0.1, 0.3, 0.7, 0.95)]
-            ]);
-
-            // Tempo is decisive: a style at a tempo it is never played at is cut down hard.
-            const tempoGate = {
-                afrobeats: tempoFit(bpm, 84, 95, 114, 126), amapiano: tempoFit(bpm, 102, 108, 116, 122), trap: tempoFit(bpm, 125, 135, 172, 185),
-                rap: tempoFit(bpm, 74, 82, 98, 108), rnb: tempoFit(bpm, 55, 65, 88, 98)
-            };
-            for (const k in tempoGate) S[k] *= 0.5 + 0.5 * tempoGate[k];
-
-            // A style needs positive evidence, not just the absence of other things: without a 16th-note shaker AND a clap
-            // (Afrobeats) or a shaker AND a four-on-the-floor kick (Amapiano), the score is cut down.
-            const c01 = (x) => clamp(x, 0, 1);
-            S.afrobeats *= 0.45 + 0.55 * Math.min(c01(hat16 / 0.5), c01(backbeat / 0.5));
-            S.amapiano *= 0.45 + 0.55 * Math.min(c01(hat16 / 0.5), c01(kickMain / 0.7));
-
-            // the fallback: a plain 4/4 pop / dance / anything-else beat
-            S.universal = 0.40 + 0.25 * trap(kickMain, 0.6, 0.85, 1, 1.01) * (1 - clamp(kickSync / 0.5, 0, 1)) + 0.10 * tempoFit(bpm, 96, 105, 130, 140);
-            parts.universal = [{ label: "an ordinary 4/4 groove", w: 1, v: S.universal }];
-
-            // ---------- decide ----------
-            // Afrobeats and Amapiano are one family: how sure we are is judged against the OTHER styles,
-            // then the two are told apart.
-            const fam = { afrobeats: Math.max(S.afrobeats, S.amapiano), trap: S.trap, rap: S.rap, rnb: S.rnb, universal: S.universal };
-            const order = Object.keys(fam).sort((a, b) => fam[b] - fam[a]);
-            const top = order[0], second = order[1];
-            const margin = fam[top] - fam[second];
-            const confidence = clamp(fam[top] * (0.45 + 0.55 * clamp(margin / 0.18, 0, 1)), 0, 1);
-
-            let genre = top, decided = true;
-            if (genre !== "universal" && (fam[top] < 0.58 || margin < 0.06)) { genre = "universal"; decided = false; }
-            if (genre === "afrobeats") genre = S.amapiano > S.afrobeats + 0.02 ? "amapiano" : "afrobeats";
+            const cls = classifyFeatures(f);
+            const genre = cls.genre, decided = cls.decided, second = cls.runnerUp, confidence = cls.confidence, S = cls.scores, parts = cls.parts;
 
             const reasons = (parts[genre] || []).filter(p => p.v >= 0.6).sort((a, b) => b.w * b.v - a.w * a.v).slice(0, 4).map(p => p.label);
 
@@ -213,12 +227,15 @@
                 runnerUp: second,
                 scores: S,
                 features: f,
+                profiles: options && options.wantProfiles ? { kick: Array.from(kickF), snare: Array.from(snareF), hat: Array.from(hatF), perc: Array.from(percF), s0sec: A.s0 * A.hopSec, beatSec: A.grid.periodFrames * A.hopSec, sustain: sustain, rolls: rolls } : undefined,
                 reasons: reasons
             };
         }
 
         return { detect };
     }
+
+    if (typeof module === "object" && module.exports) module.exports = { classifyFeatures, LABELS, STYLE_OF };
 
     if (typeof window !== "undefined" && window.VocalVaultFill && window.VocalVaultFill.engine) {
         const eng = createGenreEngine(window.VocalVaultFill.engine);

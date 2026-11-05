@@ -307,6 +307,33 @@
             }
             // a clap or snare on beats 2 and 4 puts beat 1 one beat before each of them (weighted lightly: half-time styles differ)
             for (let i = 0; i < 4; i++) downScore[i] += 0.35 * (clapScore[(i + 1) % 4] + clapScore[(i + 3) % 4]) / 2;
+
+            // Harmonic cue: the chords change on beat 1 of a bar. Compare the pitch content of the two beats before each beat
+            // with the two beats after it; the beat position (1 of 4) where that difference is largest is the bar line.
+            // Energy peaks (above) cannot tell a chord change from a stab on the off-beat; the notes themselves can.
+            {
+                const chromaNov = [0, 0, 0, 0];
+                const win = Math.round(2 * P * hop), N = 8192;
+                const trim = Math.round(0.08 * P * hop);
+                let k2 = 0, used = 0;
+                for (let pos = grid.phaseFrames + 2 * P; pos < frames - 2 * P - 2 && used < 64; pos += P, k2++) {
+                    const c = Math.round(pos * hop);
+                    const A = chromaOfSegment(mono, sr, c - win + trim, c - trim, N);
+                    const B = chromaOfSegment(mono, sr, c + trim, c + win - trim, N);
+                    if (!A.ok || !B.ok) continue;
+                    let dot = 0, na = 0, nb = 0;
+                    for (let q = 0; q < 12; q++) { dot += A.chroma[q] * B.chroma[q]; na += A.chroma[q] ** 2; nb += B.chroma[q] ** 2; }
+                    chromaNov[(k2 + 2) % 4] += 1 - dot / Math.sqrt(Math.max(1e-12, na * nb));
+                    used++;
+                }
+                // k2 started two beats in, so index (k2 + 2) % 4 is the beat index counted from grid.phaseFrames (same as k above)
+                const sNov = chromaNov[0] + chromaNov[1] + chromaNov[2] + chromaNov[3];
+                const sDown = downScore[0] + downScore[1] + downScore[2] + downScore[3];
+                if (used >= 8 && sNov > 0 && sDown > 0) {
+                    const CN = (typeof o.chromaDownWeight === "number") ? o.chromaDownWeight : 2.0;
+                    for (let i = 0; i < 4; i++) downScore[i] = downScore[i] / sDown + CN * chromaNov[i] / sNov;
+                }
+            }
             let b0 = 0;
             for (let i = 1; i < 4; i++) if (downScore[i] > downScore[b0]) b0 = i;
             const sorted = downScore.slice().sort((a, b) => b - a);

@@ -91,3 +91,49 @@ Edited: `js/fxrack-dsp.js`, `js/fxbrain.js`, `js/pitchcorrect.js`, `index.html`.
 - Auto (Studio): house retune speeds raised (afrobeats / amapiano / universal 55 ms, rnb 75, rap 50, trap 18), every style uses Flex-Tune,
   humanize raised. Pipeline Auto follows the same table; the Pipeline retune slider starts at 50 ms.
 - Reverb predelay: Studio default 63 ms -> 30 ms; Auto 18-80 ms -> 16-38 ms (past ~40 ms the room is heard as a separate repeat).
+
+## Step 14 — Better detection + the Music Brain
+
+Everything that listens to a beat or a vocal was measured against 48 beats rendered by the Beat Lab (so key, tempo and style are known),
+then improved. New file: `js/musictheory.js` (plain JS, also runs in Node). It is a **rule-based music-knowledge engine**, not a language
+model: it knows scales and modes, chord roles, and how fast each style is played, and uses that to check what the detectors hear.
+
+- **Beat key** (`MusicTheory.analyzeKey`, used by `detectKey`; the old detector stays as fallback):
+  tuning is estimated first (so a beat that is 40 cents off pitch still reads correctly), drums are filtered out of the spectrum,
+  the 7-note set is chosen, then the home note from the bass notes, chord loop, first chord and chord roles. Reports the mode
+  (e.g. "D dorian feel") and the chord loop in Roman numerals (e.g. `i - VI - III - VII`). When a loop only plays two chords and several
+  keys fit, common chord roles (vi-IV, not iii-I) break the tie. The key spelling always keeps the right 7 notes for pitch correction.
+- **Beat tuning** (the "tuned to the beat, not A = 440" reference): measured on the pitched sound only, accurate to about 1 cent.
+- **Tempo**: half/double-time is settled by the style's normal count (`MusicTheory.reconcileTempo`): slow-jam R&B is shown at 68, not 136;
+  trap at 140, not 70. Only applied when the style call is confident, and never to a tempo the Beat Lab or the user set.
+- **Bar start (beat 1)**: the fill engine now also looks at where the *chords change* (pitch content before vs after each beat), not
+  only where drums hit. Correct bar phase went from 18 of 48 to 26 of 48 beats (off-beat anticipations in Afro grooves are still hard).
+- **Genre**: fingerprints re-calibrated against what the sensor really measures; hand percussion (congas) is now used as evidence;
+  the rule that kept calling Afropop "universal" was loosened. `classifyFeatures()` is a pure function so it can be tested without audio.
+- **Vocal key** (when the beat's key is unknown): the singer's overall tuning offset is removed first, held notes count by duration, and
+  the notes phrases come to rest on decide the home note.
+
+How well it works is measured on synthetic Beat Lab beats only (Afrobeats and R&B). Real recordings will differ: treat the numbers as a
+regression check, not a promise.
+
+## Step 15 — Exact key landing + no "ocean" noise after tuning
+
+**1. The tuner now lands every note exactly on the key it names.** The softer settings added in Step 13 left notes within about 24 cents of a
+scale note untouched, so the median sung note ended up 14-17 cents off the key (measured). Changed:
+- Flex-Tune default 40 → 6 (notes within 4 cents are left as sung; everything else is pulled onto the key). Natural preset 8, Modern pop 4.
+- Auto (Studio) and the Pipeline's auto settings use the same tight 4-6 cent zone. The "adaptive" logic used to widen that zone for rough
+  takes (12-34 cents), so the rougher the singing the less it was fixed; it can no longer loosen it.
+- Auto no longer skips tuning because a take is "within a quarter-tone"; it skips only when nearly every note is within 10 cents.
+- Studio / Auto-mix now tune to the beat's real pitch (the tuning offset measured from the beat), not only to A = 440, so a beat that sits
+  20 cents sharp still gets a vocal that is in tune with it.
+- Speed (retune ms) and Humanize still control how the note is *reached*, so the glide between notes stays natural; they no longer decide
+  whether the note lands on the key.
+
+**2. Noise cleanup after retuning (`cleanNoise` in `pitchcorrect.js`, "Noise cleanup" on VL Tune).** Shifting pitch re-spaces tiny grains of the
+voice, which brought room noise back a few dB louder and swishy *only while the singer sings* (the gaps were untouched), so the singer seemed
+to bring the noise. After tuning, the noise between the voice's harmonics is now lowered using the note's own tracked pitch (the harmonics are
+left alone), plus a light broad noise cut learned from the quiet gaps (fading out above 5 kHz so S sounds and air are kept). It switches itself off
+when the take has no clear gap or is already clean. Default 60% = 10 dB between harmonics, 3 dB broad.
+
+Measured on synthetic sung vocals (not by ear): sung-note noise 4-10 dB louder than the gaps before, about level with them now; voice peaks
+unchanged (0.07 dB); S sounds 1-2 dB lower; note centres median 2 cents from the key, 98-100% within 10 cents on every path.

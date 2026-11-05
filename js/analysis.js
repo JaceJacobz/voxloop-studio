@@ -906,7 +906,22 @@ if (typeof window !== "undefined") {
 //    major and minor key profiles.
 // ============================================================
 
+    // The harmonic key engine lives in musictheory.js (tuning correction, bass + chord evidence, modes, progression knowledge).
+    // The older detector below stays as the fallback if that file is missing or finds nothing.
     function detectKey(audioBuffer) {
+        const MT = (typeof window !== "undefined" ? window.MusicTheory : (typeof self !== "undefined" ? self.MusicTheory : null));
+        if (MT && audioBuffer && audioBuffer.length) {
+            try {
+                const n = audioBuffer.length, ch = audioBuffer.numberOfChannels, mono = new Float32Array(n);
+                for (let c = 0; c < ch; c++) { const d = audioBuffer.getChannelData(c); for (let i = 0; i < n; i++) mono[i] += d[i] / ch; }
+                const r = MT.analyzeKey(mono, audioBuffer.sampleRate);
+                if (r && r.key) return r;
+            } catch (e) { console.warn("Music-theory key engine failed, using the fallback", e); }
+        }
+        return detectKeyLegacy(audioBuffer);
+    }
+
+    function detectKeyLegacy(audioBuffer) {
 
     if (!audioBuffer) {
         return {

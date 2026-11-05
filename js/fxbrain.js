@@ -36,6 +36,11 @@
 
     // Guess the key from the notes someone actually sang (used only when the beat's key is unknown)
     function keyFromNotes(notes, hopSec) {
+        const MT = root.MusicTheory;
+        if (MT && MT.keyFromMelody) {
+            const k = MT.keyFromMelody(notes, hopSec);
+            if (k) return { rootPc: k.rootPc, scale: k.scale, score: k.score, label: NOTE[k.rootPc] + " " + k.scale, confidence: k.confidence, tuningCents: k.tuningCents };
+        }
         const hist = new Float64Array(12);
         for (const n of notes) hist[((Math.round(n.center) % 12) + 12) % 12] += Math.max(1, (n.end - n.start));
         const major = [0, 2, 4, 5, 7, 9, 11], minor = [0, 2, 3, 5, 7, 8, 10];
@@ -148,13 +153,23 @@
         }
         const A = root.VocalVaultAnalysis;
         if (A && !info.bpm) { try { const r = await A.analyzeBpm(buf); if (r && r.bpm) { info.bpm = r.bpm; info.source.bpm = "listened"; } } catch (e) { /* ignore */ } }
-        if (A && !info.key) { try { const r = A.detectKey(buf); const k = r && r.key ? parseKey(r.key + " " + r.scale) : null; if (k) { info.key = k; info.source.key = "listened"; info.keyConfidence = r.confidence; } } catch (e) { /* ignore */ } }
+        if (A && !info.key) { try { const r = A.detectKey(buf); const k = r && r.key ? parseKey(r.key + " " + r.scale) : null; if (k) {
+            info.key = k; info.source.key = "listened"; info.keyConfidence = r.confidence;
+            // how far the beat sits from standard pitch (A = 440). Vocals are tuned to the beat, not to the grid, so they sit in tune WITH it.
+            k.refCents = (r.tuningStrength >= 0.35 && Math.abs(r.tuningRaw) >= 8) ? r.tuningRaw : 0;
+        } } catch (e) { /* ignore */ } }
 
         const sr = buf.sampleRate;
         const chans = []; for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) chans.push(buf.getChannelData(c));
         Object.assign(info, vibeOf(chans, sr, info.bpm));
         const gen = genreOf(chans, sr, info.bpm);
         if (gen) { info.genre = gen; info.genreId = gen.genreId; }
+        // Music knowledge: settle half / double-time with the style's normal count (68 vs 136 is the same pulse).
+        const MT = root.MusicTheory;
+        if (MT && gen && gen.decided && gen.confidence >= 0.5 && info.source.bpm === "listened" && info.bpm) {
+            const rt = MT.reconcileTempo(info.bpm, gen.genreId, { label: gen.label });
+            if (rt.changed) { info.bpmDetected = info.bpm; info.bpm = rt.bpm; info.tempoNote = rt.reason; }
+        }
         beatCache.set(buf, info);
         return info;
     }
@@ -250,7 +265,7 @@
     };
     // flex = Flex-Tune (notes already close to a scale note are left as sung); humanize = how much of the singer's own
     // in-note movement survives. Flex 0 would snap every note onto the grid, which is what sounds like Voloco.
-    const STYLE_MUL = { natural: { tune: 1.6, wet: 0.85, comp: 0.8, humanize: 65, flex: 45 }, polished: { tune: 1, wet: 1, comp: 1, humanize: 45, flex: 35 }, big: { tune: 0.6, wet: 1.3, comp: 1.2, humanize: 25, flex: 25 } };
+    const STYLE_MUL = { natural: { tune: 1.6, wet: 0.85, comp: 0.8, humanize: 65, flex: 8 }, polished: { tune: 1, wet: 1, comp: 1, humanize: 45, flex: 6 }, big: { tune: 0.6, wet: 1.3, comp: 1.2, humanize: 25, flex: 4 } };
     const LABEL = { main: "Main vocal", adlib: "Adlib", tag: "Tag", harmony: "Harmony", other: "Vocal" };
     const r1 = (v) => Math.round(v * 10) / 10, r05 = (v) => Math.round(v * 2) / 2;
 
@@ -267,7 +282,10 @@
             say(true, "This sounds rapped or spoken (few held notes), so I left tuning off. Tuning would make it sound odd.");
         } else if (st && st.voicedFrames > 60) {
             const w25 = st.within25Pct;
-            if (w25 >= 93 || (w25 >= 90 && type !== "main")) say(true, "Pitch is already tight (" + Math.round(w25) + "% within a quarter-tone), so no tuning needed.");
+            // Skip only a take that is already essentially exact (nearly every note within 10 cents). "Within a quarter-tone" is far too loose:
+            // it lets notes sit 20 cents off the key and still sound out of tune.
+            const w10 = st.within10Pct != null ? st.within10Pct : 0;
+            if (w10 >= 90 && w25 >= 97) say(true, "Pitch is already exact (" + Math.round(w10) + "% within 10 cents of the key), so no tuning needed.");
             else {
                 const raw = clamp((92 - w25) / 50, 0, 1);
                 let speed = g.tune * sm.tune * (prof.delivery === "mixed" ? 1.35 : 1) * (1 - 0.35 * raw);
@@ -276,7 +294,7 @@
                 say(false, "About " + Math.round(100 - w25) + "% of the singing drifts more than a quarter-tone from " + (key ? key.label : "the key") + (V.keyNote || "") + ".");
                 chain.push(mkItem("tune", {
                     key: key ? NOTE[key.rootPc] : "auto", scale: key ? key.scale : "major", speed,
-                    humanize: sm.humanize, flex: B.genreId === "trap" ? Math.min(sm.flex, 20) : sm.flex, vibrato: 0, amount: prof.delivery === "mixed" ? 85 : 100
+                    humanize: sm.humanize, flex: sm.flex, vibrato: 0, amount: prof.delivery === "mixed" ? 85 : 100
                 }, "Pulls the off-notes into " + (key ? key.label : "the key") + " at " + speed + " ms. " + (speed < 15 ? "That's fast, for the modern tuned sound that suits " + (B.genre ? B.genre.label : "this beat") + "." : speed > 45 ? "That's slow so it still sounds natural." : "A middle setting that keeps it natural but clean.")));
             }
         } else say(true, "I couldn't track enough clear notes to judge the pitch, so I left tuning off.");
@@ -372,10 +390,10 @@
         if (meas.activeSec < 0.3) return { findings: [{ ok: true, text: "Almost no singing here, so I left it alone." }], chain: [], meas };
 
         let pitch = null;
-        try { pitch = await Fx.runTask("analyze", { mono: U.mono(ch), sr, rootPc: B.key ? B.key.rootPc : 0, scale: B.key ? B.key.scale : "major" }); } catch (e) { pitch = null; }
+        try { pitch = await Fx.runTask("analyze", { mono: U.mono(ch), sr, rootPc: B.key ? B.key.rootPc : 0, scale: B.key ? B.key.scale : "major", refCents: B.key ? (B.key.refCents || 0) : 0 }); } catch (e) { pitch = null; }
         let key = B.key || null, keyNote = "";
         if (pitch && pitch.notes && pitch.notes.length >= 3) {
-            const guess = keyFromNotes(pitch.notes);
+            const guess = keyFromNotes(pitch.notes, pitch.hop && pitch.sr ? pitch.hop / pitch.sr : 0);
             if (!key) { key = guess; keyNote = " (key worked out from the singing)"; }
             else if (guess && !(guess.rootPc === key.rootPc && guess.scale === key.scale)) {
                 try {

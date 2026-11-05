@@ -102,7 +102,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // How far the beat's tuning is from A = 440 Hz.
         try {
-            const t = window.VocalVaultTune.estimateBeatTuning(S.beatBuffer);
+            // The Music Brain key engine already measured the beat's tuning on its pitched (harmonic) sound, ignoring drums.
+            const bk = S && S.beatKey;
+            const t = (bk && bk.tuningStrength != null && bk.engine && bk.source !== "Beat Lab")
+                ? { cents: bk.tuningRaw, strength: bk.tuningStrength }
+                : window.VocalVaultTune.estimateBeatTuning(S.beatBuffer);
             if (t.strength >= 0.35) {
                 beatTuningCents = t.cents;
                 refValue.textContent = `${t.cents >= 0 ? "+" : ""}${t.cents.toFixed(0)} cents`;
@@ -178,8 +182,8 @@ document.addEventListener("DOMContentLoaded", () => {
             autoTranspose: autoKeyBox.checked,
             testDetune: testBox.checked,
             selective: selectiveBox ? selectiveBox.checked : true,
-            selectiveCents: autoTune ? autoTune.selectiveCents : 24,
-            selectiveSoftCents: autoTune ? autoTune.selectiveSoftCents : 52,
+            selectiveCents: autoTune ? autoTune.selectiveCents : 6,
+            selectiveSoftCents: autoTune ? autoTune.selectiveSoftCents : 14,
             spokenSung: spokenBox ? spokenBox.checked : false,
             natural: naturalBox ? naturalBox.checked : true,      // gentle vibrato, quicker arrival on notes, steadier holds
             adaptive: naturalBox ? naturalBox.checked : true      // rawer takes get a stronger, steadier correction
@@ -321,6 +325,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 ? "No note was more than 15 cents off the scale, so only fine tightening was applied. "
                 : `${result.corrected} of ${result.notes} notes were more than 15 cents off and were pulled onto the scale. `;
         }
+
+        if (result.noiseClean && result.noiseClean.applied) text += " Retuning stirs up room noise inside the notes, so the noise between the voice's harmonics was lowered to match the quiet parts.";
 
         // Singing feel: what was done to make a raw take sound sung
         if (result.adaptive && result.adaptive.rawness >= 0.5) {

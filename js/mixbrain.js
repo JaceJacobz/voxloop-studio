@@ -290,7 +290,7 @@
         const strength = prof.delivery === "mixed" ? 85 : 100;
         const notes = ["Pitch fix set for " + (ctx.genre && ctx.genre.decided ? ctx.genre.label : "this song") + " and a " + prof.label + ": retune speed " + retuneMs + " ms (" + (retuneMs <= 15 ? "fast, a modern tuned sound" : retuneMs >= 50 ? "slow, keeps it natural" : "in between") + "), vibrato flattening " + flatten + "%, strength " + strength + "%" + (st ? "; " + Math.round(100 - w25) + "% of notes were more than a quarter-tone off" : "") + "."];
         if (prof.delivery === "rapped") notes.push("This sounds rapped or spoken, so talk-sing lines are left as performed.");
-        return { retuneMs, flatten, strength, selectiveCents: Math.round(lerp(30, 18, raw)), selectiveSoftCents: Math.round(lerp(60, 44, raw)), notes };
+        return { retuneMs, flatten, strength, selectiveCents: Math.round(lerp(4, 6, raw)), selectiveSoftCents: Math.round(lerp(10, 14, raw)), notes };
     }
 
     root.VLMixBrain = { ready, profile, chain, adaptRecipe, harshness, levels, master, echo, reverbTail, gate, bloom, enhanceCaps, tune, IDEAL_LUFS };

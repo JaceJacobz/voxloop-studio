@@ -989,6 +989,9 @@ continueAnalysisButton.addEventListener("click", () => {
                 window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: result.bpm } }));
             } catch (e) { /* ignore */ }
 
+            // Second opinion from music knowledge (only for tempos we listened for, not ones the Beat Lab told us).
+            if (!(known && known.buffer === currentBeat && known.bpm > 30)) refineTempoByStyle(currentBeat, result.bpm);
+
         } catch (error) {
 
             console.error(error);
@@ -1002,6 +1005,27 @@ continueAnalysisButton.addEventListener("click", () => {
 
     }
 
+
+    // Half / double time is the one thing a tempo detector cannot settle by itself: 68 and 136 are the same pulse.
+    // Once the beat's style is known (the genre sensor), the style's normal count decides. Never overrides a tempo the user changed.
+    function refineTempoByStyle(beat, bpm) {
+        setTimeout(function () {
+            try {
+                const MT = window.MusicTheory, G = window.VocalVaultGenre;
+                if (!(MT && G && G.detect) || analyzedBeatBuffer !== beat || detectedBpm !== bpm || originalBpm !== bpm) return;
+                const chans = []; for (let c = 0; c < Math.min(2, beat.numberOfChannels); c++) chans.push(beat.getChannelData(c).subarray(0, Math.min(beat.length, beat.sampleRate * 75)));
+                const g = G.detect(chans, beat.sampleRate, { bpm: bpm });
+                if (!g || !g.decided || g.confidence < 0.5) return;
+                const rt = MT.reconcileTempo(bpm, g.sub === "amapiano" ? "amapiano" : g.styleId, { label: g.label });
+                if (!rt.changed || analyzedBeatBuffer !== beat || detectedBpm !== bpm) return;
+                detectedBpm = rt.bpm; originalBpm = rt.bpm;
+                showBpm();
+                beatBpmStatus.textContent = rt.reason + ". (Tap Double speed if this beat feels faster to you.)";
+                if (analysisManualBpm) analysisManualBpm.value = String(Math.round(rt.bpm * 10) / 10);
+                window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: rt.bpm } }));
+            } catch (e) { /* the first answer stands */ }
+        }, 60);
+    }
 
     function formatBpm(bpm) {
 
@@ -1243,9 +1267,14 @@ async function runBeatKeyAnalysis() {
                     result.confidence * 100
                 );
 
-            beatKeyStatus.textContent = result.source === "Beat Lab"
+            // Music Brain extras: the mode when it is not plain major/minor, and the chord loop it heard.
+            const extras = [];
+            if (result.mode && result.modeRoot && result.mode !== "ionian" && result.mode !== "aeolian") extras.push(`${result.modeRoot} ${result.mode} feel`);
+            if (result.progression && result.progression.text) extras.push(`chords ${result.progression.text}`);
+            if (result.tuningCents) extras.push(`recording is ${Math.abs(result.tuningCents)}¢ ${result.tuningCents > 0 ? "sharp" : "flat"}`);
+            beatKeyStatus.textContent = (result.source === "Beat Lab"
                 ? "From the Beat Lab • exact"
-                : `Detected • ${confidencePercent}% confidence`;
+                : `Detected • ${confidencePercent}% confidence`) + (extras.length ? " • " + extras.join(" • ") : "");
 
         }
 

@@ -60,7 +60,7 @@
         const ch = []; for (let c = 0; c < buf.numberOfChannels; c++) ch.push(Float32Array.from(buf.getChannelData(c).subarray(s0, s1)));
         return { channels: ch, sr, s0, s1 };
     }
-    function env() { const b = st.beatInfo; return { bpm: b && b.bpm, key: b && b.key ? { rootPc: b.key.rootPc, scale: b.key.scale } : null }; }
+    function env() { const b = st.beatInfo; return { bpm: b && b.bpm, key: b && b.key ? { rootPc: b.key.rootPc, scale: b.key.scale, refCents: b.key.refCents || 0 } : null }; }
     async function ensureBeatInfo() {
         const b = beat().buffer;
         if (!b || !window.VLBrain) return null;
@@ -755,7 +755,7 @@
                 const bi = st.beatInfo || {};
                 if (e.chain.length) {
                     const seg = segAudio(f.clip, 0, f.clip.duration);
-                    const r = await Fx.runChain(seg.channels, seg.sr, e.chain, { bpm: bi.bpm, key: bi.key ? { rootPc: bi.key.rootPc, scale: bi.key.scale } : null });
+                    const r = await Fx.runChain(seg.channels, seg.sr, e.chain, { bpm: bi.bpm, key: bi.key ? { rootPc: bi.key.rootPc, scale: bi.key.scale, refCents: bi.key.refCents || 0 } : null });
                     bake(f.clip, 0, seg.s1, r.channels, seg.sr, "Auto: " + e.chain.map((c) => Fx.P[c.type].name).join(" + "));
                 }
                 for (const z of e.extra) {

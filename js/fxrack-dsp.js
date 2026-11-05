@@ -86,7 +86,7 @@
                 const track = engine.trackClean(a.mono, a.sr);
                 const notes = engine.segmentNotes(track.midi);
                 let stats = null;
-                try { stats = engine.measure(track, { rootPc: a.rootPc || 0, scale: a.scale || "major", refCents: 0 }); } catch (e) { stats = null; }
+                try { stats = engine.measure(track, { rootPc: a.rootPc || 0, scale: a.scale || "major", refCents: a.refCents || 0 }); } catch (e) { stats = null; }
                 let keyFit = null;
                 try { keyFit = engine.estimateTuning ? null : null; } catch (e) { keyFit = null; }
                 return { hop: track.hop, sr: a.sr, midi: track.midi, notes, stats, keyFit };
@@ -309,31 +309,35 @@
             R("speed", "Retune speed", 1, 300, 1, 60, " ms", { easyLabel: "Natural ← → Robotic", invert: true }),
             S("key", "Key", ["auto"].concat(NOTE_NAMES), "auto", { easyLabel: "Song key" }),
             S("scale", "Scale", SCALE_OPTS, "major", { easyLabel: "Major or minor" }),
-            // Flex-Tune 0 snaps EVERY note onto the grid (that is the Voloco / T-Pain sound). Above 0, notes closer than
-            // about 0.6 x Flex cents to a scale note are left exactly as sung. 40 = leave anything within ~24 cents.
-            R("flex", "Flex-Tune", 0, 100, 1, 40, "", {}),
+            // Flex-Tune 0 snaps EVERY note onto the grid. Above 0, notes closer than about 0.6 x Flex cents (never under 4) to a
+            // scale note are left as sung. The default 6 leaves only notes within 4 cents, so every note still lands exactly on the key.
+            R("flex", "Flex-Tune", 0, 100, 1, 6, "", {}),
             // This ADDS a synthetic vibrato to held straight notes. It does not "keep" the singer's own (that is Humanize).
             R("vibrato", "Added vibrato (straight notes)", 0, 1.5, 0.05, 0, "", {}),
             R("humanize", "Humanize", 0, 100, 1, 40, "", {}),
+            // Retuning re-spaces tiny grains of the voice, which brings room noise back louder and swishy only while the singer sings.
+            // This lowers the noise between the voice's harmonics (and a little everywhere) so the take stays clean. 60 = the tested default.
+            R("clean", "Noise cleanup", 0, 100, 1, 60, " %", { easyLabel: "Remove tuning noise" }),
             R("transpose", "Transpose", -12, 12, 1, 0, " st", {}),
             R("detune", "Detune (A = Hz)", 420, 460, 0.5, 440, " Hz", {})
         ],
         presets: {
             "Default": {},
-            "Natural": { speed: 80, humanize: 60, flex: 45, vibrato: 0 },
-            "Modern pop": { speed: 30, humanize: 25, flex: 25, vibrato: 0 },
+            "Natural": { speed: 80, humanize: 60, flex: 8, vibrato: 0 },
+            "Modern pop": { speed: 30, humanize: 25, flex: 4, vibrato: 0 },
             "Hard (T-Pain)": { speed: 3, humanize: 0, flex: 0, vibrato: 0 }
         },
         async process(ch, sr, p, env) {
-            let rootPc = 0, scale = p.scale, chromatic = false;
+            let rootPc = 0, scale = p.scale, chromatic = false, beatRef = 0;
             if (p.key === "auto") {
-                if (env && env.key) { rootPc = env.key.rootPc; scale = env.key.scale || scale; }
+                if (env && env.key) { rootPc = env.key.rootPc; scale = env.key.scale || scale; beatRef = env.key.refCents || 0; }
                 else chromatic = true;
             } else rootPc = Math.max(0, NOTE_NAMES.indexOf(p.key));
             const options = {
-                rootPc, scale, chromatic, refCents: 1200 * Math.log2((p.detune || 440) / 440),
+                rootPc, scale, chromatic, refCents: 1200 * Math.log2((p.detune || 440) / 440) + beatRef,
                 strength: 1, retuneMs: p.speed, selective: p.flex > 0, selectiveCents: Math.max(4, p.flex * 0.6), selectiveSoftCents: Math.max(10, p.flex * 1.2),
                 flatten: 0.6 * (1 - p.humanize / 100), vibratoAmount: p.vibrato, manualSemitones: Math.round(p.transpose),
+                cleanDb: 5 * (p.clean == null ? 60 : p.clean) / 100, cleanComb: 16.7 * (p.clean == null ? 60 : p.clean) / 100,
                 adaptive: false, autoTranspose: false
             };
             const r = await runTask("tune", { channels: ch, sr, options });
@@ -800,7 +804,7 @@
             if (p.halo !== "off") {
                 const key = env && env.key;
                 if (p.halo === "octave" || !key) halo = (await runTask("shiftConst", { channels: ch, sr, cents: 1200 })).channels;
-                else halo = (await runTask("harmonize", { channels: ch, sr, options: { rootPc: key.rootPc, scale: key.scale, refCents: 0, degrees: RS.DEGREES[p.halo] || 2, retuneMs: 25 } })).channels;
+                else halo = (await runTask("harmonize", { channels: ch, sr, options: { rootPc: key.rootPc, scale: key.scale, refCents: key.refCents || 0, degrees: RS.DEGREES[p.halo] || 2, retuneMs: 25 } })).channels;
             }
             const layer = RS.build(ch, sr, params, halo);
             const n = layer.channels[0].length, dry = ch.length > 1 ? ch : [ch[0], ch[0]];
