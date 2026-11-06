@@ -1667,7 +1667,8 @@ function createTuneEngine() {
         const notes = segmentNotes(track.midi);
         const raw = new Float32Array(track.midi.length);
 
-        const stepUp = (m, steps) => { let c = m, k = 0; while (k < steps) { c++; if (mask[((c % 12) + 12) % 12]) k++; } return c; };
+        // positive steps go up the scale, negative steps go down it (3rd below = -2), so a part below the lead stays in the key too
+        const stepUp = (m, steps) => { let c = m, k = 0; const dir = steps < 0 ? -1 : 1, want = Math.abs(steps); while (k < want) { c += dir; if (mask[((c % 12) + 12) % 12]) k++; } return c; };
 
         for (const nt of notes) {
             const home = nearestNote(nt.center - ref, o.rootPc, mask, false);

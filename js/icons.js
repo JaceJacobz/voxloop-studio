@@ -55,6 +55,7 @@
         "p-doubler": '<path ' + S + ' d="M5 8c3 0 3 8 6 8M9 8c3 0 3 8 6 8"/><path ' + S + ' d="M13 8c3 0 3 8 6 8" opacity=".5"/>',
         "p-resonance": '<circle ' + S + ' cx="12" cy="12" r="2.4"/><circle ' + S + ' cx="12" cy="12" r="5.6" opacity=".7"/><circle ' + S + ' cx="12" cy="12" r="8.8" opacity=".4"/>',
         "p-crowd": '<circle cx="7" cy="9" r="2.2" fill="currentColor"/><circle cx="12" cy="8" r="2.4" fill="currentColor"/><circle cx="17" cy="9" r="2.2" fill="currentColor"/><path ' + S + ' d="M3.5 18c.5-3 2-4 3.500-4M8.5 18c.6-3.4 2-4.6 3.500-4.600M20.500 18c-.5-3-2-4-3.500-4M15.500 18c-.6-3.400-2-4.600-3.500-4.600"/>',
+        "p-harmony": '<path ' + S + ' d="M4 9h16M4 14h16M4 19h16"/><circle cx="8" cy="9" r="1.6" fill="currentColor"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/><circle cx="16" cy="19" r="1.6" fill="currentColor"/>',
         "p-voice": '<path ' + S + ' d="M5 12h2.5l2-5 3.500 10 2.500-8 1.500 3H19"/>',
         "p-orbit": '<ellipse ' + S + ' cx="12" cy="12" rx="9" ry="4.2" transform="rotate(-25 12 12)"/><circle cx="12" cy="12" r="2" fill="currentColor"/>',
         "p-delay": '<circle cx="6" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor" opacity=".65"/><circle cx="17.500" cy="12" r="1.400" fill="currentColor" opacity=".4"/><circle cx="21" cy="12" r="1" fill="currentColor" opacity=".25"/>',

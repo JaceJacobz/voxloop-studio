@@ -228,8 +228,8 @@
     }
 
     // Who is singing and how clean is the take: this decides how gentle or bold the processing should be
-    function profileVocal(meas, pitch) {
-        const p = { f0: null, range: "unknown", delivery: "unknown", sustained: null, quality: 1, qualityNotes: [], label: "" };
+    function profileVocal(meas, pitch, audio) {
+        const p = { f0: null, range: "unknown", delivery: "unknown", sustained: null, quality: 1, qualityNotes: [], label: "", voice: null, deliveryFrom: "held notes" };
         if (pitch && pitch.midi) {
             const v = []; for (let i = 0; i < pitch.midi.length; i++) { const m = pitch.midi[i]; if (!isNaN(m)) v.push(m); }
             if (v.length > 30) { const med = median(v); p.f0 = 440 * Math.pow(2, (med - 69) / 12); p.range = p.f0 < 150 ? "low" : p.f0 < 235 ? "mid" : "high"; }
@@ -240,6 +240,23 @@
                 p.sustained = voiced > 0 ? sus / voiced : 0;
                 p.delivery = p.sustained >= 0.55 ? "sung" : p.sustained >= 0.3 ? "mixed" : "rapped";
             }
+            // Voice ID (voiceid.js): pitch range, the voice's own sibilant frequency, harmonic cleanliness and sung / mixed / rapped
+            // from held notes + pitch plateaus + syllable rate. It replaces the single "median pitch + held notes" guess above,
+            // and says how sure it is. When it is not sure, the brain stays neutral instead of acting on a wrong label.
+            const VID = root.VoiceID;
+            if (VID && audio && audio.ch && audio.ch.length) {
+                try {
+                    let vid = VID.describe({ mono: U.mono(audio.ch), sr: audio.sr, midi: pitch.midi, hop: pitch.hop, notes: pitch.notes });
+                    if (vid.ok) {
+                        vid = VID.applyOverride(vid, audio.override);
+                        p.voice = vid; p.f0 = vid.f0.median; p.range = vid.range;
+                        let del = vid.delivery.label;
+                        // an unsure "rapped" must not switch tuning off, and an unsure "sung" must not force full-strength tuning
+                        if (!vid.overridden && vid.confidence < 0.5 && del !== "mixed") del = "mixed";
+                        p.delivery = del; p.deliveryFrom = "held notes, pitch plateaus and syllable rate";
+                    }
+                } catch (e) { p.voice = null; }
+            }
         }
         // take quality: noise, clipping, room
         if (meas.snrDb != null) { if (meas.snrDb < 22) { p.quality -= 0.3; p.qualityNotes.push("noisy (only " + meas.snrDb.toFixed(0) + " dB above the background)"); } else if (meas.snrDb < 32) { p.quality -= 0.12; p.qualityNotes.push("a little background noise"); } }
@@ -247,8 +264,8 @@
         if (meas.tailDb != null && meas.tailDb > -18) { p.quality -= 0.1; p.qualityNotes.push("recorded in a live room"); }
         if (meas.levelDb < -42) { p.quality -= 0.1; p.qualityNotes.push("recorded very quietly"); }
         p.quality = clamp(p.quality, 0.2, 1);
-        const who = p.range === "low" ? "low voice" : p.range === "high" ? "high voice" : p.range === "mid" ? "mid-range voice" : "voice";
-        p.label = (p.delivery === "unknown" ? "" : p.delivery + " ") + who + (p.f0 ? " (~" + Math.round(p.f0) + " Hz)" : "") + ", " + (p.quality > 0.85 ? "clean take" : p.quality > 0.6 ? "decent take" : "rough take");
+        const who = p.voice ? p.voice.register : p.range === "low" ? "low voice" : p.range === "high" ? "high voice" : p.range === "mid" ? "mid-range voice" : "voice";
+        p.label = (p.delivery === "unknown" ? "" : p.delivery + " ") + who + (p.f0 ? " (~" + Math.round(p.f0) + " Hz" + (p.voice ? ", " + Math.round(p.voice.confidence * 100) + "% sure" : "") + ")" : "") + ", " + (p.quality > 0.85 ? "clean take" : p.quality > 0.6 ? "decent take" : "rough take");
         return p;
     }
 
@@ -299,16 +316,23 @@
             }
         } else say(true, "I couldn't track enough clear notes to judge the pitch, so I left tuning off.");
 
+        // ---- who is singing (measured by voiceid.js; every number below that depends on the voice comes from this)
+        const vh = prof.voice && prof.voice.hints && prof.voice.confidence >= 0.5 ? prof.voice.hints : null;
+        if (prof.voice) {
+            say(true, "Voice: " + prof.label + (prof.voice.overridden ? " (set by you)" : "") + ".");
+            prof.voice.notes.forEach((t) => say(true, t));
+        }
+
         // ---- sibilance (stronger when the beat is bright, because bright beats make harsh S sounds stand out more)
         if (meas.sibIdx > 10 + 1.5 * B.bright) {
             const amt = clamp(3 + (meas.sibIdx - 10) * 0.8 + 1.2 * (B.bright - 0.5), 3, 10);
             say(false, "Sharp 'S' / 'T' sounds stick out (" + meas.sibIdx.toFixed(0) + " dB above normal brightness).");
-            chain.push(mkItem("deess", { amount: r05(amt), freq: prof.range === "high" ? 6800 : prof.range === "low" ? 5200 : 6000 }, "Softens the harsh S sounds by up to " + amt.toFixed(0) + " dB" + (B.bright > 0.62 ? ", a bit more because the beat is bright" : "") + "."));
+            chain.push(mkItem("deess", { amount: r05(amt), freq: vh ? vh.deessHz : prof.range === "high" ? 6800 : prof.range === "low" ? 5200 : 6000 }, "Softens the harsh S sounds by up to " + amt.toFixed(0) + " dB" + (vh && vh.deessFromAudio ? " around " + vh.deessHz + " Hz, where this voice's own S sounds are" : "") + (B.bright > 0.62 ? ", a bit more because the beat is bright" : "") + "."));
         } else say(true, "'S' sounds are under control, so no de-esser.");
 
         // ---- tone: the target curve, then adjusted for THIS beat (so voice and beat share the space) and THIS take
         const eqOver = {}, why = [];
-        const hpBase = prof.range === "high" ? 120 : prof.range === "low" ? 70 : 90;
+        const hpBase = vh ? vh.hpHz : prof.range === "high" ? 120 : prof.range === "low" ? 70 : 90;
         if (meas.rumbleDb > -26) { eqOver.hp = Math.max(hpBase, 100); why.push("cuts low rumble"); }
         else if (type !== "main") { eqOver.hp = Math.max(hpBase, 130); why.push("keeps " + (LABEL[type] || "it").toLowerCase() + "s out of the bass"); }
         else eqOver.hp = hpBase;
@@ -331,13 +355,14 @@
             if (presMask > 0.25) { pres += 1.2 * presMask; why.push("adds clarity because the beat is strong in the 2.5–5 kHz range"); }
             pres = Math.min(pres, 2.2);
             if (gentle && pres > 1) pres = 1;
-            if (Math.abs(pres) >= 0.8) { eqOver.presG = r05(pres); if (pres > 0 && !presMask) why.push("adds clarity"); if (pres < 0) why.push("takes the edge off harshness"); say(false, pres > 0 ? "A little dull in the presence area, so the words may get lost." : "Slightly harsh around 3 kHz."); }
+            if (Math.abs(pres) >= 0.8) { eqOver.presG = r05(pres); if (vh) eqOver.presF = vh.presHz; if (pres > 0 && !presMask) why.push("adds clarity"); if (pres < 0) why.push("takes the edge off harshness"); say(false, pres > 0 ? "A little dull in the presence area, so the words may get lost." : "Slightly harsh around 3 kHz."); }
             const oth = [800, 1300, 2000, 5000, 8000].reduce((a, f) => (Math.abs(by[f]) > Math.abs(a.g) ? { f, g: by[f] } : a), { f: 1300, g: 0 });
             if (Math.abs(oth.g) >= 1.2) { eqOver.midF = oth.f; eqOver.midG = r05(oth.g); eqOver.midQ = 1; why.push((oth.g < 0 ? "dips " : "lifts ") + oth.f + " Hz"); }
             let air = plan.shelf.gainDb;
             // dark beat = voice can sparkle more; bright beat or a noisy take = keep the top gentle
             air += mapc(B.bright, 0.3, 0.0, 0, 0.8) - mapc(B.bright, 0.6, 1, 0, 1.2);
             if (gentle) air = Math.min(air, 0.5);
+            if (vh && !vh.airSafe) air = Math.min(air, 0);                       // a breathy voice already has plenty of top end
             air = clamp(air, -2, 2);
             if (Math.abs(air) >= 0.8) { eqOver.air = r05(air); why.push(air > 0 ? "adds air" + (B.bright < 0.4 ? " (the beat is dark, so there's room on top)" : "") : "softens the top because the beat is already bright"); say(false, air > 0 ? "The top end is a bit closed in." : "The beat is bright, so the voice's top end needs to sit back."); }
             if (!why.length || (why.length === 1 && eqOver.hp)) say(true, "Tone is balanced for this beat.");
@@ -402,7 +427,7 @@
                 } catch (e) { /* keep beat key */ }
             }
         }
-        const prof = profileVocal(meas, pitch);
+        const prof = profileVocal(meas, pitch, { ch, sr, override: ctx.voiceOverride });
         const r = decide(type, { meas, prof, pitch, keyNote, forceTune: ctx.forceTune }, B, style, key);
         return { findings: r.findings, chain: r.chain, meas, key, pitch, prof };
     }
@@ -425,6 +450,20 @@
                 const level = Math.round(clamp(-11 + 5 * energy * g.dbl, -12, -5)), delay = Math.round(clamp(14 + 8 * (1 - (B.busy || 0.5)), 12, 24));
                 zones.push({ start: a, end: b, label: "Doubles in the big section", chain: [mkItem("doubler", { level, delay, spread: 85 }, "Doubles the lead only where the beat is biggest, at " + level + " dB and " + delay + " ms, tight enough to sound like one thick voice.")] });
             });
+        }
+        if (flavors.harmony) {
+            // Backing harmonies in the big sections only, in the beat's key, and never on a rapped vocal or when the key is unknown
+            const pr = who && who.prof;
+            if (pr && pr.delivery !== "rapped" && B.key) {
+                const high = pr.range === "high" || (pr.f0 && pr.f0 > 330);
+                const g2 = B.genreId, v = high ? ["3rd below", "off"] : g2 === "rnb" ? ["3rd above", "5th above"] : g2 === "trap" || g2 === "rap" ? ["octave below", "off"] : ["3rd above", "off"];
+                const level = Math.round(clamp(-18 + 6 * energy, -18, -12));
+                (B.sections || []).forEach((s) => {
+                    const a = Math.max(0, rel(s.start)), b = Math.min(clipDur, rel(s.end));
+                    if (b - a < 1.5) return;
+                    zones.push({ start: a, end: b, label: "Harmony in the big section", chain: [mkItem("harmony", { v1: v[0], v2: v[1], v3: "off", level, key: NOTE[B.key.rootPc], scale: B.key.scale, late: 14, spread: 70 }, "A " + v[0] + (v[1] !== "off" ? " and a " + v[1] : "") + " in " + B.key.label + " only where the beat is biggest, " + Math.abs(level) + " dB under the lead" + (high ? " (below, because this is a high voice)" : "") + ".")] });
+                });
+            } else zones.skippedHarmony = true;
         }
         if (flavors.tails) {
             // choose the echo time that fits inside each pause, and only use the pauses big enough to let it ring
@@ -490,9 +529,9 @@
                 if (!clip.buffer) continue;
                 if (lane.mixLevel === "mute" || lane.muted) continue;
                 const chans = []; for (let c = 0; c < clip.buffer.numberOfChannels; c++) chans.push(clip.buffer.getChannelData(c));
-                const r = await analyzeClip(chans, clip.buffer.sampleRate, { type: lane.type, style: opts.style, beat, beatKeyConfidence: beat.source && beat.source.key === "Beat Lab" ? 1 : 0 });
+                const r = await analyzeClip(chans, clip.buffer.sampleRate, { type: lane.type, style: opts.style, beat, voiceOverride: opts.voiceOverride, beatKeyConfidence: beat.source && beat.source.key === "Beat Lab" ? 1 : 0 });
                 const extra = r.meas ? flavourZones(r.meas, opts.flavors || {}, beat, clip.start, clip.duration, lane.type, opts.intensity, { prof: r.prof, key: r.key }) : [];
-                out.lanes.push({ laneId: lane.id, clipId: clip.id, laneName: lane.name, laneType: lane.type, clipName: clip.name, findings: r.findings, chain: r.chain, extra, meas: r.meas, vocal: r.prof ? r.prof.label : "", skippedCrowd: !!extra.skippedCrowd, skippedResonance: extra.skippedResonance || "" });
+                out.lanes.push({ laneId: lane.id, clipId: clip.id, laneName: lane.name, laneType: lane.type, clipName: clip.name, findings: r.findings, chain: r.chain, extra, meas: r.meas, vocal: r.prof ? r.prof.label : "", skippedCrowd: !!extra.skippedCrowd, skippedHarmony: !!extra.skippedHarmony, skippedResonance: extra.skippedResonance || "" });
                 if (opts.onProgress) opts.onProgress(lane.name);
             }
         }

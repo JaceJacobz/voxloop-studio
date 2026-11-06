@@ -137,3 +137,39 @@ when the take has no clear gap or is already clean. Default 60% = 10 dB between 
 
 Measured on synthetic sung vocals (not by ear): sung-note noise 4-10 dB louder than the gaps before, about level with them now; voice peaks
 unchanged (0.07 dB); S sounds 1-2 dB lower; note centres median 2 cents from the key, 98-100% within 10 cents on every path.
+
+
+## Step 16 — Voice type, plugin accuracy, VL Harmony, bar-start fix
+
+Everything below was measured with the scripts in `tests/` (run with `node tests/<name>.test.js`). They use **synthetic** voices and beats
+(`tests/synth-voice.js`, `tests/synth-beat.js`): treat them as regression checks, not a promise about real recordings.
+
+**1. Voice type (`js/voiceid.js`, new).** The brain used to call a voice low / mid / high from one number (median pitch) and sung / rapped from
+the share of held notes. Now it measures: pitch range (low edge, median), the voice's *own* S-sound frequency (4-10 kHz), how clean the harmonics
+are (breathiness), and sung / mixed / rapped from held notes + pitch plateaus + syllables per second. Every voice-dependent setting follows a
+measurement: low cut = 0.62 x the lowest note, de-esser centre = the measured S frequency, presence centre from it, air held back on breathy takes.
+It reports a **confidence**; under 50% the brain uses neutral settings (and an unsure "rapped" can no longer switch tuning off). The Auto panel has a
+**Voice** row (Auto / Sung / Rapped / Low / Mid / High) to correct a wrong call in one tap. Findings now say what was detected and how sure it is.
+Measured on 11 synthetic voices (bass to soprano, sung and rapped): sung/rapped right on 11/11; the S frequency lands within ~200 Hz.
+Known limits: pitch alone cannot separate a high male voice from a low female one, so the middle bands say "tenor / low alto" instead of guessing
+(a formant-based voice-size estimate was tried and **removed**: the same synthetic vocal tract read 1.03 to 1.21 depending on the pitch sung).
+Alternating sung and rapped lines read "mixed", fast short sung notes can still look sung only because they are held.
+
+**2. Plugin accuracy.** Found by measuring each plugin, then fixed:
+- **VL Comp** under-compressed (it read raw sample values, so the gain recovered between waveform peaks): at 4:1, -2 dB in gave -14.3 instead of -15.5. Now a peak-hold detector; the curve is within 0.1 dB.
+- **Limiter** let the first few ms of any audio through (a loud start passed at +5.4 dB with a -1 dB ceiling). Fixed; also fixes the master.
+- Checked and fine: de-esser (3/6/9 dB setting cuts the S by 2.98/5.94/8.89 dB, leaves vowels untouched), delay timing (250.0 ms at 1/8 and 120 BPM), imager, orbit, master true-peak (never above -1 dB on 4 test mixes).
+- Not testable in Node (need a browser audio engine): EQ, Hall, Doubler, Crowd. Listen to those.
+
+**3. VL Harmony (new plugin, category Pitch).** There was no plugin called "path"; this was read as "pitch" and adds the missing pitch tool: up to three backing voices, each moved by
+*scale steps* (3rd, 4th, 5th, 6th, octave, above or below) in the beat's key, so a harmony cannot land on a wrong note (tested: every note in A minor, exact intervals).
+Auto can place it in the big sections only (flavour "Key-locked backing harmonies"), never on a rapped vocal or an unknown key; high voices get the part below.
+If the plugin meant something else (phaser, pan, pad, gate...), say which.
+
+**4. Bar start (beat 1).** On synthetic beats the grid could lock half a beat late on off-beat Afro grooves (hats on the "and"). Now chord changes decide: the grid moves half a beat
+only when the chord changes are clearly sharper there and concentrated on one beat of the bar (a drums-only beat is left alone).
+Measured (24 beats each, original -> now): normal 20 -> 23, chords every 2 bars 20 -> 23, noisy 24 -> 24, drums only 14 -> 14. An attempt using kick/bass evidence was worse and was dropped.
+
+**5. Still open (measured, not fixed).** Major two-chord loops (I-IV, e.g. C - F) are called the wrong key (F major) on all 6 test keys; a change that let the home-note evidence choose between the tied
+key sets fixed none of them and broke minor two-chord loops (6/6 -> 2/6), so it was **not** shipped. Minor two-chord loops and every four-chord loop are right (`tests/key.test.js`).
+The original 48-beat Beat Lab set is not in this zip, so the 26/48 figure above could not be re-measured; the numbers here are from my own synthetic beats.

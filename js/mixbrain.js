@@ -70,7 +70,7 @@
             const mono = root.VLFx.util.mono(channelsOf(vocal, 90));
             pitch = await Fx.runTask("analyze", { mono, sr: vocal.sampleRate, rootPc: key ? key.rootPc : 0, scale: key ? key.scale : "major" });
         } catch (e) { pitch = null; }
-        const prof = B.profileVocal(meas, pitch);
+        const prof = B.profileVocal(meas, pitch, { ch: vch, sr: vocal.sampleRate, override: o.voiceOverride });
 
         // the beat on its own: how loud, and how much louder its peaks are than its average
         let beatLufs = null, beatPlr = null;

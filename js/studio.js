@@ -1914,7 +1914,7 @@ function createStudioEngine() {
             acc += m[i];
             if (i >= L) acc -= m[i - L];
             const count = Math.min(i + 1, L);
-            need[i] = (acc + (L - count)) / L;                 // before the start, the gain is 1
+            need[i] = (acc + (L - count) * m[0]) / L;         // before the start, assume the first (safest) value, not 1: a loud first few ms used to pass the ceiling
         }
         // m and dq are no longer needed; let GC reclaim them after this function
 

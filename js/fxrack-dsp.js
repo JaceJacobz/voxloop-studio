@@ -365,6 +365,61 @@
         }
     };
 
+
+    // ---- Harmony (key-aware pitch harmonizer: up to 3 voices, each moved a number of SCALE steps so it cannot leave the key) ----
+    const HARM_STEPS = { "off": null, "3rd above": 2, "4th above": 3, "5th above": 4, "6th above": 5, "octave above": 7, "3rd below": -2, "5th below": -4, "octave below": -7 };
+    const HARM_OPTS = Object.keys(HARM_STEPS);
+    P.harmony = {
+        id: "harmony", name: "VL Harmony", cat: "Pitch", icon: "p-harmony",
+        blurb: "Adds backing voices a third, fifth or octave away. Every note is moved by SCALE steps in the song's key, so the harmony can't land on a wrong note. Needs the key (set on the beat or in the plugin).",
+        likeA: "Vocal harmonizer",
+        easy: ["v1", "v2", "level"],
+        params: [
+            S("v1", "Voice 1", HARM_OPTS, "3rd above", { easyLabel: "First harmony" }),
+            S("v2", "Voice 2", HARM_OPTS, "off", { easyLabel: "Second harmony" }),
+            S("v3", "Voice 3", HARM_OPTS, "off", {}),
+            R("level", "Harmony level", -30, -4, 0.5, -14, " dB", { easyLabel: "How loud (under the lead)" }),
+            R("spread", "Stereo spread", 0, 100, 1, 70, "%", { easyLabel: "Width" }),
+            R("late", "Timing offset", 0, 40, 1, 14, " ms", {}),
+            R("speed", "Retune speed", 5, 120, 1, 30, " ms", {}),
+            R("tone", "Tone (high cut)", 3000, 16000, 100, 8000, " Hz", {}),
+            S("key", "Key", ["auto"].concat(NOTE_NAMES), "auto", {}),
+            S("scale", "Scale", SCALE_OPTS, "major", {})
+        ],
+        presets: {
+            "Default": {}, "Third up": { v1: "3rd above", v2: "off", v3: "off" }, "Third + fifth": { v1: "3rd above", v2: "5th above", v3: "off", level: -16 },
+            "Low support": { v1: "octave below", v2: "off", v3: "off", level: -16 }, "Full stack": { v1: "3rd above", v2: "5th above", v3: "octave below", level: -17, spread: 90 }
+        },
+        async process(ch, sr, p, env) {
+            const wanted = [p.v1, p.v2, p.v3].map((v) => HARM_STEPS[v]).filter((v) => v != null);
+            const n = ch[0].length, dry = ch.length > 1 ? ch : [ch[0], ch[0]];
+            if (!wanted.length) return { channels: [Float32Array.from(dry[0]), Float32Array.from(dry[1])], info: { note: "no voices chosen" } };
+            let rootPc = 0, scale = p.scale, haveKey = true, ref = 0;
+            if (p.key === "auto") { if (env && env.key) { rootPc = env.key.rootPc; scale = env.key.scale || scale; ref = env.key.refCents || 0; } else haveKey = false; }
+            else rootPc = Math.max(0, NOTE_NAMES.indexOf(p.key));
+            const L = new Float32Array(n + Math.round(0.08 * sr)), Rr = new Float32Array(L.length);
+            for (let i = 0; i < n; i++) { L[i] = dry[0][i]; Rr[i] = dry[1][i]; }
+            const skipped = [];
+            let idx = 0;
+            for (const steps of wanted) {
+                let layer;
+                if (haveKey) layer = (await runTask("harmonize", { channels: ch, sr, options: { rootPc, scale, refCents: ref, degrees: steps, retuneMs: p.speed } })).channels;
+                else if (Math.abs(steps) === 7) layer = (await runTask("shiftConst", { channels: ch, sr, cents: steps > 0 ? 1200 : -1200 })).channels;
+                else { skipped.push(steps); idx++; continue; }
+                let m = mono(layer);
+                // keep it out of the lead's way: no low rumble from a part moved down, no hiss, a little later like a second take
+                const hpC = bqCoef("hp", steps < 0 ? 180 : 250, sr, 0.7071), lpC = bqCoef("lp", p.tone, sr, 0.7071);
+                m = bqRun(bqRun(bqRun(m, hpC), hpC), lpC);
+                const g = dbLin(p.level) / Math.sqrt(wanted.length), d = Math.round((p.late * (1 + 0.35 * idx)) / 1000 * sr);
+                const pan = wanted.length === 1 ? 0.6 * (p.spread / 100) : (idx % 2 === 0 ? -1 : 1) * (p.spread / 100) * (idx === 2 ? 0.5 : 1);
+                const th = (pan + 1) * Math.PI / 4, gl = Math.cos(th) * Math.SQRT2 * g, gr = Math.sin(th) * Math.SQRT2 * g;
+                for (let i = 0; i < m.length && i + d < L.length; i++) { L[i + d] += m[i] * gl; Rr[i + d] += m[i] * gr; }
+                idx++;
+            }
+            return { channels: [L, Rr], info: { skipped, usedKey: haveKey } };
+        }
+    };
+
     // ---- EQ ----
     P.eq = {
         id: "eq", name: "VL EQ", cat: "Tone", icon: "p-eq",
@@ -438,10 +493,15 @@
             const n = ch[0].length, out = ch.map(() => new Float32Array(n));
             const ac = Math.exp(-1 / (Math.max(0.1, p.atk) / 1000 * sr)), rc = Math.exp(-1 / (Math.max(5, p.rel) / 1000 * sr));
             const slope = 1 / p.ratio - 1, kn = Math.max(0.01, p.knee), mk = dbLin(p.makeup), mix = p.mix / 100;
-            let grDb = 0;
+            let grDb = 0, held = 0;
+            // The level detector holds each peak for ~8 ms (a real compressor reads the signal's envelope, not each raw sample).
+            // Reading raw samples let the gain spring back between the peaks of the waveform, so low voices were compressed
+            // less than the ratio said (measured: -2 dB in gave -14.3 out instead of -15.5 at 4:1).
+            const hold = Math.exp(-1 / (0.008 * sr));
             for (let i = 0; i < n; i++) {
                 let lv = 0;
                 for (let c = 0; c < ch.length; c++) { const v = Math.abs(ch[c][i]); if (v > lv) lv = v; }
+                held = lv > held ? lv : held * hold; lv = held;
                 const over = linDb(lv) - p.thr;
                 let target = 0;
                 if (2 * over < -kn) target = 0;
@@ -814,7 +874,7 @@
         }
     };
 
-    const ORDER = ["tune", "pitchedit", "deess", "eq", "comp", "sat", "voice", "doubler", "resonance", "crowd", "imager", "orbit", "delay", "reverb", "limit"];
+    const ORDER = ["tune", "pitchedit", "harmony", "deess", "eq", "comp", "sat", "voice", "doubler", "resonance", "crowd", "imager", "orbit", "delay", "reverb", "limit"];
 
     function defaults(id) {
         const pl = P[id], o = {};

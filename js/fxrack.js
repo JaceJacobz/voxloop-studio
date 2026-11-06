@@ -37,7 +37,7 @@
         pitch: null, snap: "scale",
         beatInfo: null, beatFor: null,
         heard: null,             // findings from "Auto this"
-        plan: null, planStyle: "polished", intensity: "normal", flavors: { doubs: false, tails: false, crowd: false, voice: false, orbit: false, ride: false, resonance: false },
+        plan: null, planStyle: "polished", intensity: "normal", flavors: { doubs: false, tails: false, crowd: false, voice: false, orbit: false, ride: false, resonance: false, harmony: false },
         busyMsg: ""
     };
     try { const v = localStorage.getItem("vl-rack-easy"); if (v != null) st.easy = v === "1"; } catch (e) { /* ignore */ }
@@ -494,7 +494,7 @@
         try {
             const bi = await ensureBeatInfo();
             const seg = segAudio(f.clip, st.sel.start, st.sel.end);
-            const r = await window.VLBrain.analyzeClip(seg.channels, seg.sr, { type: f.lane.type, style: st.planStyle, beat: bi || {}, beatKeyConfidence: bi && bi.source && bi.source.key === "Beat Lab" ? 1 : 0 });
+            const r = await window.VLBrain.analyzeClip(seg.channels, seg.sr, { type: f.lane.type, style: st.planStyle, beat: bi || {}, voiceOverride: st.voice, beatKeyConfidence: bi && bi.source && bi.source.key === "Beat Lab" ? 1 : 0 });
             st.heard = r.findings; st.chain = r.chain; st.cache = [];
             st.tab = "chain"; renderAll(); schedule();
             status(r.chain.length ? "Here's what this part needs. Press Preview to hear it." : "This part already sounds good. Nothing needed.");
@@ -672,19 +672,26 @@
     function renderAuto() {
         const body = $("#fx-body");
         const styles = [["natural", "Natural", "Keeps it sounding like you. Gentle tuning, light space."], ["polished", "Polished", "Radio-ready balance. Tight tuning, clean tone."], ["big", "Big", "Thicker, wider, more reverb. Strong tuning."]];
-        const fl = [["doubs", "Doubles in the big parts of the song"], ["tails", "Echo on the last word of lines"], ["crowd", "Crowd answering back"], ["voice", "Voice-change spice on the final sound"], ["orbit", "Slow stereo movement (headphones)"], ["ride", "Even out phrase loudness with volume automation (Auto-ride)"], ["resonance", "Shimmer layer: natural double + soft echo + ghost harmony (resonance)"]];
+        const fl = [["doubs", "Doubles in the big parts of the song"], ["tails", "Echo on the last word of lines"], ["crowd", "Crowd answering back"], ["voice", "Voice-change spice on the final sound"], ["orbit", "Slow stereo movement (headphones)"], ["ride", "Even out phrase loudness with volume automation (Auto-ride)"], ["resonance", "Shimmer layer: natural double + soft echo + ghost harmony (resonance)"], ["harmony", "Key-locked backing harmonies in the big parts"]];
         let html = '<div class="fx-auto-pane">' +
             '<p class="fx-lead">Voxloop listens to your beat and each vocal, then adds <b>only what is needed</b>. If something already sounds good it is left alone, and you\'ll see why.</p>' +
             '<div class="fx-styles" role="radiogroup" aria-label="Style">' + styles.map((s) => '<button type="button" role="radio" aria-checked="' + (st.planStyle === s[0]) + '" class="fx-style' + (st.planStyle === s[0] ? " is-on" : "") + '" data-style="' + s[0] + '"><strong>' + s[1] + "</strong><small>" + s[2] + "</small></button>").join("") + "</div>" +
             '<details class="fx-flav"' + (Object.values(st.flavors).some(Boolean) ? " open" : "") + "><summary>Optional extras (style, not needs)</summary>" +
             fl.map((f) => '<label class="fx-chk"><input type="checkbox" data-flav="' + f[0] + '"' + (st.flavors[f[0]] ? " checked" : "") + "> " + f[1] + "</label>").join("") +
             '<div class="fx-intens"><span>How much:</span><div class="fx-seg" id="fx-intens" role="group" aria-label="How much">' + [["subtle", "Subtle"], ["normal", "Normal"], ["lots", "Lots"]].map((i) => '<button type="button" data-int="' + i[0] + '" class="' + (st.intensity === i[0] ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div></details>" +
+            '<div class="fx-intens"><span>Voice:</span><div class="fx-seg" id="fx-voice" role="group" aria-label="Voice type (Auto detects it; tap to correct it)">' + [["auto", "Auto"], ["sung", "Sung"], ["rapped", "Rapped"], ["low", "Low"], ["mid", "Mid"], ["high", "High"]].map((i) => '<button type="button" data-vc="' + i[0] + '" class="' + ((i[0] === "auto" && !st.voice) || (st.voice && (st.voice.delivery === i[0] || st.voice.range === i[0])) ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div>" +
             '<button type="button" class="fx-btn fx-auto" id="fx-listen">' + VLI("sparkle", 15) + ' Listen & make a plan</button> <span class="fx-busy" id="fx-plan-busy" hidden></span>' +
             '<div id="fx-plan"></div></div>';
         body.innerHTML = html;
         $$(".fx-style", body).forEach((b) => b.addEventListener("click", () => { st.planStyle = b.dataset.style; renderAuto(); }));
         $$("[data-flav]", body).forEach((c) => c.addEventListener("change", () => { st.flavors[c.dataset.flav] = c.checked; }));
         $$("#fx-intens [data-int]", body).forEach((b) => b.addEventListener("click", () => { st.intensity = b.dataset.int; $$("#fx-intens button", body).forEach((x) => x.classList.toggle("is-on", x === b)); }));
+        $$("#fx-voice [data-vc]", body).forEach((b) => b.addEventListener("click", () => {
+            const k = b.dataset.vc, v = Object.assign({}, st.voice || {});
+            if (k === "auto") st.voice = null;
+            else { if (k === "sung" || k === "rapped") v.delivery = v.delivery === k ? "auto" : k; else v.range = v.range === k ? "auto" : k; st.voice = (v.delivery && v.delivery !== "auto") || (v.range && v.range !== "auto") ? v : null; }
+            $$("#fx-voice button", body).forEach((x) => { const c = x.dataset.vc; x.classList.toggle("is-on", c === "auto" ? !st.voice : !!st.voice && (st.voice.delivery === c || st.voice.range === c)); });
+        }));
         $("#fx-listen").addEventListener("click", makePlan);
         if (st.plan) renderPlan();
     }
@@ -696,7 +703,7 @@
         const busy = $("#fx-plan-busy"); busy.hidden = false; busy.textContent = "Listening to the beat…";
         $("#fx-listen").disabled = true;
         try {
-            const plan = await window.VLBrain.planProject(withClips, beat().buffer, { style: st.planStyle, flavors: st.flavors, intensity: st.intensity, onProgress: (n) => { busy.textContent = "Listening to " + n + "…"; } });
+            const plan = await window.VLBrain.planProject(withClips, beat().buffer, { style: st.planStyle, flavors: st.flavors, intensity: st.intensity, voiceOverride: st.voice, onProgress: (n) => { busy.textContent = "Listening to " + n + "…"; } });
             plan.lanes.forEach((e) => { e.include = true; });
             st.plan = plan; st.beatInfo = plan.beat || st.beatInfo; st.beatFor = beat().buffer;
             updateHeader();
@@ -717,6 +724,7 @@
             else html += '<div class="fx-doing"><b>Nothing needed</b>: this one already sounds good.</div>';
             if (e.extra.length) html += '<div class="fx-doing"><b>Extras (tap one to hear it):</b> ' + e.extra.map((z, zi) => '<button type="button" class="fx-pill alt fx-zone" data-lane="' + i + '" data-zone="' + zi + '" title="' + esc(z.chain[0].reason) + '">' + esc(z.label) + " @ " + fmtT(z.start) + "</button>").join("") + "</div>" + '<ul class="fx-reasons">' + e.extra.map((z) => "<li><b>" + esc(z.label) + ":</b> " + esc(z.chain[0].reason) + "</li>").join("") + "</ul>";
             if (e.skippedResonance) html += '<div class="fx-doing"><b>Resonance skipped:</b> ' + esc(e.skippedResonance.replace(/^Resonance left off: /, "")) + "</div>";
+            if (e.skippedHarmony) html += '<div class="fx-doing"><b>Harmony skipped:</b> it needs a known key and a sung (not rapped) vocal.</div>';
             if (e.skippedCrowd) html += '<div class="fx-doing"><b>Crowd skipped:</b> it rarely suits this style. Choose "Lots" if you want it anyway.</div>';
             html += '<button type="button" class="fx-btn fx-ghost" data-open="' + i + '">Open in rack to preview</button></div>';
         });

@@ -297,6 +297,32 @@
             const grid = findGrid(O, hopSec, bpmIn);
             const P = grid.periodFrames;
 
+            // Off-beat check. Hi-hats and shakers play on the "and" of every beat, so a grid built from all onsets can lock half a
+            // beat late. Drums cannot settle it (an Afro kick often sits off the beat on purpose), but chords can: a chord change is
+            // SHARP when the grid is on the beat and smeared when the grid is half a beat off. So the grid is moved half a beat only
+            // if the chord changes are clearly sharper there.
+            {
+                const win0 = Math.round(2 * P * hop), N0 = 8192, trim0 = Math.round(0.08 * P * hop);
+                const sharp = (ph) => {
+                    let used = 0; const per = [0, 0, 0, 0], cnt = [0, 0, 0, 0];
+                    for (let pos = ph + 2 * P, kk = 0; pos < frames - 2 * P - 2 && used < 48; pos += P, kk++) {
+                        const c = Math.round(pos * hop);
+                        const A0 = chromaOfSegment(mono, sr, c - win0 + trim0, c - trim0, N0), B0 = chromaOfSegment(mono, sr, c + trim0, c + win0 - trim0, N0);
+                        if (!A0.ok || !B0.ok) continue;
+                        let dot = 0, na = 0, nb = 0;
+                        for (let q = 0; q < 12; q++) { dot += A0.chroma[q] * B0.chroma[q]; na += A0.chroma[q] ** 2; nb += B0.chroma[q] ** 2; }
+                        per[kk % 4] += 1 - dot / Math.sqrt(Math.max(1e-12, na * nb)); cnt[kk % 4]++; used++;
+                    }
+                    if (used < 12) return null;
+                    let mx = 0, tot = 0; for (let i = 0; i < 4; i++) { const v = per[i] / Math.max(1, cnt[i]); mx = Math.max(mx, v); tot += v; }
+                    // peaky = how much the change is concentrated on ONE beat of the bar (real chords); about 1 means no chord pattern at all
+                    return { mx, peaky: tot > 0 ? mx / (tot / 4) : 1 };
+                };
+                const alt = grid.phaseFrames + P / 2 >= P ? grid.phaseFrames - P / 2 : grid.phaseFrames + P / 2;
+                const sHere = sharp(grid.phaseFrames), sAlt = sharp(alt);
+                if (sHere && sAlt && sAlt.peaky >= 2.0 && sAlt.mx > sHere.mx * 1.5 && sAlt.peaky > sHere.peaky) { grid.phaseFrames = alt; grid.shiftedHalfBeat = true; }
+            }
+
             // --- which of the four beats is beat 1 ---
             const lowO = triSmooth(F.kick, 1), bassO = triSmooth(F.bass, 1);
             const downScore = [0, 0, 0, 0], clapScore = [0, 0, 0, 0], snareO = triSmooth(F.snare, 1), chordO = triSmooth(F.chord, 2);
