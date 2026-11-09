@@ -81,3 +81,25 @@ function sungFast(centerHz, seed, secs) { // short sung notes (0.18-0.3 s), runs
   return plan;
 }
 module.exports.melodicRap = melodicRap; module.exports.sungFast = sungFast;
+// a rap whose syllables sit on the beat's 8th-note grid (some skipped, a few pushed a little off: human)
+function rappedOnGrid(bpm, bars, seed, startBar) {
+  const r = rng(seed), beat = 60 / bpm, plan = [], c0 = 69 + 12 * Math.log2(125 / 440);
+  for (let k = (startBar || 0) * 8; k < bars * 8; k++) {
+    if (r() > 0.78) continue; const t = k * beat / 2 + (r() * 2 - 1) * 0.012, dur = beat / 2 * 0.62, m0 = c0 + (r() * 2 - 1) * 2, sl = (r() * 2 - 1) * 3;
+    plan.push({ t0: t, dur, vowel: Math.floor(r() * 5), hz: (tt) => midiHz(m0 + sl * (tt / dur - 0.5)) });
+  }
+  return plan;
+}
+module.exports.rappedOnGrid = rappedOnGrid;
+// a vocal whose lines use notes beyond the plain key (A minor), slightly out of tune; truth = the notes the singer MEANT
+function colourVocal(A, seed, startSec) {
+  const r = rng(seed), plan = [], truth = []; let t = startSec || 0.3;
+  const LINES = [{ n: "in key", deg: [0, 3, 7, 5, 3, 0] }, { n: "blue note", deg: [0, 3, 5, 6, 6, 7, 5, 3, 0] }, { n: "lift to the 4th", deg: [5, 8, 12, 13, 13, 10, 8, 5] }, { n: "rapped", rap: true }, { n: "major colour", deg: [0, 4, 7, 9, 9, 7, 4, 0] }];
+  LINES.forEach((L) => {
+    if (L.rap) { for (let k = 0; k < 14; k++) { const m0 = A + 3 + (r() * 2 - 1) * 2, sl = (r() * 2 - 1) * 4, d = 0.13; plan.push({ t0: t, dur: d, vowel: k % 5, hz: (tt) => midiHz(m0 + sl * (tt / d - 0.5)) }); t += 0.16; } }
+    else L.deg.forEach((d, k) => { const m = A + d + (r() * 2 - 1) * 0.22; plan.push({ t0: t, dur: 0.5, vowel: k % 5, hz: () => midiHz(m) }); truth.push({ t0: t, t1: t + 0.5, midi: A + d, line: L.n }); t += 0.52; });
+    t += 0.8;
+  });
+  return { plan, truth };
+}
+module.exports.colourVocal = colourVocal;

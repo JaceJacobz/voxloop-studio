@@ -1,5 +1,5 @@
 /* =========================================================
-   VOCAL VAULT — MIX & MASTER (UI extras)
+   VOXLOOP STUDIO — MIX & MASTER (UI extras)
 
    1. Loudness target   Streaming, Apple Music, balanced or loud. Read by
                         automix.js as state.masterTargetLufs.
@@ -80,7 +80,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     const targetSelect = $("master-target");
     if (!targetSelect) return;
 
-    const S = window.VocalVaultState;
+    const S = window.VLState;
     const formatSelect = $("export-format");
     const filenameInput = $("export-filename");
     const compare = $("mix-compare"), compareInfo = $("mix-compare-info");
@@ -132,7 +132,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
             base = base.replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ").trim();
             if (!base.toLowerCase().endsWith(".wav")) base += ".wav";
         } else {
-            base = `vocal-vault-master-${bits}bit.wav`;
+            base = `voxloop-master-${bits}bit.wav`;
         }
         download.setAttribute("download", base);
         const lenHint = rep && rep.durationOutLabel
@@ -158,7 +158,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
 
     function buildComparison() {
 
-        const Levels = window.VocalVaultLevels, mix = S.mixBuffer;
+        const Levels = window.VLLevels, mix = S.mixBuffer;
         if (!Levels || !mix || !S.vocalBuffer || !S.beatBuffer) { compare.classList.add("hidden"); return; }
 
         const eng = Levels.engine, sr = S.beatBuffer.sampleRate;
@@ -225,7 +225,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     stopButton.addEventListener("click", stopPlayback);
 
     // automix.js (via script.js) announces a finished mix
-    window.addEventListener("vv-mix-ready", () => {
+    window.addEventListener("vl-mix-ready", () => {
         stopPlayback();
         refreshDownload();
         try { buildComparison(); } catch (error) { console.error(error); compare.classList.add("hidden"); }
@@ -238,7 +238,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     function updateStyleHint() {
         const sel = document.getElementById("mix-style");
         const hint = document.getElementById("mix-style-hint");
-        const P = window.VocalVaultPresets;
+        const P = window.VLPresets;
         if (!sel || !hint || !P) return;
         const list = P.listStyles();
         const found = list.find((s) => s.id === sel.value);
@@ -270,7 +270,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     document.addEventListener("DOMContentLoaded", () => {
         const style = document.getElementById("mix-style");
         const polish = document.getElementById("mix-polish");
-        const P = window.VocalVaultPresets;
+        const P = window.VLPresets;
         // Rebuild style list from presets so Auto-detect and any new styles appear
         if (style && P && P.listStyles) {
             const cur = style.value || "auto";

@@ -6,7 +6,7 @@
  *  3. Apply → the effect is baked into just that part of the clip (undo any time)
  *  4. Auto: Voxloop listens to the vocal + beat and only adds what is actually needed
  *
- * Needs: fxrack-dsp.js (VLFx), fxbrain.js (VLBrain, optional), daw.js (VocalVaultDAW bridge).
+ * Needs: fxrack-dsp.js (VLFx), fxbrain.js (VLBrain, optional), daw.js (VLDAW bridge).
  */
 (function () {
     "use strict";
@@ -191,7 +191,9 @@
         const changed = !st.sel || st.sel.clipId !== sel.clipId || Math.abs(st.sel.start - sel.start) > 1e-3 || Math.abs(st.sel.end - sel.end) > 1e-3;
         st.sel = sel;
         if (changed) { st.cache = []; st.out = null; st.pitch = null; st.heard = null; st.chain.forEach((p) => { if (p.type === "pitchedit") p.params.moves = {}; }); }
-        if (!st.open) { st.open = true; panel.classList.remove("hidden"); if (st.tab === "auto") st.tab = "chain"; }
+        // Selecting only highlights the part, so it can be copied, cut, split or deleted with the timeline in view.
+        // The Effects panel opens from the edit bar (or when a plugin is asked for).
+        if (!st.open && sel.openPanel) { st.open = true; panel.classList.remove("hidden"); if (st.tab === "auto") st.tab = "chain"; }
         afterRender();
         renderAll();
         ensureBeatInfo();
@@ -204,7 +206,7 @@
             const el = $('.studio-clip[data-clip-id="' + c.id + '"]');
             if (!el) return;
             if (c.fxLog && c.fxLog.length) { const b = document.createElement("span"); b.className = "fx-badge"; b.textContent = "fx " + c.fxLog.length; b.title = c.fxLog.map((z) => z.text).join("\n"); el.appendChild(b); }
-            if (st.open && st.sel && st.sel.clipId === c.id) paintSel(el, st.sel.start, st.sel.end, c.duration);
+            if (st.sel && st.sel.clipId === c.id) paintSel(el, st.sel.start, st.sel.end, c.duration);
         }));
     }
 
@@ -303,7 +305,7 @@
             '<div class="fx-card-h"><button type="button" class="fx-pow" data-act="bypass" aria-label="Turn on or off" title="On / off">' + VLI("power", 14) + "</button>" +
             '<div class="fx-card-t"><strong>' + VLI(def.icon, 16) + " " + esc(def.name) + "</strong>" + (st.easy ? "" : '<small>' + esc(def.likeA) + "</small>") + "</div>" +
             '<select class="fx-preset" data-act="preset" aria-label="Preset"><option value="">Preset…</option>' + presets.map((p) => "<option>" + esc(p) + "</option>").join("") + "</select>" +
-            '<div class="fx-card-b"><button type="button" data-act="up" title="Move earlier" aria-label="Move earlier">' + VLI("up", 14) + '</button><button type="button" data-act="down" title="Move later" aria-label="Move later">' + VLI("down", 14) + '</button><button type="button" data-act="del" title="Remove" aria-label="Remove">' + VLI("close", 14) + '</button></div></div>' +
+            '<div class="fx-card-b"><button type="button" data-act="autoplugin" class="fx-aplug" title="Auto: set this plugin from the audio" aria-label="Auto for this plugin">Auto</button><button type="button" data-act="up" title="Move earlier" aria-label="Move earlier">' + VLI("up", 14) + '</button><button type="button" data-act="down" title="Move later" aria-label="Move later">' + VLI("down", 14) + '</button><button type="button" data-act="del" title="Remove" aria-label="Remove">' + VLI("close", 14) + '</button></div></div>' +
             (st.easy ? '<p class="fx-blurb">' + esc(def.blurb) + "</p>" : "") +
             (pl.reason ? '<p class="fx-why">Why: ' + esc(pl.reason) + "</p>" : "") +
             '<div class="fx-params">' + rows + "</div></div>";
@@ -316,6 +318,7 @@
                 const act = e.target.dataset && e.target.dataset.act; if (!act) return;
                 if (act === "bypass") { st.chain[i].bypass = !st.chain[i].bypass; st.cache = []; renderChain(); schedule(); }
                 else if (act === "del") { st.chain.splice(i, 1); st.cache = []; renderChain(); schedule(); }
+                else if (act === "autoplugin") { autoPlugin(i); }
                 else if (act === "up" && i > 0) { [st.chain[i - 1], st.chain[i]] = [st.chain[i], st.chain[i - 1]]; st.cache = []; renderChain(); schedule(); }
                 else if (act === "down" && i < st.chain.length - 1) { [st.chain[i + 1], st.chain[i]] = [st.chain[i], st.chain[i + 1]]; st.cache = []; renderChain(); schedule(); }
             });
@@ -502,6 +505,27 @@
         setBusy(false);
     }
 
+    // Auto for ONE plugin: listen to the selected audio, take only this plugin's settings from what the brain decides.
+    // If the brain would not use this plugin on this audio, it is switched off and the reason is shown.
+    async function autoPlugin(i) {
+        const pl = st.chain[i], f = findClip();
+        if (!pl) return;
+        if (!f || !st.sel) { status("Select part of a vocal clip first, then press Auto on a plugin"); return; }
+        if (!window.VLBrain) { status("fxbrain.js is not loaded"); return; }
+        setBusy(true, "listening…");
+        try {
+            const bi = await ensureBeatInfo();
+            const seg = segAudio(f.clip, st.sel.start, st.sel.end);
+            const r = await window.VLBrain.analyzeClip(seg.channels, seg.sr, { type: f.lane.type, style: st.planStyle, beat: bi || {}, voiceOverride: st.voice, beatKeyConfidence: bi && bi.source && bi.source.key === "Beat Lab" ? 1 : 0 });
+            const hit = r.chain.find((c) => c.type === pl.type);
+            const keepMoves = pl.params.moves;
+            if (hit) { pl.params = Object.assign({}, hit.params); if (keepMoves) pl.params.moves = keepMoves; pl.reason = hit.reason || "Set by Auto from this audio."; pl.bypass = false; status("Auto set " + Fx.P[pl.type].name + " from this audio."); }
+            else { pl.bypass = true; pl.reason = "Auto: this audio does not need it, so it is switched off."; status(Fx.P[pl.type].name + " is not needed here, so Auto switched it off."); }
+            st.cache = []; renderChain(); schedule();
+        } catch (e) { console.warn(e); status("Could not analyse: " + (e.message || e)); }
+        setBusy(false);
+    }
+
     // ------------------------------------------------------------------ Pitch editor (blob view)
     let eng = null;
     const tuneEng = () => { if (!eng && typeof window.createTuneEngine === "function") eng = window.createTuneEngine(); return eng; };
@@ -675,18 +699,22 @@
         const fl = [["doubs", "Doubles in the big parts of the song"], ["tails", "Echo on the last word of lines"], ["crowd", "Crowd answering back"], ["voice", "Voice-change spice on the final sound"], ["orbit", "Slow stereo movement (headphones)"], ["ride", "Even out phrase loudness with volume automation (Auto-ride)"], ["resonance", "Shimmer layer: natural double + soft echo + ghost harmony (resonance)"], ["harmony", "Key-locked backing harmonies in the big parts"]];
         let html = '<div class="fx-auto-pane">' +
             '<p class="fx-lead">Voxloop listens to your beat and each vocal, then adds <b>only what is needed</b>. If something already sounds good it is left alone, and you\'ll see why.</p>' +
+            '<div class="fx-aware" id="fx-aware"></div>' +
             '<div class="fx-styles" role="radiogroup" aria-label="Style">' + styles.map((s) => '<button type="button" role="radio" aria-checked="' + (st.planStyle === s[0]) + '" class="fx-style' + (st.planStyle === s[0] ? " is-on" : "") + '" data-style="' + s[0] + '"><strong>' + s[1] + "</strong><small>" + s[2] + "</small></button>").join("") + "</div>" +
             '<details class="fx-flav"' + (Object.values(st.flavors).some(Boolean) ? " open" : "") + "><summary>Optional extras (style, not needs)</summary>" +
             fl.map((f) => '<label class="fx-chk"><input type="checkbox" data-flav="' + f[0] + '"' + (st.flavors[f[0]] ? " checked" : "") + "> " + f[1] + "</label>").join("") +
             '<div class="fx-intens"><span>How much:</span><div class="fx-seg" id="fx-intens" role="group" aria-label="How much">' + [["subtle", "Subtle"], ["normal", "Normal"], ["lots", "Lots"]].map((i) => '<button type="button" data-int="' + i[0] + '" class="' + (st.intensity === i[0] ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div></details>" +
-            '<div class="fx-intens"><span>Voice:</span><div class="fx-seg" id="fx-voice" role="group" aria-label="Voice type (Auto detects it; tap to correct it)">' + [["auto", "Auto"], ["sung", "Sung"], ["rapped", "Rapped"], ["low", "Low"], ["mid", "Mid"], ["high", "High"]].map((i) => '<button type="button" data-vc="' + i[0] + '" class="' + ((i[0] === "auto" && !st.voice) || (st.voice && (st.voice.delivery === i[0] || st.voice.range === i[0])) ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div>" +
+            '<label class="fx-ap-row"><input type="checkbox" id="fx-ap"' + (apOn() ? " checked" : "") + '> <span><b>Autopilot</b>: produce every new take automatically</span></label>' +
+                        '<div class="fx-intens"><span>Voice:</span><div class="fx-seg" id="fx-voice" role="group" aria-label="Voice type (Auto detects it; tap to correct it)">' + [["auto", "Auto"], ["sung", "Sung"], ["rapped", "Rapped"], ["low", "Low"], ["mid", "Mid"], ["high", "High"]].map((i) => '<button type="button" data-vc="' + i[0] + '" class="' + ((i[0] === "auto" && !st.voice) || (st.voice && (st.voice.delivery === i[0] || st.voice.range === i[0])) ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div>" +
             '<button type="button" class="fx-btn fx-auto" id="fx-listen">' + VLI("sparkle", 15) + ' Listen & make a plan</button> <span class="fx-busy" id="fx-plan-busy" hidden></span>' +
             '<div id="fx-plan"></div></div>';
         body.innerHTML = html;
+        if (window.VLEdit) window.VLEdit.paintAware();
         $$(".fx-style", body).forEach((b) => b.addEventListener("click", () => { st.planStyle = b.dataset.style; renderAuto(); }));
         $$("[data-flav]", body).forEach((c) => c.addEventListener("change", () => { st.flavors[c.dataset.flav] = c.checked; }));
         $$("#fx-intens [data-int]", body).forEach((b) => b.addEventListener("click", () => { st.intensity = b.dataset.int; $$("#fx-intens button", body).forEach((x) => x.classList.toggle("is-on", x === b)); }));
-        $$("#fx-voice [data-vc]", body).forEach((b) => b.addEventListener("click", () => {
+        const apBox = $("#fx-ap"); if (apBox) apBox.addEventListener("change", () => apSet(apBox.checked));
+                $$("#fx-voice [data-vc]", body).forEach((b) => b.addEventListener("click", () => {
             const k = b.dataset.vc, v = Object.assign({}, st.voice || {});
             if (k === "auto") st.voice = null;
             else { if (k === "sung" || k === "rapped") v.delivery = v.delivery === k ? "auto" : k; else v.range = v.range === k ? "auto" : k; st.voice = (v.delivery && v.delivery !== "auto") || (v.range && v.range !== "auto") ? v : null; }
@@ -703,7 +731,7 @@
         const busy = $("#fx-plan-busy"); busy.hidden = false; busy.textContent = "Listening to the beat…";
         $("#fx-listen").disabled = true;
         try {
-            const plan = await window.VLBrain.planProject(withClips, beat().buffer, { style: st.planStyle, flavors: st.flavors, intensity: st.intensity, voiceOverride: st.voice, onProgress: (n) => { busy.textContent = "Listening to " + n + "…"; } });
+            const plan = await window.VLBrain.planProject(withClips, beat().buffer, { style: st.planStyle, flavors: st.flavors, autoFlavors: st.apRun, intensity: st.intensity, voiceOverride: st.voice, onProgress: (n) => { busy.textContent = "Listening to " + n + "…"; } });
             plan.lanes.forEach((e) => { e.include = true; });
             st.plan = plan; st.beatInfo = plan.beat || st.beatInfo; st.beatFor = beat().buffer;
             updateHeader();
@@ -784,9 +812,39 @@
         busy.hidden = true; btn.disabled = false;
     }
 
+    // ------------------------------------------------------------------ Studio autopilot
+    // A take that appears in a lane (recorded or imported) is listened to and produced by itself, once the beat is loaded.
+    // Everything it does is baked into the clip like a manual Auto-produce, so it can be undone from the clip.
+    function apPrefs() { try { return JSON.parse(localStorage.getItem("vl-autopilot") || "{}"); } catch (e) { return {}; } }
+    function apOn() { return apPrefs().studio !== false; }
+    function apSet(v) { const p = apPrefs(); p.studio = !!v; try { localStorage.setItem("vl-autopilot", JSON.stringify(p)); } catch (e) { /* private mode */ } }
+    const apDone = new WeakSet(); let apBusy = false, apSig = "";
+    async function apTick() {
+        if (apBusy || !apOn() || !D) return;
+        const b = beat(); if (!b || !b.buffer) return;
+        if ($("#fx-listen") && $("#fx-listen").disabled) return;                 // a plan is already being made
+        const fresh = lanes().filter((l) => l.clips.some((c) => c.buffer && !apDone.has(c)));
+        if (!fresh.length) { apSig = ""; return; }
+        const sig = fresh.map((l) => l.id + ":" + l.clips.map((c) => (c.id || "") + (c.duration || 0).toFixed(2)).join(",")).join("|");
+        if (sig !== apSig) { apSig = sig; return; }                                // wait until the take stops changing (still recording / importing)
+        apBusy = true;
+        try {
+            fresh.forEach((l) => l.clips.forEach((c) => apDone.add(c)));
+            if (!st.open) openRack("auto");
+            st.apRun = true;                                                       // lets the brain choose the extras too
+            await makePlan();
+            if (st.plan) await applyPlan();
+        } catch (e) { console.warn("Studio autopilot", e); }
+        st.apRun = false;
+        apBusy = false;
+    }
+    window.VLFxRack = { st, select, openEffects: () => { if (st.sel) select(Object.assign({}, st.sel, { openPanel: true })); }, autoPlugin, autoThis, addPlugin };      // also lets tests drive the rack without pointer gestures
+    window.VLStudioAutopilot = { markDone: (c) => apDone.add(c), isDone: (c) => apDone.has(c), tick: apTick, get on() { return apOn(); }, set: apSet };
+    setInterval(apTick, 1500);
+
     // ------------------------------------------------------------------ boot
     function init() {
-        D = window.VocalVaultDAW;
+        D = window.VLDAW;
         if (!D) { setTimeout(init, 200); return; }
         buildPanel(); injectToolbar(); bindSelection();
         $("#tr-play") && $("#tr-play").addEventListener("click", stopPreview);

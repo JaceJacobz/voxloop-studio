@@ -1,5 +1,5 @@
 /* =========================================================
-   VOCAL VAULT — STUDIO CHAIN
+   VOXLOOP STUDIO — STUDIO CHAIN
 
    Everything here decides for itself by measuring the audio. The user
    never sets anything.
@@ -14,7 +14,7 @@
      4. warmth          a little harmonic saturation, blended in
 
    Everything lives in createStudioEngine() on plain Float32Arrays. A
-   browser wrapper at the bottom exposes window.VocalVaultStudio.
+   browser wrapper at the bottom exposes window.VLStudio.
    ========================================================= */
 
 function createStudioEngine() {
@@ -2477,7 +2477,7 @@ if (typeof window !== "undefined") {
 
     // glue + loudness + true-peak limiter on the final mix (plain channel arrays in and out)
     function master(channels, sr, options) {
-        const meter = window.VocalVaultLevels && window.VocalVaultLevels.engine;
+        const meter = window.VLLevels && window.VLLevels.engine;
         if (!meter) throw new Error("Mastering needs levelmatch.js loaded first.");
         return engine.master(channels, sr, Object.assign({ meter }, options || {}));
     }
@@ -2519,5 +2519,5 @@ if (typeof window !== "undefined") {
         return { channels: stem, gainDb: lv.gainDb };
     }
 
-    window.VocalVaultStudio = { engine, prepareVocal, finishVocal, renderFx, renderBloom, master, enhanceBeat };
+    window.VLStudio = { engine, prepareVocal, finishVocal, renderFx, renderBloom, master, enhanceBeat };
 }

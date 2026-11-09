@@ -20,7 +20,7 @@
   if (!panel) return;
 
   const el = {
-    record: $("vr-record"), recordLabel: $("vr-record-label"), start: $("vr-start"), countIn: $("vr-countin"),
+    record: $("vr-record"), recordLabel: $("vr-record-label"), start: $("vr-start"),
     meter: $("vr-meter-fill"), status: $("vr-status"), take: $("vr-take"), play: $("vr-play"), redo: $("vr-redo"),
     balance: $("vr-balance"), balanceOut: $("vr-balance-readout"), auto: $("vr-auto"),
     sync: $("vr-sync"), syncOut: $("vr-sync-out"), reverb: $("vr-reverb"), reverbOut: $("vr-reverb-out"),
@@ -31,6 +31,7 @@
     recording: false, previewing: false, busy: false,
     recorder: null, stream: null, level: 0, meterTimer: 0,
     beatStart: 0, fromBar: 0, restoreLoop: null, countInSynth: null,
+    micInfo: null,
     take: null,                 // { samples, sampleRate, songStart, seed }  songStart = seconds on the song's clock
     vocalBaseDb: 0,             // set by "Auto balance": how much the raw vocal is lifted or lowered
     beatLevel: { sum: 0, count: 0 },
@@ -38,6 +39,9 @@
   };
 
   const setStatus = text => { el.status.textContent = text; };
+  document.getElementById("vr-open-settings")?.addEventListener("click", () => {
+    if (window.VLDAW && window.VLDAW.setMode) window.VLDAW.setMode("settings");
+  });
   const barSec = () => barSeconds(current);
 
   // ---------- Where to start from ----------
@@ -56,22 +60,11 @@
   }
 
   // ---------- Microphone ----------
+  // The microphone comes from the shared helper (settings.js): earbuds or the phone's own, as chosen in Settings
   async function openMic() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error("This browser cannot use a microphone here. Open the page in Chrome, Edge, Firefox or Safari.");
-    }
-    try {
-      // Raw, unprocessed sound: the browser's echo cancelling and noise gate chop up a singing voice
-      return await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
-      });
-    } catch (err) {
-      if (err && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
-        throw new Error("The microphone is blocked. Allow it from the lock icon in the address bar, then press Record again.");
-      }
-      if (err && err.name === "NotFoundError") throw new Error("No microphone found. Plug one in and press Record again.");
-      throw err;
-    }
+    const mic = await window.VLMic.open();
+    state.micInfo = mic;
+    return mic.stream;
   }
 
   // The recorder runs in the audio thread and reports the exact audio-clock time of its first sample
@@ -168,10 +161,12 @@
   // microphone reports it a moment later (input delay). Both are taken off.
   function latencyCompensation(stream) {
     const raw = Tone.getContext().rawContext;
-    const output = (raw.outputLatency || 0) + (raw.baseLatency || 0);
+    let output = (raw.outputLatency || 0) + (raw.baseLatency || 0);
     const track = stream && stream.getAudioTracks()[0];
-    const input = (track && track.getSettings && track.getSettings().latency) || 0.015;
-    return output + input;
+    let input = (track && track.getSettings && track.getSettings().latency) || 0.015;
+    // Wireless earbuds: browsers often report almost no delay although it is really 150 ms or more
+    if (state.micInfo && state.micInfo.wireless && output < 0.06) { output = 0.17; input = Math.max(input, 0.03); }
+    return output + input + (window.VLSettings.get("offsetMs") || 0) / 1000;
   }
 
   // ---------- Count-in clicks ----------
@@ -180,7 +175,8 @@
       state.countInSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.06, sustain: 0, release: 0.02 } }).toDestination();
       state.countInSynth.volume.value = -6;
     }
-    for (let i = 0; i < 4; i++) state.countInSynth.triggerAttackRelease(i === 0 ? "A5" : "E5", 0.05, startTime + i * beatSec, 0.9);
+    const clicks = 4 * window.VLSettings.get("countInBars");
+    for (let i = 0; i < clicks; i++) state.countInSynth.triggerAttackRelease(i % 4 === 0 ? "A5" : "E5", 0.05, startTime + i * beatSec, 0.9);
   }
 
   // ---------- Recording ----------
@@ -194,6 +190,7 @@
       if (playing) stopPlayback("");
       setStatus("Allowing the microphone\u2026");
       state.stream = await openMic();
+      if (state.micInfo && state.micInfo.note) setStatus(state.micInfo.note);
 
       const tone = Tone.getContext();
       const source = tone.rawContext.createMediaStreamSource(state.stream);
@@ -206,9 +203,10 @@
 
       state.fromBar = Number(el.start.value) || 0;
       const beatSec = 60 / current.bpm;
-      const countIn = el.countIn.checked;
+      const countIn = window.VLSettings.get("countIn");
       const begin = Tone.now() + 0.15;
-      const beatStart = begin + (countIn ? 4 * beatSec : 0);
+      const countSec = countIn ? 4 * window.VLSettings.get("countInBars") * beatSec : 0;
+      const beatStart = begin + countSec;
       if (countIn) playCountIn(begin, beatSec);
 
       // The song must not loop while recording (the vocal is stored against one pass of the song)
@@ -224,7 +222,7 @@
       el.record.classList.add("is-recording");
       el.recordLabel.textContent = "Stop";
       setStatus(countIn ? "Count-in\u2026 then sing." : "Recording. Press Stop when you are done.");
-      if (countIn) setTimeout(() => { if (state.recording) setStatus("Recording. Press Stop when you are done."); }, (begin - Tone.now() + 4 * beatSec) * 1000);
+      if (countIn) setTimeout(() => { if (state.recording) setStatus("Recording. Press Stop when you are done."); }, (begin - Tone.now() + countSec) * 1000);
       meterLoop();
     } catch (err) {
       console.error(err);

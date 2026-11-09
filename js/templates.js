@@ -20,6 +20,20 @@ function P(text) {
 }
 const V = (...texts) => texts.map(P);     // a list of pattern variants
 
+// A riff = a rhythm (like P) plus WHICH chord note each hit plays, in order. A bass line or log-drum line is written
+// once and then follows the chords, so it is a part someone played, not a roll of the dice.
+//   tokens: r root, 3 third, 5 fifth, 7 seventh, 8 octave, 9 ninth, 4 fourth, l low fifth, b step below the root
+//   RIFF("x..x ..x. ..x. x...", "r r 5 8")  ->  { probs: [16 chances], tokens: [16 of token or null] }
+function RIFF(rhythm, notes) {
+  const probs = P(rhythm);
+  const list = String(notes).trim().split(/\s+/);
+  const hits = probs.filter(p => p > 0).length;
+  if (hits !== list.length) throw new Error("Riff has " + hits + " hits but " + list.length + " notes: " + rhythm + " / " + notes);
+  let i = 0;
+  const tokens = probs.map(p => (p > 0 ? list[i++] : null));
+  return { probs, tokens };
+}
+
 // ---------- Tracks (shared by every genre) ----------
 // Row order on screen, top to bottom.
 const TRACK_ORDER = [

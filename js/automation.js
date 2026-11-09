@@ -18,7 +18,7 @@
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const fmtT = (s) => { const m = Math.floor(s / 60); return m + ":" + (s - m * 60).toFixed(1).padStart(4, "0"); };
     const fmtDb = (db) => (db <= SILENT + 0.5 ? "silent" : (db < 0 ? "−" : db > 0 ? "+" : "") + Math.abs(db).toFixed(1) + " dB");
-    const D = () => window.VocalVaultDAW;
+    const D = () => window.VLDAW;
     const api = () => (D() && D().api) || {};
     const status = (m) => { if (api().status) api().status(m); };
 

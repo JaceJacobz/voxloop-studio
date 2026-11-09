@@ -117,6 +117,7 @@
 
     // keep the playhead in view while recording
     function follow() {
+        return;                                        // daw.js follows the playhead while playing and recording
         const host = $("#studio-lanes"); if (!host) return;
         const head = host.querySelector(".studio-lane-head"), hw = head ? head.offsetWidth : 0;
         const x = hw + S.o.getPlayhead() * S.o.pxPerSec;
@@ -173,6 +174,7 @@
     // ------------------------------------------------------------ ruler sync + playhead line
     let line = null, headW = 0;
     function ensureLine() {
+        return null;                                   // the playhead is now ONE element (daw.js), so there is no second line to keep in sync
         const host = $("#studio-lanes"); if (!host) return null;
         if (!line || !line.isConnected) { line = document.createElement("div"); line.className = "studio-playline"; line.setAttribute("aria-hidden", "true"); host.appendChild(line); }
         return line;

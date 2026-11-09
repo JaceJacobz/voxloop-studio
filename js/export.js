@@ -63,7 +63,7 @@ async function renderSongBuffer(beat, settings, onProgress) {
 
     const ctx = {
       template, beat, view: null, stepSec, swing: settings.swing, humanize: settings.humanize,
-      sidechainOn: settings.sidechainOn, isAudible: settings.isAudible, floorTime: 0, lastWhen: {}
+      sidechainOn: settings.sidechainOn, isAudible: settings.isAudible, floorTime: 0, lastWhen: {}, fxOn: settings.fxOn !== false
     };
 
     // Queue one bar: its levels and effects, then every step of every track, at their exact times
@@ -99,7 +99,7 @@ async function renderSongBuffer(beat, settings, onProgress) {
 
 // ---------- WAV encoding ----------
 // bits: 16 or 24. Trailing silence is trimmed (a short tail is kept).
-function encodeAudioBufferWav(audioBuffer, bits) {   // (named apart from mixui.js's encodeWav: two files used the same name)
+function encodeAudioBufferWav(audioBuffer, bits, forceFrames) {   // (named apart from mixui.js's encodeWav: two files used the same name)
   const channels = Math.min(2, audioBuffer.numberOfChannels);
   const rate = audioBuffer.sampleRate;
   const data = [];
@@ -108,7 +108,8 @@ function encodeAudioBufferWav(audioBuffer, bits) {   // (named apart from mixui.
   // Find the end of the sound (anything louder than about -80 dB), keep a quarter second after it
   let end = audioBuffer.length - 1;
   while (end > 0 && Math.abs(data[0][end]) < 1e-4 && Math.abs(data[channels - 1][end]) < 1e-4) end--;
-  const frames = Math.min(audioBuffer.length, end + Math.floor(rate * 0.25));
+  // (stems pass forceFrames so every file is exactly the same length and lines up when imported)
+  const frames = forceFrames ? Math.min(audioBuffer.length, forceFrames) : Math.min(audioBuffer.length, end + Math.floor(rate * 0.25));
 
   const bytes = bits / 8;
   const dataSize = frames * channels * bytes;
@@ -143,6 +144,71 @@ function encodeAudioBufferWav(audioBuffer, bits) {   // (named apart from mixui.
     }
   }
   return { blob: new Blob([buffer], { type: "audio/wav" }), seconds: frames / rate, bytes: buffer.byteLength };
+}
+
+// ---------- Stems: one file per group of instruments, for a DAW (BandLab, FL Studio...) ----------
+// Each stem is the whole beat with only that group playing, at the same levels as the full mix, so the stems
+// line up and sound right together. (They are not guaranteed to add up to the exact full mix: the master
+// processing reacts to what it hears, and a stem is quieter than the whole.)
+const STEM_GROUPS = [
+  { name: "Drums",      tracks: ["kick", "snare", "clap", "rim", "hat", "openhat"] },
+  { name: "Percussion", tracks: ["shaker", "perc", "bell"] },
+  { name: "Bass",       tracks: ["bass", "logdrum"] },
+  { name: "Music",      tracks: ["chords", "pad", "pluck", "lead"] }
+];
+// Each stem is handed to onStem the moment it is rendered and then dropped. Four full-length stereo buffers held at
+// once is hundreds of MB, which a phone browser may not survive: only one is in memory at a time.
+async function renderStems(beat, settings, onProgress, onStem) {
+  for (let g = 0; g < STEM_GROUPS.length; g++) {
+    const group = STEM_GROUPS[g];
+    const buffer = await renderSongBuffer(beat, Object.assign({}, settings, {
+      isAudible: n => group.tracks.includes(n) && (!settings.isAudible || settings.isAudible(n)),
+      fxOn: g === 0                                     // the impact and crash belong to the drums stem only
+    }), (done, total) => { if (onProgress) onProgress(g, STEM_GROUPS.length, done / total); });
+    await onStem({ name: group.name, buffer });
+  }
+}
+
+// A zip file with the files stored as they are (no compression: WAV does not shrink much, and this needs no library)
+const ZIP_CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function zipCrc32(bytes) { let c = 0xFFFFFFFF; for (let i = 0; i < bytes.length; i++) c = ZIP_CRC[(c ^ bytes[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+// Compress with the browser's own deflate when it has one (WAV with silence shrinks a lot); otherwise store as is
+async function zipDeflate(bytes) {
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch (err) { return null; }
+}
+async function makeZip(files) {                        // files: [{ name, data: Uint8Array }]  ->  Blob
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), crc = zipCrc32(f.data), size = f.data.length;
+    const packed = await zipDeflate(f.data);
+    const body = packed && packed.length < size ? packed : f.data;       // deflate only when it actually helps
+    const method = body === f.data ? 0 : 8, stored = body.length;
+    const head = new DataView(new ArrayBuffer(30));
+    head.setUint32(0, 0x04034b50, true); head.setUint16(4, 20, true); head.setUint16(6, 0x0800, true); head.setUint16(8, method, true);
+    head.setUint16(10, dosTime, true); head.setUint16(12, dosDate, true); head.setUint32(14, crc, true);
+    head.setUint32(18, stored, true); head.setUint32(22, size, true); head.setUint16(26, name.length, true); head.setUint16(28, 0, true);
+    parts.push(new Uint8Array(head.buffer), name, body);
+    const rec = new DataView(new ArrayBuffer(46));
+    rec.setUint32(0, 0x02014b50, true); rec.setUint16(4, 20, true); rec.setUint16(6, 20, true); rec.setUint16(8, 0x0800, true); rec.setUint16(10, method, true);
+    rec.setUint16(12, dosTime, true); rec.setUint16(14, dosDate, true); rec.setUint32(16, crc, true);
+    rec.setUint32(20, stored, true); rec.setUint32(24, size, true); rec.setUint16(28, name.length, true);
+    rec.setUint32(42, offset, true);
+    central.push(new Uint8Array(rec.buffer), name);
+    offset += 30 + name.length + stored;
+  }
+  const centralSize = central.reduce((n, p) => n + p.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, centralSize, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
 }
 
 function downloadBlob(blob, filename) {

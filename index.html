@@ -9,10 +9,21 @@
     <link rel="icon" type="image/png" sizes="32x32" href="logo-mark.png">
     <link rel="icon" type="image/png" sizes="16x16" href="assets/logo.png">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <script>
+        /* The app used to be called Vocal Vault: carry saved preferences over to the new names once. */
+        try {
+            [["vv-mode", "vl-last-screen"], ["vv-settings", "vl-settings"]].forEach(function (p) {
+                var v = localStorage.getItem(p[0]);
+                if (v !== null && localStorage.getItem(p[1]) === null) localStorage.setItem(p[1], v);
+                if (v !== null) localStorage.removeItem(p[0]);
+            });
+        } catch (e) { /* storage not available */ }
+    </script>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/fxrack.css">
     <link rel="stylesheet" href="css/ui-polish.css">
     <link rel="stylesheet" href="css/mobile.css">
+    <link rel="stylesheet" href="css/nav.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=Instrument+Sans:wght@400..700&display=swap" rel="stylesheet">
@@ -26,20 +37,19 @@
     </div>
 </div>
 
-<div id="app-shell" class="app-shell mode-pipeline is-booting ux-simple">
+<div id="app-shell" class="app-shell mode-pipeline is-booting">
 
     <!-- TOP BAR: logo + name · Simple/Pro · Pipeline/Studio · roles -->
     <header class="top-bar">
+        <button type="button" id="nav-toggle" class="nav-toggle" aria-label="Open the menu" aria-expanded="false" aria-controls="nav-drawer">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
         <div class="logo-mark" aria-hidden="true"><img src="assets/logo.png" alt=""></div>
         <div class="brand-block">
             <h1>Voxloop Studio</h1>
             <p class="subtitle" id="mode-subtitle">Create · Record · Mix · Master</p>
         </div>
-
-        <div class="ux-switch" role="group" aria-label="Control detail">
-            <button type="button" class="ux-btn is-active" data-ux="simple" id="ux-simple" title="Fewer controls">Simple</button>
-            <button type="button" class="ux-btn" data-ux="pro" id="ux-pro" title="All controls">Pro</button>
-        </div>
+        <span class="nav-current" id="nav-current" aria-live="polite"></span>
 
         <nav class="mode-switch" role="tablist" aria-label="Workspace">
             <button type="button" class="mode-btn" data-mode="beatlab" role="tab" aria-selected="false" title="Beat Lab: make a beat">
@@ -47,22 +57,55 @@
                 <span class="mode-label">Beat Lab</span>
             </button>
             <button type="button" class="mode-btn" data-mode="studio" role="tab" aria-selected="false" title="Studio: record, layer and edit vocals">
-                <svg class="mode-ico" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="6.5" y="1.8" width="5" height="9" rx="2.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M3.8 8.6a5.2 5.2 0 0 0 10.4 0M9 13.8v2.4M6.4 16.2h5.2" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+                <svg class="mode-ico" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="6.5" y="1.8" width="5" height="9" rx="2.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M3.8 8.6a5.2 5.2 0 0 0 10.4 0M9 13.8v2.4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
                 <span class="mode-label">Studio</span>
             </button>
             <button type="button" class="mode-btn is-active" data-mode="pipeline" role="tab" aria-selected="true" title="Pipeline: auto tune, mix and master a finished vocal">
-                <svg class="mode-ico" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="5" r="1.9" fill="var(--bg)" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="9" r="1.9" fill="var(--bg)" stroke="currentColor" stroke-width="1.5"/><circle cx="7.5" cy="13" r="1.9" fill="var(--bg)" stroke="currentColor" stroke-width="1.5"/></svg>
+                <svg class="mode-ico" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="5" r="1.9" fill="currentColor"/><circle cx="12" cy="9" r="1.9" fill="currentColor"/><circle cx="7.5" cy="13" r="1.9" fill="currentColor"/></svg>
                 <span class="mode-label">Pipeline</span>
+            </button>
+            <span class="mode-sep" aria-hidden="true"></span>
+            <button type="button" class="mode-btn" data-mode="drafts" role="tab" aria-selected="false" title="Drafts: beats and songs saved to finish later">
+                <svg class="mode-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>
+                <span class="mode-label">Drafts</span><span class="drafts-badge" hidden>0</span>
+            </button>
+            <button type="button" class="mode-btn" data-mode="settings" role="tab" aria-selected="false" title="Settings: microphone, count-in and timing">
+                <svg class="mode-ico" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="2.4" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M9 1.8v2.2M9 14v2.2M1.8 9H4M14 9h2.2M3.9 3.9l1.6 1.6M12.5 12.5l1.6 1.6M14.1 3.9l-1.6 1.6M5.5 12.5l-1.6 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                <span class="mode-label">Settings</span>
             </button>
         </nav>
 
         <div class="top-bar-spacer"></div>
+
+        <button type="button" id="draft-save" class="draft-save" hidden title="Save this to Drafts to finish later" aria-label="Save to drafts">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>
+            <span>Save to drafts</span>
+        </button>
 
         <div id="pipeline-roles" class="pipeline-roles">
             <span class="role-chip role-vocal" id="role-vocal-chip">Vocal: —</span>
             <span class="role-chip role-beat" id="role-beat-chip">Beat: —</span>
         </div>
     </header>
+
+    <!-- MENU (phone): every place in the app -->
+    <div id="nav-backdrop" class="nav-backdrop"></div>
+    <aside id="nav-drawer" class="nav-drawer" role="dialog" aria-modal="true" aria-label="Menu" aria-hidden="true">
+        <div class="nav-head">
+            <img src="assets/logo.png" alt="" width="30" height="30">
+            <div><strong>Voxloop Studio</strong><small>Make a beat · record · finish</small></div>
+            <button type="button" id="nav-close" class="nav-close" aria-label="Close the menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+        <nav class="nav-list" aria-label="Places">
+            <p class="nav-group">Make music</p>
+            <button type="button" class="mode-btn nav-item" data-mode="beatlab"><svg width="22" height="22" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 12V8M6.5 14V4M10 11V6M13.5 13V3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg><span><b>Beat Lab</b><small>Make a beat</small></span></button>
+            <button type="button" class="mode-btn nav-item" data-mode="studio"><svg width="22" height="22" viewBox="0 0 18 18" aria-hidden="true"><rect x="6.5" y="1.8" width="5" height="9" rx="2.5" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M3.8 8.6a5.2 5.2 0 0 0 10.4 0M9 13.8v2.4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg><span><b>Studio</b><small>Record, layer and edit vocals</small></span></button>
+            <button type="button" class="mode-btn nav-item" data-mode="pipeline"><svg width="22" height="22" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="5" r="1.9" fill="currentColor"/><circle cx="12" cy="9" r="1.9" fill="currentColor"/><circle cx="7.5" cy="13" r="1.9" fill="currentColor"/></svg><span><b>Pipeline</b><small>Tune, mix and master a finished vocal</small></span></button>
+            <p class="nav-group">Your stuff</p>
+            <button type="button" class="mode-btn nav-item" data-mode="drafts"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg><span><b>Drafts</b><small>Beats and songs to finish later</small></span><span class="drafts-badge" hidden>0</span></button>
+            <button type="button" class="mode-btn nav-item" data-mode="settings"><svg width="22" height="22" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="2.4" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M9 1.8v2.2M9 14v2.2M1.8 9H4M14 9h2.2M3.9 3.9l1.6 1.6M12.5 12.5l1.6 1.6M14.1 3.9l-1.6 1.6M5.5 12.5l-1.6 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span><b>Settings</b><small>Microphone, count-in, timing</small></span></button>
+        </nav>
+    </aside>
 
     <!-- ===================== BEAT LAB MODE ===================== -->
     <div id="mode-beatlab" class="mode-panel hidden" aria-hidden="true">
@@ -103,8 +146,32 @@
                     <span class="field-label">Form</span>
                     <select id="bl-structure"></select>
                 </label>
+                <label class="toggle melody-toggle" title="On by default. Turn it off for a beat with no melody line: the lead and pluck (and a chime bell) stop; chords, pad, bass and drums stay.">
+                    <input type="checkbox" id="bl-melody" checked>
+                    <span class="toggle-ui"></span>
+                    Melody
+                </label>
                 <span class="bpm-pill"><strong id="bl-bpm">--</strong> BPM</span>
             </div>
+
+            <details class="panel-card beatlab-sound" id="bl-soundBox">
+                <summary>
+                    <span class="panel-title">Sound: kits &amp; instruments</span>
+                    <span class="beatlab-sound-hint" id="bl-soundHint">Each style picks its own. Change any part, or leave it on the style default.</span>
+                </summary>
+                <div class="beatlab-packrow">
+                    <label class="field">
+                        <span class="field-label">Sound pack</span>
+                        <select id="bl-pack"></select>
+                    </label>
+                    <span class="beatlab-sound-hint" id="bl-packHint"></span>
+                </div>
+                <div class="beatlab-soundgrid" id="bl-soundGrid"></div>
+                <button type="button" id="bl-soundReset" class="secondary-button">Back to style defaults</button>
+                <h4 class="beatlab-samples-title">Your own samples</h4>
+                <p class="beatlab-sound-hint">Replace a synthesized drum with your own recording (WAV, MP3, M4A; up to 10 seconds). It goes through the same fader and mixer, and stays until you clear it or reload the page.</p>
+                <div class="beatlab-soundgrid" id="bl-sampleGrid"></div>
+            </details>
 
             <div class="beatlab-row">
                 <section class="panel-card beatlab-feel">
@@ -172,11 +239,7 @@
                             <span>Start from</span>
                             <select id="vr-start"><option value="0">The beginning</option></select>
                         </label>
-                        <label class="toggle">
-                            <input type="checkbox" id="vr-countin" checked>
-                            <span class="toggle-ui"></span>
-                            Count in one bar
-                        </label>
+                        <button type="button" class="link-button" id="vr-open-settings">Mic &amp; count-in settings</button>
                     </div>
                 </div>
                 <div class="vr-meter" aria-hidden="true"><i id="vr-meter-fill"></i></div>
@@ -245,7 +308,12 @@
                     <button id="bl-rebalance" type="button" class="secondary-button small">Re-balance</button>
                 </div>
                 <p class="mixstatus" id="bl-mixStatus"></p>
-                <div class="mixreport" id="bl-mixReport"></div>
+                <div class="mixdoctor">
+                    <button id="bl-doctorBtn" type="button" class="secondary-button">Check &amp; fix my mix</button>
+                    <span class="beatlab-sound-hint">Listens to the beat like an engineer (balance, low end, the singer's range, headroom), fixes what it can, and tells you the rest.</span>
+                    <ul class="doctor-list" id="bl-doctorList"></ul>
+                </div>
+                <details class="edit-summary"><summary>What the auto-mix changed</summary><div class="mixreport" id="bl-mixReport"></div></details>
                 <div class="strips" id="bl-mixer"></div>
                 <button id="bl-mixerReset" type="button" class="secondary-button small">Reset mixer</button>
             </details>
@@ -261,10 +329,15 @@
                             <option value="16">16-bit</option>
                         </select>
                     </label>
+                    <button id="bl-stems" type="button" class="secondary-button">Download stems (zip)</button>
+                    <label class="beatlab-check">
+                        <input type="checkbox" id="bl-doctorOnExport" checked>
+                        <span>Check my mix first</span>
+                    </label>
                     <button id="bl-send-pipeline" type="button" class="secondary-button">Send to Pipeline</button>
                     <button id="bl-send-studio" type="button" class="secondary-button">Open in Studio</button>
                 </div>
-                <p class="hint">Download keeps a mix-ready instrumental. Sending loads the beat into Voxloop Studio so you can record, tune, mix and master vocals on top of it.</p>
+                <p class="hint">Stems are four WAV files (drums, percussion, bass, music) of the same length, to open in BandLab or any DAW. "Check my mix first" runs the Mix Doctor before every download or send (about half a minute longer). Download keeps a mix-ready instrumental. Sending loads the beat into Voxloop Studio so you can record, tune, mix and master vocals on top of it.</p>
                 <p id="bl-status" role="status">Ready. Generate a beat, then play or send it onward.</p>
             </section>
         </div>
@@ -627,6 +700,13 @@
                 </span>
             </label>
             <label class="tune-check">
+                <input type="checkbox" id="tune-phrases" checked>
+                <span>
+                    Listen line by line: allow the notes each line really uses
+                    <small>On: every line is checked for notes that belong to the song but not to its plain key (a blue note, a lift to the 4th, a major colour) and keeps them, instead of bending them to the nearest key note. Rapped lines are left as performed. Turn off to use one key for the whole vocal.</small>
+                </span>
+            </label>
+            <label class="tune-check">
                 <input type="checkbox" id="tune-auto" checked>
                 <span>
                     Auto: set speed, strength and vibrato from my song and voice
@@ -659,7 +739,7 @@
                 <strong id="tune-shift-value">0 (automatic)</strong>
                 <input type="range" id="tune-shift" class="tune-slider" min="-12" max="12" value="0" step="1">
             </div>
-            <div class="pro-only">
+            <div class="advanced-block">
             <div class="tune-row">
                 <label for="tune-retune">Retune speed</label>
                 <strong id="tune-retune-value">50 ms</strong>
@@ -838,7 +918,7 @@
                 <label for="master-target">Loudness target</label>
                 <select id="master-target"></select>
             </div>
-            <div class="mix-option pro-only">
+            <div class="mix-option">
                 <label class="mix-check" for="beat-enhance">
                     <input type="checkbox" id="beat-enhance" checked>
                     Auto-enhance beat
@@ -884,7 +964,7 @@
                 </select>
                 <span class="info-tip"><button type="button" class="info-tip-btn" aria-label="About instrument balance" aria-expanded="false"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7 6.2v3.6M7 4.2h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><span class="info-tip-panel" role="tooltip">Brings out the piano, keys, guitars, pads and strings in your beat (and the snare and hats) so you can hear them under the voice, like a studio mix. It lifts them just enough to sit a bit under the vocal, mostly while you sing. Kick and bass are not touched. If they are already audible, nothing changes.</span></span>
             </div>
-            <div class="mix-option mix-option-wide pro-only">
+            <div class="mix-option mix-option-wide">
                 <label for="harmony-select">Higher harmony</label>
                 <select id="harmony-select">
                     <option value="0" selected>Off</option>
@@ -904,7 +984,7 @@
         <div id="mix-result" class="mix-result">
             <h3 class="mix-result-title">Your mix</h3>
             <audio id="mix-audio-player" class="mix-player" controls></audio>
-            <a id="mix-download" class="primary-button tune-download mix-download-btn hidden" download="vocal-vault-master.wav" href="#">
+            <a id="mix-download" class="primary-button tune-download mix-download-btn hidden" download="voxloop-master.wav" href="#">
                 Download final mix
             </a>
             <div id="mix-compare" class="hidden mix-compare">
@@ -921,7 +1001,7 @@
 
 
 
-            <footer class="project-footer">Voxloop Studio · VL Studio · Create · Record · Mix · Master</footer>
+            <footer class="project-footer">Voxloop Studio</footer>
         </div>
     </div>
 
@@ -960,9 +1040,11 @@
                 <div class="studio-ruler-row">
                     <div class="studio-lane-head studio-ruler-head">Lanes</div>
                     <div class="studio-ruler-scroll" id="studio-ruler-scroll">
-                        <canvas id="studio-ruler" height="28"></canvas>
-                        <div id="studio-playhead" class="studio-playhead"><span></span></div>
+                        <canvas id="studio-ruler" height="30"></canvas>
                     </div>
+                </div>
+                <div class="studio-playhead-layer" aria-hidden="true">
+                    <div id="studio-playhead" class="studio-playhead"><span class="ph-flag"></span><b class="ph-time"></b></div>
                 </div>
 
                 <div id="studio-lanes" class="studio-lanes">
@@ -1007,12 +1089,12 @@
                 <div class="transport-right">
                     <div class="tr-opts">
                         <label class="tr-loop"><input type="checkbox" id="tr-loop"> Loop</label>
-                        <label class="tr-countin" title="1-bar count-in before record">
-                            <input type="checkbox" id="tr-countin" checked> Count-in
-                        </label>
-                        <label class="tr-countin" title="Disable noise suppression / AGC (can be hissy on laptop mics)">
-                            <input type="checkbox" id="tr-raw-mic"> Raw mic
-                        </label>
+                        <button type="button" id="tr-phone" class="tr-phone" aria-pressed="false" title="Hear it like a small phone speaker (check your mix where many people listen)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg><span>Phone</span>
+                        </button>
+                        <button type="button" id="tr-settings" class="tr-gear" title="Recording settings: mic, count-in, timing" aria-label="Recording settings">
+                            <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="2.4" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M9 1.8v2.2M9 14v2.2M1.8 9H4M14 9h2.2M3.9 3.9l1.6 1.6M12.5 12.5l1.6 1.6M14.1 3.9l-1.6 1.6M5.5 12.5l-1.6 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                        </button>
                     </div>
                     <div class="tr-readout">
                         <div class="tr-meter" title="Input level"><div id="tr-meter-fill" class="tr-meter-fill"></div></div>
@@ -1021,6 +1103,102 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ===================== DRAFTS ===================== -->
+    <div id="mode-drafts" class="mode-panel hidden" aria-hidden="true">
+        <div class="drafts-layout">
+            <div class="drafts-head">
+                <div>
+                    <h2 class="panel-title">Drafts</h2>
+                    <p class="settings-note">Beats and songs you saved to finish later. They stay on this device.</p>
+                </div>
+                <div class="drafts-filter" role="group" aria-label="Show">
+                    <button type="button" data-f="all" class="is-on">All</button>
+                    <button type="button" data-f="beats">Beats</button>
+                    <button type="button" data-f="songs">Songs</button>
+                </div>
+            </div>
+            <div id="drafts-list" class="drafts-list" aria-live="polite"></div>
+            <p class="drafts-foot" id="drafts-count"></p>
+            <p class="drafts-foot">Drafts live in this browser. If you clear the browser's site data they are removed, so send finished songs to Pipeline and download them.</p>
+        </div>
+    </div>
+
+    <!-- ===================== SETTINGS MODE ===================== -->
+    <div id="mode-settings" class="mode-panel hidden" aria-hidden="true">
+        <div class="settings-layout">
+            <section class="panel-card settings-card">
+                <h2 class="panel-title">Recording</h2>
+                <p class="settings-note">These apply to recording in Studio and in Beat Lab. They are saved on this device.</p>
+
+                <fieldset class="settings-group">
+                    <legend>Microphone</legend>
+                    <label class="settings-choice"><input type="radio" name="st-mic" value="earbuds" checked><span><strong>Earbuds mic</strong> (default)<small>Your wired or Bluetooth earbuds. Keeps the beat out of the mic.</small></span></label>
+                    <label class="settings-choice"><input type="radio" name="st-mic" value="phone"><span><strong>Phone's own mic</strong><small>Use the built-in mic even when earbuds are connected. Wear them only to hear, or the beat leaks into the take.</small></span></label>
+                    <p class="settings-now" id="st-mic-now" role="status"></p>
+                    <div class="settings-row">
+                        <button type="button" class="secondary-button" id="st-test">Test mic</button>
+                        <button type="button" class="secondary-button" id="st-refresh">Refresh</button>
+                        <div class="settings-meter" aria-hidden="true"><i id="st-meter-fill"></i></div>
+                    </div>
+                </fieldset>
+
+                <label class="settings-field">
+                    <span class="field-label">Mic cleanup (the phone's call-style processing)</span>
+                    <select id="st-cleanup">
+                        <option value="off">Off: the cleanest sound for singing (recommended)</option>
+                        <option value="on">On: only if the beat leaks into your mic</option>
+                    </select>
+                    <small class="settings-note">With it on, the phone squashes and dulls a singing voice. Use headphones instead, so the beat cannot leak into the mic.</small>
+                </label>
+
+                <label class="settings-field">
+                    <span class="field-label">Quiet singing</span>
+                    <select id="st-lift">
+                        <option value="auto">Auto: lift a quiet take a lot (up to +30 dB)</option>
+                        <option value="normal">Normal: lift up to +12 dB</option>
+                        <option value="off">Off: keep the level as recorded</option>
+                    </select>
+                    <small class="settings-note">Every take is brought to a healthy level after you record it. A loud take is brought down, a quiet one up, so a soft singer is never stuck with a weak recording. Lifting also lifts background noise, which is why Autopilot cleans the noise after this step.</small>
+                </label>
+
+                <fieldset class="settings-group">
+                    <legend>Count-in</legend>
+                    <label class="toggle">
+                        <input type="checkbox" id="st-countin">
+                        <span class="toggle-ui"></span>
+                        Play clicks before recording starts
+                    </label>
+                    <label class="settings-field" id="st-countin-bars-row" hidden>
+                        <span class="field-label">Length</span>
+                        <select id="st-countin-bars"><option value="1">1 bar</option><option value="2">2 bars</option></select>
+                    </label>
+                </fieldset>
+
+                <fieldset class="settings-group">
+                    <legend>Autopilot</legend>
+                    <label class="toggle">
+                        <input type="checkbox" id="st-automelody" checked>
+                        <span class="toggle-ui"></span>
+                        Add a trumpet melody that fits my vocal when the beat has no melody
+                    </label>
+                    <p class="settings-note">Short lines that answer you in the gaps, quiet under your voice. You can change, regenerate or remove it from the Melody button in Studio.</p>
+                </fieldset>
+
+                <fieldset class="settings-group">
+                    <legend>Timing</legend>
+                    <p class="settings-note">The delay of your phone and earbuds is measured and removed from every take automatically. If takes still land a little early or late, nudge them here. Bluetooth earbuds usually need a positive value.</p>
+                    <div class="settings-row">
+                        <input type="range" id="st-offset" min="-300" max="300" step="5" value="0" aria-label="Timing nudge in milliseconds">
+                        <output id="st-offset-out">0 ms</output>
+                    </div>
+                    <p class="settings-now" id="st-last"></p>
+                </fieldset>
+
+                <button type="button" class="secondary-button" id="st-reset">Back to defaults</button>
+            </section>
         </div>
     </div>
 
@@ -1043,6 +1221,7 @@
 </script>
 <script src="lib/Tone.js"></script>
 <script src="js/icons.js"></script>
+<script src="js/settings.js"></script>
 <script>
     (function () {
         if (window.__voxloopNativeAudioContext) {
@@ -1052,10 +1231,13 @@
     })();
 </script>
 <script src="js/templates.js"></script>
+<script src="js/templates-afro.js"></script>
+<script src="js/packs.js"></script>
 <script src="js/beatgen.js"></script>
 <script src="js/automix-bs.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/export.js"></script>
+<script src="js/mixdoctor.js"></script>
 <script src="js/musictheory.js"></script>
 <script src="js/analysis.js"></script>
 <script src="js/pitchcorrect.js"></script>
@@ -1064,7 +1246,7 @@
 <script src="js/fxplus.js"></script>
 <script src="js/levelmatch.js"></script>
 <script src="js/presets.js"></script>
-<script src="js/automix-vv.js"></script>
+<script src="js/automix-vl.js"></script>
 <script src="js/fill.js"></script>
 <script src="js/genre.js"></script>
 <script src="js/balance.js"></script>
@@ -1074,12 +1256,19 @@
 <script src="js/studiolevels.js"></script>
 <script src="js/daw.js"></script>
 <script src="js/fxrack-dsp.js"></script>
+<script src="js/vlclean.js"></script>
 <script src="js/resonance.js"></script>
 <script src="js/voiceid.js"></script>
+<script src="js/phrasebrain.js"></script>
 <script src="js/fxbrain.js"></script>
 <script src="js/mixbrain.js"></script>
 <script src="js/fxrack.js"></script>
 <script src="js/automation.js"></script>
+<script src="js/takecheck.js"></script>
+<script src="js/editing.js"></script>
+<script src="js/melody.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/drafts.js"></script>
 <script src="js/reference.js"></script>
 <script src="js/studioui.js"></script>
 <script src="js/beatlab.js"></script>
@@ -1215,24 +1404,6 @@
         });
     });
 
-    // Simple / Pro
-    function setUx(mode) {
-        if (!shell) return;
-        shell.classList.toggle("ux-simple", mode === "simple");
-        shell.classList.toggle("ux-pro", mode === "pro");
-        document.querySelectorAll(".ux-btn").forEach((b) => {
-            b.classList.toggle("is-active", b.dataset.ux === mode);
-        });
-        try { localStorage.setItem("vv-ux-mode", mode); } catch (e) {}
-    }
-    document.querySelectorAll(".ux-btn").forEach((b) => {
-        b.addEventListener("click", () => setUx(b.dataset.ux));
-    });
-    try {
-        const saved = localStorage.getItem("vv-ux-mode");
-        if (saved === "pro" || saved === "simple") setUx(saved);
-    } catch (e) {}
-
     const obs = new MutationObserver(refresh);
     Object.keys(map).forEach((id) => {
         const el = document.getElementById(id);
@@ -1247,7 +1418,7 @@
         const mo = new MutationObserver(refresh);
         mo.observe(player, { attributes: true, attributeFilter: ["src"] });
     }
-    window.vvRefreshPipelineChrome = refresh;
+    window.vlRefreshPipelineChrome = refresh;
     refresh();
 })();
 </script>
@@ -1308,14 +1479,14 @@
 
 
 <!-- Voxloop Studio modal -->
-<div id="vv-modal" class="vv-modal" hidden aria-hidden="true">
-    <div class="vv-modal-backdrop" data-vv-modal-dismiss></div>
-    <div class="vv-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="vv-modal-title">
-        <h2 id="vv-modal-title" class="vv-modal-title">Notice</h2>
-        <p id="vv-modal-message" class="vv-modal-message"></p>
-        <div class="vv-modal-actions">
-            <button type="button" id="vv-modal-cancel" class="secondary-button vv-modal-cancel" hidden>Cancel</button>
-            <button type="button" id="vv-modal-ok" class="primary-button">OK</button>
+<div id="vl-modal" class="vl-modal" hidden aria-hidden="true">
+    <div class="vl-modal-backdrop" data-vl-modal-dismiss></div>
+    <div class="vl-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="vl-modal-title">
+        <h2 id="vl-modal-title" class="vl-modal-title">Notice</h2>
+        <p id="vl-modal-message" class="vl-modal-message"></p>
+        <div class="vl-modal-actions">
+            <button type="button" id="vl-modal-cancel" class="secondary-button vl-modal-cancel" hidden>Cancel</button>
+            <button type="button" id="vl-modal-ok" class="primary-button">OK</button>
         </div>
     </div>
 </div>
@@ -1323,18 +1494,18 @@
 
 <script>
 (function () {
-    const root = document.getElementById("vv-modal");
+    const root = document.getElementById("vl-modal");
     if (!root) return;
-    const titleEl = document.getElementById("vv-modal-title");
-    const msgEl = document.getElementById("vv-modal-message");
-    const okBtn = document.getElementById("vv-modal-ok");
-    const cancelBtn = document.getElementById("vv-modal-cancel");
+    const titleEl = document.getElementById("vl-modal-title");
+    const msgEl = document.getElementById("vl-modal-message");
+    const okBtn = document.getElementById("vl-modal-ok");
+    const cancelBtn = document.getElementById("vl-modal-cancel");
     let resolver = null;
 
     function close(result) {
         root.hidden = true;
         root.setAttribute("aria-hidden", "true");
-        document.body.classList.remove("vv-modal-open");
+        document.body.classList.remove("vl-modal-open");
         const r = resolver;
         resolver = null;
         if (r) r(result);
@@ -1349,14 +1520,14 @@
         cancelBtn.textContent = o.cancelLabel || "Cancel";
         root.hidden = false;
         root.setAttribute("aria-hidden", "false");
-        document.body.classList.add("vv-modal-open");
+        document.body.classList.add("vl-modal-open");
         setTimeout(() => okBtn.focus(), 30);
         return new Promise((resolve) => { resolver = resolve; });
     }
 
     okBtn.addEventListener("click", () => close(true));
     cancelBtn.addEventListener("click", () => close(false));
-    root.querySelector("[data-vv-modal-dismiss]").addEventListener("click", () => {
+    root.querySelector("[data-vl-modal-dismiss]").addEventListener("click", () => {
         close(cancelBtn.hidden ? true : false);
     });
     document.addEventListener("keydown", (e) => {
@@ -1370,7 +1541,7 @@
         }
     });
 
-    window.VocalVaultModal = {
+    window.VLModal = {
         alert: function (message, title) {
             return open({ message: String(message || ""), title: title || "Notice", confirm: false });
         },
@@ -1380,6 +1551,8 @@
     };
 })();
 </script>
+<script src="js/autodecide.js"></script>
+<script src="js/autopilot.js"></script>
 
 </body>
 </html>

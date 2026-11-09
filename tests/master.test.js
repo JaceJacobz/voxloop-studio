@@ -4,7 +4,7 @@ const fs = require("fs"), path = require("path"), vm = require("vm");
 const g = globalThis; g.window = g; g.self = g; g.document = { getElementById: () => null, createElement: () => ({}), addEventListener() {} };
 const load = (f) => vm.runInThisContext(fs.readFileSync(path.join(__dirname, "../js", f), "utf8"), { filename: f });
 load("studio.js"); load("levelmatch.js");
-const E = g.VocalVaultStudio.engine, M = g.VocalVaultLevels && g.VocalVaultLevels.engine;
+const E = g.VLStudio.engine, M = g.VLLevels && g.VLLevels.engine;
 if (!M) { console.log("no loudness meter exported"); process.exit(2); }
 const sr = 44100, secs = 20, n = sr * secs;
 function song(level, peaky) {

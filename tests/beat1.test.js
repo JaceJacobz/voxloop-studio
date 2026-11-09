@@ -3,7 +3,7 @@ const fs = require("fs"), path = require("path"), vm = require("vm"), B = requir
 const g = globalThis; g.window = g; g.self = g; g.document = { getElementById: () => null, createElement: () => ({}), addEventListener() {} };
 const load = (f) => vm.runInThisContext(fs.readFileSync(path.join(__dirname, "../js", f), "utf8"), { filename: f });
 load("studio.js"); load("musictheory.js".replace("musictheory", "fill")); 
-const Fill = g.VocalVaultFill.engine;
+const Fill = g.VLFill.engine;
 const VAR = process.argv[2] || 'base'; const results = []; let ok = 0, tot = 0; const byPat = {};
 const pats = Object.keys(B.PATTERNS), progs = ["minor4", "major4", "minor2", "major2"], tempos = process.env.Q ? [92] : [92, 105], pres = [0, 1, 2, 3];
 let seed = 1;

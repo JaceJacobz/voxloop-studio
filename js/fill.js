@@ -1,5 +1,5 @@
 /**
- * Vocal Vault — optional fill for missing / thin instruments (v2, section-aware)
+ * Voxloop Studio — optional fill for missing / thin instruments (v2, section-aware)
  *
  * What it does differently from a "lay a loop over the whole song" fill:
  *  1. GRID      Finds the beat's real tempo (to 0.001%) and where beat 1 of each bar really falls,
@@ -1027,9 +1027,9 @@
         return { fillMissing, detectInstruments, analyze, plan };
     }
 
-    if (typeof window !== "undefined" && window.VocalVaultStudio && window.VocalVaultStudio.engine) {
-        const eng = createFillEngine(window.VocalVaultStudio.engine);
-        window.VocalVaultFill = { detectInstruments: eng.detectInstruments, fillMissing: eng.fillMissing, engine: eng };
+    if (typeof window !== "undefined" && window.VLStudio && window.VLStudio.engine) {
+        const eng = createFillEngine(window.VLStudio.engine);
+        window.VLFill = { detectInstruments: eng.detectInstruments, fillMissing: eng.fillMissing, engine: eng };
     }
 
 })(typeof window !== "undefined" ? window : this);

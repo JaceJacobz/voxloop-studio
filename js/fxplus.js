@@ -1,5 +1,5 @@
 /* =========================================================
-   VOCAL VAULT — EXTRA PRODUCTION (all automatic)
+   VOXLOOP STUDIO — EXTRA PRODUCTION (all automatic)
 
    1. doubler       Two quiet, slightly detuned and delayed copies of the
                     voice, one left and one right. This is the classic
@@ -220,6 +220,6 @@ function createFxPlusEngine(studio) {
     return { doubler, duckBeatMid, voiceActivity, echoTime, room, reverbTime, harmonyStem, toMono };
 }
 
-if (typeof window !== "undefined" && window.VocalVaultStudio) {
-    window.VocalVaultFxPlus = { engine: createFxPlusEngine(window.VocalVaultStudio.engine) };
+if (typeof window !== "undefined" && window.VLStudio) {
+    window.VLFxPlus = { engine: createFxPlusEngine(window.VLStudio.engine) };
 }

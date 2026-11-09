@@ -1,7 +1,7 @@
 /* =========================================================
-   VOCAL VAULT — STEP 4: PITCH CORRECTION (UI)
-   Needs pitchcorrect.js (window.VocalVaultTune) and the shared state
-   that script.js exposes as window.VocalVaultState.
+   VOXLOOP STUDIO — STEP 4: PITCH CORRECTION (UI)
+   Needs pitchcorrect.js (window.VLTune) and the shared state
+   that script.js exposes as window.VLState.
    ========================================================= */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -21,6 +21,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const testBox = $("tune-test");
     const shiftSlider = $("tune-shift");
     const autoKeyBox = $("tune-auto-key");
+    const phraseBox = $("tune-phrases");
     const autoNote = $("tune-auto-note");
     const runButton = $("tune-run-button");
     const statusLine = $("tune-status");
@@ -33,10 +34,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const stopButton = $("tune-stop");
     const downloadLink = $("tune-download");
 
-    if (!section || !window.VocalVaultTune) return;
+    if (!section || !window.VLTune) return;
 
-    const NOTE_NAMES = window.VocalVaultTune.noteNames;
-    const S = window.VocalVaultState;
+    const NOTE_NAMES = window.VLTune.noteNames;
+    const S = window.VLState;
 
     let beatTuningCents = 0;
     let lastResult = null;
@@ -65,7 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bindReadout(strengthSlider, "tune-strength-value", v => `${Math.round(v)}%`);
     bindReadout(retuneSlider, "tune-retune-value", v => (v === 0 ? "Instant" : `${Math.round(v)} ms`));
     bindReadout(flattenSlider, "tune-flatten-value", v => `${Math.round(v)}%`);
-    // 0 means "let Vocal Vault decide" only while the automatic key match is ticked; otherwise it means no move at all
+    // 0 means "let Voxloop Studio decide" only while the automatic key match is ticked; otherwise it means no move at all
     const updateShiftReadout = bindReadout(shiftSlider, "tune-shift-value", v => (v === 0 ? (autoKeyBox.checked ? "0 (automatic)" : "0 (no move)") : `${v > 0 ? "+" : ""}${Math.round(v)} semitone${Math.abs(v) === 1 ? "" : "s"}`));
     autoKeyBox.addEventListener("change", updateShiftReadout);
 
@@ -106,7 +107,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const bk = S && S.beatKey;
             const t = (bk && bk.tuningStrength != null && bk.engine && bk.source !== "Beat Lab")
                 ? { cents: bk.tuningRaw, strength: bk.tuningStrength }
-                : window.VocalVaultTune.estimateBeatTuning(S.beatBuffer);
+                : window.VLTune.estimateBeatTuning(S.beatBuffer);
             if (t.strength >= 0.35) {
                 beatTuningCents = t.cents;
                 refValue.textContent = `${t.cents >= 0 ? "+" : ""}${t.cents.toFixed(0)} cents`;
@@ -125,7 +126,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // The vocal was cleaned up or re-timed after pitch correction ran: that result is out of date.
-    window.addEventListener("vv-prep-changed", () => {
+    window.addEventListener("vl-prep-changed", () => {
         if (!lastResult) return;
         lastResult = null;
         if (S) S.tunedVocal = null;
@@ -174,7 +175,7 @@ document.addEventListener("DOMContentLoaded", () => {
             rootPc: parseInt(rootSelect.value, 10),
             scale: scaleSelect.value,
             refCents: beatTuningCents,
-            strength: parseFloat(strengthSlider.value) / 100,
+            strength: Math.min(parseFloat(strengthSlider.value) / 100, (S.autopilotTuneCap != null ? S.autopilotTuneCap : 100) / 100),   // Autopilot can cap it (a mixed sing/rap line is tuned more gently)
             retuneMs: parseFloat(retuneSlider.value),
             minRetuneMs: parseFloat(retuneSlider.value),          // the slider is the speed: no hidden minimum
             flatten: parseFloat(flattenSlider.value) / 100,
@@ -190,9 +191,25 @@ document.addEventListener("DOMContentLoaded", () => {
         };
         if (S) S.tuneOptions = { rootPc: options.rootPc, scale: options.scale, refCents: options.refCents };   // the harmony layer follows this key
 
+        // ---- listen line by line: allowed notes and strength per line (phrasebrain.js), handed to the engine as zones
+        let phraseRes = null;
+        if (phraseBox && phraseBox.checked && window.PhraseBrain && typeof createTuneEngine === "function" && (options.scale === "major" || options.scale === "minor")) {
+            try {
+                statusLine.textContent = "Listening line by line…";
+                await new Promise((r) => setTimeout(r, 30));
+                const eng = createTuneEngine(), mono = eng.mixDown(channels);
+                const tr = eng.trackClean(mono, vocal.sampleRate), notes = eng.segmentNotes(tr.midi);
+                const res = window.PhraseBrain.analyze({ notes, hopSec: tr.hop / vocal.sampleRate, key: { rootPc: options.rootPc, scale: options.scale }, refCents: options.refCents, totalSec: mono.length / vocal.sampleRate });
+                // only when most of the vocal already lives in this key: a vocal sung in a different key altogether is MOVED as a whole (the old way)
+                if (res.zones.length && !res.globalMismatch && res.keyCoverage >= 0.55) { options.zones = res.zones; options.autoTranspose = false; phraseRes = res; }
+            } catch (error) { console.warn("Line-by-line listening failed, using one key:", error); }
+        }
+        S.phraseResult = phraseRes;
+        showPhraseLines(phraseRes);
+
         try {
 
-            const result = await window.VocalVaultTune.tuneVocal(
+            const result = await window.VLTune.tuneVocal(
                 channels, vocal.sampleRate, options,
                 (fraction, label) => {
                     statusLine.textContent = `${label}… ${Math.round(fraction * 100)}%`;
@@ -228,6 +245,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
         }
     });
+
+    function showPhraseLines(res) {
+        let box = document.getElementById("tune-lines");
+        if (!box) {
+            box = document.createElement("details"); box.id = "tune-lines"; box.className = "edit-summary"; box.hidden = true;
+            box.innerHTML = "<summary></summary><ul></ul>";
+            statusLine.parentNode.insertBefore(box, statusLine.nextSibling);
+        }
+        if (!res || !res.lines.length) { box.hidden = !res; if (res) { box.querySelector("summary").textContent = "Line by line: " + res.summary.lines + " lines, all fit the beat's key"; box.querySelector("ul").innerHTML = ""; } return; }
+        box.hidden = false; box.open = false;
+        box.querySelector("summary").textContent = "How each line was handled (" + res.lines.length + ")";
+        box.querySelector("ul").innerHTML = res.lines.map((l) => "<li>" + l.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>").join("");
+    }
 
     function buildBuffers(result, vocal) {
 

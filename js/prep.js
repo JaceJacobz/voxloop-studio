@@ -1,5 +1,5 @@
 /* =========================================================
-   VOCAL VAULT — CLEAN-UP & TIMING
+   VOXLOOP STUDIO — CLEAN-UP & TIMING
 
    Two optional steps, both OFF unless the user ticks them, because
    noise and loose timing are sometimes part of the performance:
@@ -567,7 +567,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     const section = $("prep-section");
     if (!section) return;
 
-    const S = window.VocalVaultState;
+    const S = window.VLState;
     const denoiseBox = $("prep-denoise"), timingBox = $("prep-timing"), tempoBox = $("prep-tempo");
     const runButton = $("prep-run-button"), status = $("prep-status"), reportList = $("prep-report");
     const compare = $("prep-compare"), playBefore = $("prep-play-before"), playAfter = $("prep-play-after"), stopButton = $("prep-stop");
@@ -618,7 +618,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     });
 
     // Stay in sync when analysis card sets BPM
-    window.addEventListener("vv-bpm-changed", () => {
+    window.addEventListener("vl-bpm-changed", () => {
         try { refreshTempoControls(); } catch (e) { /* ignore */ }
     });
 
@@ -631,7 +631,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
                 S._prepBpm = n;
                 // Also push into the analysis state so Mix can use it
                 try {
-                    const setBpm = window.VocalVaultSetBeatBpm;
+                    const setBpm = window.VLSetBeatBpm;
                     if (typeof setBpm === "function") setBpm(n);
                 } catch (e) { /* ignore */ }
             }
@@ -663,7 +663,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
             S.preparedVocal = null; after = null;
             compare.classList.add("hidden");
             status.textContent = "Nothing ticked, so the vocal stays exactly as you recorded it.";
-            window.dispatchEvent(new Event("vv-prep-changed"));
+            window.dispatchEvent(new Event("vl-prep-changed"));
             return;
         }
 
@@ -698,7 +698,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
             result.report.forEach(line => { const li = document.createElement("li"); li.textContent = line; reportList.appendChild(li); });
             compare.classList.toggle("hidden", !after);
             status.textContent = after ? "Done. Compare below, then continue." : "Nothing needed changing, so the vocal stays as recorded.";
-            window.dispatchEvent(new Event("vv-prep-changed"));
+            window.dispatchEvent(new Event("vl-prep-changed"));
 
         } catch (error) {
             console.error(error);

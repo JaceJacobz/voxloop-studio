@@ -1,5 +1,5 @@
 /* =========================================================
-   VOCAL VAULT — AUDIO ANALYSIS ENGINE
+   VOXLOOP STUDIO — AUDIO ANALYSIS ENGINE
    Step 1: BPM detection
 
    How it works
@@ -879,7 +879,7 @@ function analyzeVocalPitch(audioBuffer) {
 }
 
 if (typeof window !== "undefined") {
-    window.VocalVaultAnalysis = {
+    window.VLAnalysis = {
         analyzeBpm,
         detectKey,
         detectVocalPitch: analyzeVocalPitch,  // async, runs in a worker

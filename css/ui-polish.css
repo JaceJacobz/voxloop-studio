@@ -219,3 +219,76 @@ button.fx-zone:hover { border-color: var(--vocal); }
 
 /* ---------- 8. Resonance option note in the mix panel ---------- */
 .mix-option-note { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+/* ---------- Studio timeline, DAW style: bar/beat ruler, one playhead, drag to scrub ---------- */
+.studio-ruler-scroll { height: 30px; overflow: hidden; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
+.studio-ruler-scroll canvas { height: 30px; }
+.studio-playhead-layer { position: absolute; top: 0; bottom: 0; left: var(--lane-head); right: 0; overflow: hidden; pointer-events: none; z-index: 6; }
+.studio-playhead-layer .studio-playhead {
+    position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; z-index: auto;
+    background: var(--accent-hi); box-shadow: 0 0 0 1px rgba(168, 148, 255, 0.12); opacity: 0.95;
+}
+.studio-playhead-layer .studio-playhead .ph-flag {
+    position: absolute; top: 0; left: 50%; width: 16px; height: 16px; border-radius: 0; transform: translateX(-50%);
+    background: var(--accent-hi); clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
+}
+.studio-playhead-layer .studio-playhead .ph-time {
+    display: none; position: absolute; top: 18px; left: 50%; transform: translateX(-50%); padding: 2px 6px; border-radius: 6px;
+    background: var(--surface-2, #25232f); color: var(--text, #fff); font: 600 11px/1.2 Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.studio-playhead-layer .studio-playhead.is-dragging .ph-time { display: block; }
+/* red = the next recording starts here (a lane is armed) or is being recorded */
+.studio-playhead-layer .studio-playhead.is-armed, .studio-playhead-layer .studio-playhead.is-rec { background: var(--rec, #ff5468); box-shadow: none; }
+.studio-playhead-layer .studio-playhead.is-armed .ph-flag, .studio-playhead-layer .studio-playhead.is-rec .ph-flag { background: var(--rec, #ff5468); }
+/* the grid behind the clips follows the ruler: a stronger line per bar, a faint one per beat */
+.studio-lane-track {
+    background-image:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.10) 0 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px);
+    background-size: var(--gmaj, 80px) 100%, var(--gmin, 20px) 100%;
+    background-repeat: repeat-x;
+    background-color: transparent;
+}
+
+/* ---------- Studio edit bar, layered clips, beat chip ---------- */
+.studio-clip .clip-wave { inset: 0 auto 0 0; height: 100%; }
+.studio-lanes { touch-action: pan-x pan-y; }
+.studio-ruler-scroll { touch-action: none; }
+.studio-lane.is-active:not(.studio-lane-beat) .studio-lane-head { box-shadow: inset 3px 0 0 var(--accent-hi, #9d86ff); }
+.studio-clip.is-layered { box-shadow: 0 1px 0 rgba(0,0,0,.35); }
+.studio-editbar { flex: none; display: flex; align-items: center; gap: 2px; padding: 4px 8px; overflow-x: auto; scrollbar-width: none; background: var(--surface); border-bottom: 1px solid var(--line); }
+.studio-editbar::-webkit-scrollbar { display: none; }
+.eb-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text, #fff); font: 550 12px/1 Inter, system-ui, sans-serif; cursor: pointer; }
+.eb-btn:hover:not(:disabled) { background: var(--surface-2, rgba(255,255,255,.08)); }
+.eb-btn:disabled { opacity: .32; cursor: default; }
+.eb-sep { flex: none; width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
+@media (max-width: 720px) { .eb-btn { padding: 0 8px; } .eb-btn span { display: none; } }
+.beat-chip { display: inline-flex; align-items: center; max-width: 100%; margin-left: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-strong, rgba(255,255,255,.2)); background: var(--accent-soft, rgba(124,92,255,.12)); color: var(--text, #fff); font: 600 12px/1.2 Inter, system-ui, sans-serif; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.beat-chip[hidden] { display: none; }
+.beat-chip.is-listening { opacity: .75; }
+.beat-pop { flex: 1 1 100%; margin-top: 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--line-strong, rgba(255,255,255,.18)); background: var(--surface-2, #1d1b27); display: grid; gap: 10px; }
+.beat-pop[hidden] { display: none; }
+.bp-lead { margin: 0; font-size: 12.5px; line-height: 1.45; opacity: .85; }
+.bp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.bp-row label { min-width: 84px; opacity: .75; }
+.bp-row input[type="number"] { width: 76px; }
+.bp-row small { opacity: .6; font-size: 11.5px; }
+.bp-mini { height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-strong, rgba(255,255,255,.2)); background: transparent; color: inherit; cursor: pointer; font: 600 12px Inter, system-ui, sans-serif; }
+.bp-actions { display: flex; gap: 8px; }
+.eb-primary { height: 30px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--accent, #7c5cff); color: #fff; cursor: pointer; font: 600 12px Inter, system-ui, sans-serif; }
+.fx-aware { margin: 0 0 10px; padding: 9px 11px; border-radius: 10px; background: var(--accent-soft, rgba(124,92,255,.12)); font-size: 12.5px; line-height: 1.5; }
+
+/* ---------- Melody that fits the vocal ---------- */
+.melody-sheet { flex: none; margin: 0 12px 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--line-strong, rgba(255,255,255,.18)); background: var(--surface-2, #1d1b27); display: grid; gap: 10px; }
+.melody-sheet[hidden] { display: none; }
+.ml-lead { margin: 0; font-size: 12.5px; line-height: 1.45; opacity: .88; }
+.ml-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; font-size: 13px; }
+.ml-seg { display: inline-flex; border: 1px solid var(--line-strong, rgba(255,255,255,.2)); border-radius: 9px; overflow: hidden; }
+.ml-seg button { border: 0; background: transparent; color: inherit; padding: 6px 11px; font: 600 12px Inter, system-ui, sans-serif; cursor: pointer; }
+.ml-seg button.is-on { background: var(--accent, #7c5cff); color: #fff; }
+.ml-auto { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.4; }
+.ml-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ml-note { margin: 0; font-size: 12px; opacity: .8; }
+.ml-report { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; opacity: .85; }
+.studio-lane-melody.is-off { opacity: .5; }
+.studio-lane-melody .lane-btns { display: flex; gap: 4px; margin-left: auto; }

@@ -1,5 +1,5 @@
 /**
- * Vocal Vault — instrument balance (the beat's own instruments vs the vocal)
+ * Voxloop Studio — instrument balance (the beat's own instruments vs the vocal)
  *
  * The mix balances voice against beat by OVERALL loudness. A beat's loudness is mostly kick and bass, so the piano, keys,
  * guitars, pads and strings (a small part of that loudness) can sit far under the voice in the 300 Hz - 4 kHz range where they
@@ -196,9 +196,9 @@
         return { balanceBeat, PRESETS };
     }
 
-    if (typeof window !== "undefined" && window.VocalVaultStudio && window.VocalVaultStudio.engine) {
-        const eng = createBalanceEngine(window.VocalVaultStudio.engine);
-        window.VocalVaultBalance = { balanceBeat: eng.balanceBeat, PRESETS: eng.PRESETS, engine: eng };
+    if (typeof window !== "undefined" && window.VLStudio && window.VLStudio.engine) {
+        const eng = createBalanceEngine(window.VLStudio.engine);
+        window.VLBalance = { balanceBeat: eng.balanceBeat, PRESETS: eng.PRESETS, engine: eng };
     }
 
 })(typeof window !== "undefined" ? window : this);

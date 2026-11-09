@@ -1,5 +1,5 @@
 /* =========================================================
-   VOCAL VAULT — PITCH CORRECTION ENGINE
+   VOXLOOP STUDIO — PITCH CORRECTION ENGINE
 
    Pipeline
    1. trackPitch      YIN pitch tracker (~6 ms hop), refined at the full
@@ -29,7 +29,13 @@ function createTuneEngine() {
         dorian: [0, 2, 3, 5, 7, 9, 10],
         mixolydian: [0, 2, 4, 5, 7, 9, 10],
         lydian: [0, 2, 4, 6, 7, 9, 11],
-        phrygian: [0, 1, 3, 5, 7, 8, 10]
+        phrygian: [0, 1, 3, 5, 7, 8, 10],
+        // sets a singer really uses on top of a key: the blue-note scales, harmonic minor, the pentatonics
+        "harmonic minor": [0, 2, 3, 5, 7, 8, 11],
+        blues: [0, 3, 5, 6, 7, 10],
+        "major blues": [0, 2, 3, 4, 7, 9],
+        "pentatonic minor": [0, 3, 5, 7, 10],
+        "pentatonic major": [0, 2, 4, 7, 9]
     };
 
     // ---------------------------------------------------------
@@ -69,6 +75,8 @@ function createTuneEngine() {
 
     function scaleMask(rootPc, scaleName) {
         const mask = new Array(12).fill(false);
+        // "mask:101011010101" = an exact set of pitch classes (C = first digit), whatever its name
+        if (typeof scaleName === "string" && scaleName.indexOf("mask:") === 0 && scaleName.length === 17) { for (let i = 0; i < 12; i++) mask[i] = scaleName[5 + i] === "1"; return mask; }
         const degrees = SCALES[String(scaleName).toLowerCase()] || SCALES.major;
         for (const d of degrees) mask[(rootPc + d) % 12] = true;
         return mask;
@@ -522,7 +530,7 @@ function createTuneEngine() {
 
         const coverage = (root, scale) => {
             let c = 0;
-            for (const d of SCALES[scale]) c += counts[(root + d) % 12];
+            for (const d of (SCALES[scale] || SCALES.major)) c += counts[(root + d) % 12];
             return c / total;
         };
 
@@ -625,6 +633,13 @@ function createTuneEngine() {
         return { s: bestS, before, after: bestF };
     }
 
+    // Zones: the allowed notes (and how hard to pull) can differ line by line. o.zones = [{ start, end (seconds), rootPc, scale, strength }].
+    // A note takes the zone it starts in; outside every zone the whole-take key (o.rootPc, o.scale) and strength apply.
+    function makeZoneLookup(o, hopSec) {
+        const Z = Array.isArray(o.zones) && o.zones.length ? o.zones.map(z => ({ s: z.start, e: z.end, rootPc: z.rootPc || 0, mask: scaleMask(z.rootPc || 0, z.scale), strength: z.strength })) : null;
+        return (frame) => { if (!Z) return null; const t = frame * hopSec; for (let i = 0; i < Z.length; i++) if (t >= Z[i].s && t < Z[i].e) return Z[i]; return null; };
+    }
+
     function smartTargets(notes, hopSec, o) {
 
         const mask = scaleMask(o.rootPc, o.scale);
@@ -637,11 +652,14 @@ function createTuneEngine() {
         const move = o.transposeTotal || 0;
         const c = notes.map(nt => nt.center - ref + move);
 
-        const nearestDist = (m) => Math.abs(m - nearestNote(m, o.rootPc, mask, false)) * 100;
+        const zoneOf = makeZoneLookup(o, hopSec);
+        const zn = notes.map(nt => zoneOf(nt.start));
+        const maskFor = (i) => (zn[i] ? zn[i].mask : mask), rootFor = (i) => (zn[i] ? zn[i].rootPc : o.rootPc);
+        const nearestDist = (m, i) => Math.abs(m - nearestNote(m, rootFor(i), maskFor(i), false)) * 100;
 
         // 1. habitual drift
         if (n >= 6) {
-            const cost = (b) => c.reduce((s, m) => { const d = Math.min(60, nearestDist(m - b / 100)); return s + d * d; }, 0);
+            const cost = (b) => c.reduce((s, m, i) => { const d = Math.min(60, nearestDist(m - b / 100, i)); return s + d * d; }, 0);
             const base = cost(0);
             let bestB = 0, bestC = base;
             for (let b = -40; b <= 40; b += 2) { const v = cost(b); if (v < bestC) { bestC = v; bestB = b; } }
@@ -650,12 +668,12 @@ function createTuneEngine() {
         const adj = c.map(m => m - out.biasCents / 100);
 
         // 2. candidates and Viterbi over the phrase
-        const cands = adj.map(m => {
-            const list = [];
+        const cands = adj.map((m, ci) => {
+            const list = [], mk = maskFor(ci);
             for (let t = Math.round(m) - 2; t <= Math.round(m) + 2; t++) {
-                if (mask[((t % 12) + 12) % 12] && Math.abs(t - m) <= 1.6) list.push(t);
+                if (mk[((t % 12) + 12) % 12] && Math.abs(t - m) <= 1.6) list.push(t);
             }
-            if (!list.length) list.push(nearestNote(m, o.rootPc, mask, false));
+            if (!list.length) list.push(nearestNote(m, rootFor(ci), mk, false));
             return list.sort((a, b) => (Math.abs(a - m) - Math.abs(b - m)) || ((b - a) * (out.biasCents > 0 ? -1 : 1))).slice(0, 3);
         });
 
@@ -786,6 +804,7 @@ function createTuneEngine() {
         const mask = scaleMask(o.rootPc, o.scale);
         const ref = (o.refCents || 0) / 100;
         const hopMs = (1000 * track.hop) / track.sampleRate;
+        const zoneOf = makeZoneLookup(o, hopMs / 1000);
         const n = track.midi.length;
         const raw = new Float32Array(n);
         const info = [];
@@ -860,9 +879,10 @@ function createTuneEngine() {
 
             const nt = notes[ni];
             const move = o.transposeTotal || 0;
+            const zn = zoneOf(nt.start), zk = zn && zn.strength != null ? Math.max(0, Math.min(1, zn.strength)) : 1;
             const target = smart
                 ? smart.targets[ni]
-                : nearestNote(nt.center - ref + move, o.rootPc, mask, o.chromatic) + ref;
+                : nearestNote(nt.center - ref + move, zn ? zn.rootPc : o.rootPc, zn ? zn.mask : mask, o.chromatic) + ref;
 
             // Centre error before strength / selective (cents)
             const errCents = (target - (nt.center + move)) * 100;
@@ -896,6 +916,7 @@ function createTuneEngine() {
             }
 
             if (speechLeft) { notePull = 0; spokenLeft++; }
+            if (zk <= 0.02) notePull = 0;                       // this line was set to be left exactly as sung or rapped
             if (notePull <= 0.02) skipped++;
             else if (notePull < 0.95) partial++;
             else corrected++;
@@ -909,7 +930,7 @@ function createTuneEngine() {
                 if (Math.abs(resid) < dead) resid = 0;
                 resid = Math.max(-cap, Math.min(cap, resid));
             }
-            resid *= effStrength * notePull;
+            resid *= effStrength * notePull * zk;
 
             const offset = move * 100 + resid;
             const isLong = (nt.end - nt.start) >= longNoteFrames;
@@ -919,7 +940,7 @@ function createTuneEngine() {
             // Talk-sing gets extra flatten so the line holds a pitch instead of sliding.
             let flatten = Math.max(0, Math.min(1, o.flatten === undefined ? 0.35 : o.flatten));
             if (talk) flatten = Math.min(1, Math.max(flatten, 0.55 + 0.35 * speech));
-            flatten *= Math.min(1, Math.max(0, strength));          // the strength slider is the master amount: at 0 nothing is flattened either
+            flatten *= Math.min(1, Math.max(0, strength)) * zk;          // the strength slider is the master amount: at 0 nothing is flattened either
             const longFlatten = isLong ? (flatten * flatten * (0.8 + 0.2 * flatten)) : flatten;
             // A note that Selective leaves alone keeps its vibrato at the default setting (the slider's resting place is 40 %);
             // push Flatten above that and the vibrato of in-tune notes is flattened too, up to completely flat at 100 %.
@@ -1769,7 +1790,7 @@ function estimateBeatTuning(audioBuffer) {
 }
 
 if (typeof window !== "undefined") {
-    window.VocalVaultTune = {
+    window.VLTune = {
         tuneVocal,
         harmonizeVocal: (channels, sr, options, onProgress) => tuneVocal(channels, sr, Object.assign({}, options, { task: "harmony" }), onProgress),
         estimateBeatTuning,

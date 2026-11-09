@@ -1,5 +1,5 @@
 /**
- * Vocal Vault — genre sensor
+ * Voxloop Studio — genre sensor
  *
  * Listens to the beat (not the vocal) and says which style it most resembles, and how sure it is.
  * It measures things a producer would listen for, then scores them against a "fingerprint" for each style:
@@ -237,9 +237,9 @@
 
     if (typeof module === "object" && module.exports) module.exports = { classifyFeatures, LABELS, STYLE_OF };
 
-    if (typeof window !== "undefined" && window.VocalVaultFill && window.VocalVaultFill.engine) {
-        const eng = createGenreEngine(window.VocalVaultFill.engine);
-        window.VocalVaultGenre = { detect: eng.detect, engine: eng, LABELS: LABELS };
+    if (typeof window !== "undefined" && window.VLFill && window.VLFill.engine) {
+        const eng = createGenreEngine(window.VLFill.engine);
+        window.VLGenre = { detect: eng.detect, engine: eng, LABELS: LABELS };
     }
 
 })(typeof window !== "undefined" ? window : this);

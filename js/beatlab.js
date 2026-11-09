@@ -81,6 +81,8 @@ TRACK_ORDER.forEach(name => { trim[name] = 0; });
 
 // What the pickers are set to. "auto" means: choose at random on every new beat.
 const settings = {
+  sound: {},   // parts the user picked in the Sound panel; kept when making a new beat
+  pack: "auto",   // "auto" = a different pack each beat, or the id of the pack the user chose
   root: "auto", scale: "auto", progression: "auto", style: "auto",
   structure: "full", bpmAuto: true, bpm: current.bpm, phraseBars: 4
 };
@@ -334,6 +336,7 @@ function applyBeatSound(beat) {
   swing = template.swing;
   swingEl.value = Math.round(swing * 100);
   swingValEl.textContent = swingEl.value;
+  refreshSoundUI(beat);
 }
 
 // Swap in a beat right now (used while stopped)
@@ -362,8 +365,19 @@ function syncStructureControls() {
 // ---------- Mute, solo and the mixer ----------
 const strips = {};   // the mixer controls of each track (plus "master")
 
-// A track plays unless it is muted, or another track is soloed and it is not
+// The melody toggle ("Melody" in the toolbar, on by default). Off removes the melody line: the lead, the pluck and a
+// chime-type bell (which plays chord notes). The chords, pad, bass and all drums stay. Downloads, stems and the
+// Mix Doctor all follow it, because they use isAudible too.
+let melodyOn = true;
+function isMelodyTrack(name) {
+  if (name === "lead" || name === "pluck") return true;
+  if (name === "bell") return !current || !current.sound || !current.sound.bellKind || current.sound.bellKind === "bell";
+  return false;                                   // agogo, cowbell and clave are percussion, not melody
+}
+
+// A track plays unless it is muted, or another track is soloed and it is not, or it is melody and the melody is off
 function isAudible(name) {
+  if (!melodyOn && isMelodyTrack(name)) return false;
   return !muted.has(name) && (soloed.size === 0 || soloed.has(name));
 }
 
@@ -380,6 +394,14 @@ function refreshStates() {
     if (!isAudible(name)) engine.silence(name);
   });
 }
+
+const melodyEl = $("bl-melody");
+melodyEl?.addEventListener("change", () => {
+  melodyOn = melodyEl.checked;
+  ensureEngine();
+  refreshStates();
+  statusEl.textContent = melodyOn ? "Melody on." : "Melody off: no lead or pluck. Chords, pad, bass and drums keep playing.";
+});
 
 function toggleMute(name) {
   if (muted.has(name)) muted.delete(name); else muted.add(name);
@@ -755,6 +777,8 @@ function beatOptions() {
   if (settings.scale !== "auto") options.scale = settings.scale;
   if (settings.progression !== "auto") options.progression = settings.progression;
   if (!settings.bpmAuto) options.bpm = settings.bpm;
+  if (Object.keys(settings.sound).length) options.sound = Object.assign({}, settings.sound);
+  if (settings.pack && settings.pack !== "auto") options.pack = settings.pack;
   return options;
 }
 
@@ -956,6 +980,112 @@ playBtn.addEventListener("click", async () => {
 // ---------- New beat, genre, style, structure ----------
 // "New beat" and changing the genre both ask for a fresh beat of the chosen genre.
 // Locked groups are kept, and the key, scale, chords and tempo pickers are respected.
+// ---------- Sound panel: pick the kit, percussion, keys, bass... or keep the style's own ----------
+const soundGridEl = $("bl-soundGrid"), soundResetEl = $("bl-soundReset");
+const soundSelects = {};
+if (soundGridEl && typeof SOUND_MENU !== "undefined") {
+  Object.keys(SOUND_MENU).forEach(key => {
+    const menu = SOUND_MENU[key];
+    const label = document.createElement("label");
+    label.className = "field";
+    const span = document.createElement("span");
+    span.className = "field-label";
+    span.textContent = menu.label;
+    const select = document.createElement("select");
+    select.id = "bl-sound-" + key;
+    select.innerHTML = '<option value=""></option>' + menu.options.map(o => '<option value="' + o[0] + '">' + o[1] + '</option>').join("");
+    select.addEventListener("change", () => setSoundPart(key, select.value));
+    label.append(span, select);
+    soundGridEl.appendChild(label);
+    soundSelects[key] = select;
+  });
+}
+
+function soundLabel(key, id) {
+  const hit = SOUND_MENU[key].options.find(o => o[0] === id);
+  return hit ? hit[1] : id;
+}
+
+// Show what the beat is using; the first option names the style's own pick
+const packEl = $("bl-pack"), packHintEl = $("bl-packHint");
+let packListKey = "";
+function refreshPackUI(beat) {
+  if (!packEl || typeof packsFor !== "function") return;
+  const packs = packsFor(beat.genre, beat.style);
+  const key = beat.genre + "/" + beat.style;
+  if (key !== packListKey) {                                  // the list follows the genre and style
+    packListKey = key;
+    packEl.innerHTML = '<option value="auto">Auto: a different pack each beat</option>' +
+      packs.map(p => '<option value="' + p.id + '">' + p.name + '</option>').join("");
+    if (settings.pack !== "auto" && !packs.some(p => p.id === settings.pack)) settings.pack = "auto";
+  }
+  packEl.value = settings.pack;
+  packEl.title = packs.length ? "" : "This style has no packs";
+  if (beat.pack) {
+    const borrowed = (beat.pack.swapped || []).map(s => " (the " + PACK_PART_NAMES[s.part] + " is borrowed from " + s.from + ")").join("");
+    packHintEl.textContent = "This beat: " + beat.pack.name + borrowed + ". " + (beat.pack.blurb || "");
+  } else {
+    packHintEl.textContent = "";
+  }
+}
+
+// Choose a pack: it replaces all the sounds of the beat that is playing and the one waiting
+function setPack(id) {
+  settings.pack = id;
+  settings.sound = {};                                        // a pack is a whole set: single-part picks start again
+  if (id !== "auto") {
+    const found = packsFor(current.genre, current.style).find(p => p.id === id);
+    if (found) {
+      [current, pending].filter(Boolean).forEach(beat => {
+        beat.autoSound = packParts(found);
+        beat.sound = Object.assign({}, beat.autoSound);
+        beat.pack = { id: found.id, name: found.name, blurb: found.blurb, swapped: [] };
+      });
+      ensureEngine();
+      engine.applySound(current.sound);
+      refreshStates();                                       // the bell kind can turn the bell into melody or percussion
+    }
+  }
+  refreshSoundUI(current);
+}
+packEl?.addEventListener("change", () => setPack(packEl.value));
+
+function refreshSoundUI(beat) {
+  if (!beat || !beat.sound) return;
+  refreshPackUI(beat);
+  const auto = beat.autoSound || beat.sound;
+  Object.keys(soundSelects).forEach(key => {
+    const select = soundSelects[key];
+    select.options[0].textContent = "Style default: " + soundLabel(key, auto[key] || (key === "perc" ? "legacy" : ""));
+    const custom = settings.sound[key];
+    select.value = custom || "";
+    select.classList.toggle("is-custom", !!custom);
+  });
+}
+
+// One part changes right now, on the beat that is playing and the one waiting to start
+function setSoundPart(key, value) {
+  if (value) settings.sound[key] = value; else delete settings.sound[key];
+  [current, pending].filter(Boolean).forEach(beat => {
+    const auto = beat.autoSound || beat.sound;
+    beat.sound[key] = value || auto[key];
+  });
+  ensureEngine();
+  engine.applySound(current.sound);
+  refreshSoundUI(current);
+  refreshStates();                                  // a bell kind can turn the bell into melody or percussion
+}
+
+soundResetEl?.addEventListener("click", () => {
+  settings.sound = {};
+  [current, pending].filter(Boolean).forEach(beat => { if (beat.autoSound) Object.assign(beat.sound, beat.autoSound); });
+  ensureEngine();
+  engine.applySound(current.sound);
+  refreshSoundUI(current);
+});
+
+refreshSoundUI(current);
+
 function requestBeat() {
   useBeat(
     generatePattern(genreEl.value, beatOptions()),
@@ -967,6 +1097,8 @@ function requestBeat() {
 regenBtn.addEventListener("click", requestBeat);
 
 genreEl.addEventListener("change", () => {
+  settings.sound = {};             // each genre brings its own kits
+  settings.pack = "auto";          // ... and its own packs
   settings.progression = "auto";   // a progression number means something different in each style
   settings.style = "auto";
   fillStyleOptions();
@@ -974,6 +1106,7 @@ genreEl.addEventListener("change", () => {
 });
 
 styleEl.addEventListener("change", () => {
+  settings.sound = {};
   settings.style = styleEl.value;
   settings.progression = "auto";
   requestBeat();
@@ -1114,12 +1247,22 @@ function currentRenderSettings() {
 
 // Get the beat ready (stop playback, use a queued beat, balance the mix if it has not been balanced),
 // then render the whole song. `what` is the first words of the status message.
-async function renderBeatForOutput(what) {
+// Everything before a download or send: stop the player, take the waiting beat, and get the mix right
+// (the Mix Doctor when "Check my mix first" is ticked, otherwise the live auto-mix listening)
+async function prepareMixForRender() {
   await Tone.start();
   if (playing) stopPlayback("");
   if (pending) { const next = pending; pending = null; switchTo(next); }
+  if ($("bl-doctorOnExport") && $("bl-doctorOnExport").checked) {
+    try { await runDoctorAndApply(); }
+    catch (err) { console.warn("Mix Doctor failed, using the live auto-mix instead", err); await calibrateMix(); }   // a download never fails because of the check
+  } else {
+    await calibrateMix();
+  }
+}
 
-  await calibrateMix();
+async function renderBeatForOutput(what) {
+  await prepareMixForRender();
 
   statusEl.textContent = `${what}\u2026 0%`;
   await new Promise(resolve => setTimeout(resolve, 60));      // let the message show
@@ -1127,6 +1270,67 @@ async function renderBeatForOutput(what) {
     statusEl.textContent = `${what}\u2026 ${Math.round((done / total) * 100)}%`;
   });
 }
+
+// ---------- Mix Doctor: the beat checks its own mix ----------
+const doctorBtn = $("bl-doctorBtn"), doctorListEl = $("bl-doctorList");
+let doctorRunning = false;
+
+// Runs the Doctor on the current beat, puts its fixes where the live auto-mix keeps its own, and lists what it found.
+// (Used by the button and, when "Check my mix first" is ticked, before every download and send.)
+async function runDoctorAndApply() {
+  {
+    const result = await mixDoctor({
+      beat: current,
+      settings: currentRenderSettings(),
+      render: renderSongBuffer,
+      say: text => { statusEl.textContent = text; }
+    });
+
+    // Put its fixes where the live auto-mix keeps its own, so the faders, the player and the download all agree
+    TRACK_ORDER.forEach(name => { autoMix.autos[name] = result.autos[name] || 0; });
+    if (!masteringOn) {                            // with Mastering on, the master level is set by loudness instead
+      autoMix.master = result.masterDb;
+      masterBus.gain.rampTo(MASTER_BASE * dbToGain(autoMix.master), 0.1);
+    }
+    autoMix.listening = false;
+    autoMix.balanced = true;
+    applyVolumes(current.genre);
+    updateMixBadge();
+    renderMixReport();
+
+    doctorListEl.innerHTML = "";
+    result.findings.forEach(f => {
+      const li = document.createElement("li");
+      li.className = f.status;
+      li.textContent = f.text;
+      doctorListEl.appendChild(li);
+    });
+    return result;
+  }
+}
+
+doctorBtn?.addEventListener("click", async () => {
+  if (doctorRunning || exporting) return;
+  if (!bootAudio()) return;
+  doctorRunning = true;
+  doctorBtn.disabled = true;
+  appEl.setAttribute("inert", "");                 // nothing can change the beat while it is checked
+  try {
+    await Tone.start();
+    if (playing) stopPlayback("");
+    if (pending) { const next = pending; pending = null; switchTo(next); }
+    const result = await runDoctorAndApply();
+    const warnings = result.findings.filter(f => f.status === "warn").length;
+    statusEl.textContent = warnings ? "Mix Doctor: done. " + warnings + " thing" + (warnings > 1 ? "s" : "") + " to look at." : "Mix Doctor: your mix is ready for a vocal.";
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Mix Doctor could not finish: " + err.message;
+  } finally {
+    appEl.removeAttribute("inert");
+    doctorBtn.disabled = false;
+    doctorRunning = false;
+  }
+});
 
 exportBtn.addEventListener("click", async () => {
   if (exporting) return;
@@ -1155,6 +1359,95 @@ exportBtn.addEventListener("click", async () => {
 });
 
 
+// ---------- Stems: four WAV files in a zip ----------
+const stemsBtn = $("bl-stems");
+stemsBtn?.addEventListener("click", async () => {
+  if (exporting) return;
+  if (!bootAudio()) return;
+  exporting = true;
+  stemsBtn.disabled = true; exportBtn.disabled = true;
+  appEl.setAttribute("inert", "");
+  try {
+    const started = performance.now();
+    await prepareMixForRender();
+    const bits = Number(bitsEl.value) === 16 ? 16 : 24;
+    const base = exportFileName(current).replace(/\.wav$/i, "");
+    const files = [];
+    let frames = 0;
+    // One stem at a time: render, turn into a WAV, drop the audio (a phone cannot hold four full songs in memory)
+    await renderStems(current, currentRenderSettings(), (index, count, fraction) => {
+      statusEl.textContent = `Rendering stems: ${STEM_GROUPS[index].name} (${index + 1} of ${count}) ${Math.round(fraction * 100)}%`;
+    }, async stem => {
+      frames = frames || stem.buffer.length;                              // every stem is exactly the same length as the first
+      const wav = encodeAudioBufferWav(stem.buffer, bits, frames);
+      files.push({ name: base + " - " + stem.name + ".wav", data: new Uint8Array(await wav.blob.arrayBuffer()) });
+    });
+    statusEl.textContent = "Packing the stems into a zip\u2026";
+    const zip = await makeZip(files);
+    downloadBlob(zip, base + " - stems.zip");
+    const took = Math.max(1, Math.round((performance.now() - started) / 1000));
+    statusEl.textContent = `Saved ${base} - stems.zip \u00b7 ${files.length} files \u00b7 ${(zip.size / 1048576).toFixed(1)} MB \u00b7 made in ${took}s`;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Could not make the stems: " + err.message;
+  } finally {
+    appEl.removeAttribute("inert");
+    stemsBtn.disabled = false; exportBtn.disabled = false;
+    exporting = false;
+  }
+});
+
+// ---------- Your own samples ----------
+const sampleGridEl = $("bl-sampleGrid");
+const SAMPLE_NAMES = { kick: "Kick", snare: "Snare", clap: "Clap", rim: "Rim", hat: "Hi-hat", openhat: "Open hat", shaker: "Shaker", perc: "Percussion", bell: "Bell" };
+if (sampleGridEl && typeof SAMPLE_TRACKS !== "undefined") {
+  SAMPLE_TRACKS.forEach(track => {
+    const slot = document.createElement("div");
+    slot.className = "field sample-slot";
+    const title = document.createElement("span");
+    title.className = "field-label";
+    title.textContent = SAMPLE_NAMES[track] || track;
+    const info = document.createElement("span");
+    info.className = "sample-name";
+    info.textContent = "Synth sound";
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "audio/*,.wav,.mp3,.m4a,.ogg"; input.hidden = true;
+    const buttons = document.createElement("div");
+    buttons.className = "sample-buttons";
+    const load = document.createElement("button");
+    load.type = "button"; load.className = "secondary-button"; load.textContent = "Load\u2026";
+    const clear = document.createElement("button");
+    clear.type = "button"; clear.className = "secondary-button"; clear.textContent = "Clear"; clear.hidden = true;
+    load.addEventListener("click", () => input.click());
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      try {
+        info.textContent = "Loading\u2026";
+        const buffer = await Tone.getContext().rawContext.decodeAudioData(await file.arrayBuffer());
+        if (buffer.duration > 10) throw new Error("it is longer than 10 seconds");
+        USER_SAMPLES[track] = buffer;
+        ensureEngine(); engine.refreshSamples();
+        info.textContent = file.name.length > 24 ? file.name.slice(0, 21) + "\u2026" : file.name;
+        clear.hidden = false;
+        statusEl.textContent = (SAMPLE_NAMES[track] || track) + " sample loaded. It plays instead of the synth sound.";
+      } catch (err) {
+        info.textContent = USER_SAMPLES[track] ? info.dataset.last || "Your sample" : "Synth sound";
+        statusEl.textContent = "Could not load that sample: " + err.message;
+      }
+      input.value = "";
+    });
+    clear.addEventListener("click", () => {
+      delete USER_SAMPLES[track];
+      ensureEngine(); engine.refreshSamples();
+      info.textContent = "Synth sound"; clear.hidden = true;
+    });
+    buttons.append(load, clear);
+    slot.append(title, info, buttons, input);
+    sampleGridEl.appendChild(slot);
+  });
+}
+
 // ---------- Voxloop Studio bridge ----------
 window.VoxloopBeatLab = {
   pause() {
@@ -1175,10 +1468,10 @@ window.VoxloopBeatLab = {
       if (!bootAudio()) return;
       this.pause();
       const buffer = await this.renderCurrentBuffer();
-      // Hand off to Vocal Vault state
-      const S = window.VocalVaultState;
+      // Hand off to Voxloop Studio state
+      const S = window.VLState;
       if (!S) throw new Error("Pipeline state not ready");
-      // VocalVaultState uses internal closures; expose a setter via custom event
+      // VLState uses internal closures; expose a setter via custom event
       // The Pipeline would otherwise have to guess the key and tempo from the audio. The Beat Lab knows them exactly,
       // including modes (a dorian beat is NOT natural minor, and the vocal must be tuned to the right notes).
       const SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -1189,8 +1482,8 @@ window.VoxloopBeatLab = {
       window.dispatchEvent(new CustomEvent("vl-set-beat", {
         detail: { buffer, name: exportFileName(current).replace(/\.wav$/i, "") + " (Beat Lab)", meta }
       }));
-      if (window.VocalVaultDAW && typeof window.VocalVaultDAW.setMode === "function") {
-        window.VocalVaultDAW.setMode("pipeline");
+      if (window.VLDAW && typeof window.VLDAW.setMode === "function") {
+        window.VLDAW.setMode("pipeline");
       } else {
         // fallback: click the mode button
         const btn = document.querySelector('.mode-btn[data-mode="pipeline"]');
@@ -1210,10 +1503,10 @@ window.VoxloopBeatLab = {
       this.pause();
       const buffer = await this.renderCurrentBuffer();
       window.dispatchEvent(new CustomEvent("vl-set-beat-studio", {
-        detail: { buffer, name: exportFileName(current).replace(/\.wav$/i, "") + " (Beat Lab)" }
+        detail: { buffer, noMelody: !melodyOn, bpm: current.bpm, key: ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][current.key.root] + " " + current.key.scale, name: exportFileName(current).replace(/\.wav$/i, "") + " (Beat Lab)" }
       }));
-      if (window.VocalVaultDAW && typeof window.VocalVaultDAW.setMode === "function") {
-        window.VocalVaultDAW.setMode("studio");
+      if (window.VLDAW && typeof window.VLDAW.setMode === "function") {
+        window.VLDAW.setMode("studio");
       } else {
         const btn = document.querySelector('.mode-btn[data-mode="studio"]');
         if (btn) btn.click();
@@ -1237,3 +1530,39 @@ try {
 } catch (e) {
   console.warn("[Beat Lab] deferred boot", e);
 }
+
+// ---------- Drafts: save this beat and open it again later (drafts.js) ----------
+// The beat is plain data (patterns, chords, sounds, seed), so a draft is small and opens fully editable.
+try {
+  window.VLBeatLab = {
+    snapshot() {
+      const key = current.key ? ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][current.key.root] + " " + current.key.scale : "";
+      return {
+        v: 1,
+        beat: JSON.parse(JSON.stringify(current)),
+        settings: JSON.parse(JSON.stringify(settings)),
+        trim: Object.assign({}, trim), muted: [...muted], soloed: [...soloed], locked: [...locked],
+        melodyOn, swing,
+        summary: { genre: current.genre, genreName: (TEMPLATES[current.genre] && TEMPLATES[current.genre].name) || current.genre, style: current.styleName || "", bpm: Math.round(current.bpm), key, bars: current.totalBars || 0, seconds: Math.round((current.totalBars || 0) * 240 / current.bpm) }
+      };
+    },
+    restore(s) {
+      if (!s || !s.beat) return false;
+      if (playing) stopPlayback();
+      pending = null;
+      Object.keys(settings).forEach(k => { delete settings[k]; });
+      Object.assign(settings, s.settings || {});
+      Object.keys(trim).forEach(k => { trim[k] = (s.trim && s.trim[k]) || 0; });
+      muted.clear(); (s.muted || []).forEach(n => muted.add(n));
+      soloed.clear(); (s.soloed || []).forEach(n => soloed.add(n));
+      locked.clear(); (s.locked || []).forEach(n => locked.add(n));
+      melodyOn = s.melodyOn !== false; if (melodyEl) melodyEl.checked = melodyOn;
+      genreEl.value = s.beat.genre; fillStyleOptions();
+      switchTo(s.beat);
+      if (s.swing != null) { swing = s.swing; swingEl.value = Math.round(swing * 100); swingValEl.textContent = swingEl.value; }
+      try { ensureEngine(); refreshStates(); } catch (e) { console.warn(e); }
+      statusEl.textContent = "Draft opened. Press Play.";
+      return true;
+    }
+  };
+} catch (e) { console.warn("[Beat Lab] drafts hook", e); }

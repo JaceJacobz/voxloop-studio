@@ -56,8 +56,8 @@ button .ico { pointer-events: none; }
 
     /* ---------- studio: slim timeline ---------- */
     .studio-ruler-head { padding: 0 8px; font-size: 11px; }
-    .studio-ruler-scroll { height: 24px; }
-    .studio-ruler-scroll canvas { height: 24px; }
+    .studio-ruler-scroll { height: 30px; }
+    .studio-ruler-scroll canvas { height: 30px; }
     .studio-lane { min-height: 58px; }
     .studio-lane-track { min-height: 58px; }
     .studio-clip { top: 4px; bottom: 4px; border-radius: 7px; }

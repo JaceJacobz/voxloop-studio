@@ -1,5 +1,5 @@
 // The generator. No UI code and no audio code in here,
-// so it can be reused later (for example inside Vocal Vault).
+// so it can be reused later (for example inside Voxloop Studio).
 //
 // It builds a whole SONG: intro, verses, pre-chorus build-ups, a hook-driven chorus,
 // a bridge and an outro, each with its own drums, chords and energy. It can still make
@@ -249,6 +249,14 @@ function resolveTemplate(genre, styleId) {
   return (_resolved[cacheKey] = t);
 }
 
+// ---------- Riffs ----------
+// A style can list bass and log-drum riffs (see RIFF in templates.js). One of each is picked per beat.
+function chooseRiffs(t) {
+  const out = {};
+  if (t.riffs) Object.keys(t.riffs).forEach(name => { if (t.riffs[name] && t.riffs[name].length) out[name] = pick(t.riffs[name]); });
+  return out;
+}
+
 // A groove picks one variant of every pattern
 function isVariantList(v) { return Array.isArray(v) && Array.isArray(v[0]); }
 function firstGroove(groove) {
@@ -305,25 +313,42 @@ function probsForKind(g, kind) {
 }
 
 // Roll the hits of one kind of section. A locked group keeps what it had.
-function buildPatterns(t, groove, from, locked) {
+// A style can also write "B" versions of a part (kickB, percB, ...): the answer bar of a two-bar phrase.
+// Bar 1 plays the main groove and bar 2 answers it with the B parts, like a drummer would, instead of
+// adding random hits.
+function rollKind(groove, kind, riffs, old, locked, rollBass) {
+  const probs = probsForKind(groove, kind);
+  if (riffs && riffs.bass) probs.bass = riffs.bass.probs.slice();
+  if (riffs && riffs.logdrum) probs.logdrum = riffs.logdrum.probs.slice();
+  const hits = {};
+  Object.keys(probs).forEach(name => {
+    if (name === "bass") return;                       // made from the kick (or the riff) below
+    const kept = old && locked.has(_groups[name]);
+    if (kept) { hits[name] = old.hits[name].slice(); probs[name] = old.probs[name].slice(); }
+    else hits[name] = probs[name].map(roll);
+  });
+  if (old && locked.has(_groups.bass)) {
+    hits.bass = old.hits.bass.slice(); probs.bass = old.probs.bass.slice();
+  } else if (riffs && riffs.bass) {
+    hits.bass = probs.bass.map(roll);
+    if (!hits.bass.some(Boolean)) hits.bass[0] = 1;
+  } else {
+    hits.bass = hits.kick.map((h, i) => (h ? roll(0.93) : roll(probs.bass[i] < 0.9 && probs.kick[i] === 0 ? probs.bass[i] : 0)));
+    if (!hits.bass.some(Boolean)) hits.bass[0] = 1;
+  }
+  return { probs, hits };
+}
+
+function buildPatterns(t, groove, from, locked, riffs) {
   const patterns = {};
+  const altKeys = Object.keys(groove).filter(k => k.length > 1 && k.endsWith("B") && groove[k.slice(0, -1)] !== undefined && groove[k]);
+  let grooveB = null;
+  if (altKeys.length) { grooveB = Object.assign({}, groove); altKeys.forEach(k => { grooveB[k.slice(0, -1)] = groove[k]; }); }
   Object.keys(t.rules).forEach(kind => {
-    const probs = probsForKind(groove, kind);
     const old = from && from.patterns && from.patterns[kind];
-    const hits = {};
-    Object.keys(probs).forEach(name => {
-      if (name === "bass") return;                       // made from the kick below
-      const kept = old && locked.has(_groups[name]);
-      if (kept) { hits[name] = old.hits[name].slice(); probs[name] = old.probs[name].slice(); }
-      else hits[name] = probs[name].map(roll);
-    });
-    if (old && locked.has(_groups.bass)) {
-      hits.bass = old.hits.bass.slice(); probs.bass = old.probs.bass.slice();
-    } else {
-      hits.bass = hits.kick.map((h, i) => (h ? roll(0.93) : roll(probs.bass[i] < 0.9 && probs.kick[i] === 0 ? probs.bass[i] : 0)));
-      if (!hits.bass.some(Boolean)) hits.bass[0] = 1;
-    }
-    patterns[kind] = { probs, hits };
+    const main = rollKind(groove, kind, riffs, old, locked, true);
+    if (grooveB) main.alt = rollKind(grooveB, kind, riffs, old && old.alt, locked, true);
+    patterns[kind] = main;
   });
   return patterns;
 }
@@ -426,7 +451,13 @@ const HOOK_CELLS = {      // [step, length in steps]
   jazzy:  [ [[0,2],[3,3],[6,2],[8,2],[11,5]], [[2,2],[4,2],[7,3],[10,2],[12,4]], [[0,3],[3,2],[5,3],[8,4],[12,4]] ],
   bouncy: [ [[0,2],[2,2],[4,2],[7,2],[8,4],[12,2]], [[0,3],[3,3],[6,2],[8,2],[10,2],[12,4]] ],
   anthem: [ [[0,4],[4,2],[6,2],[8,4],[12,4]], [[0,2],[2,2],[4,4],[8,6],[14,2]], [[0,3],[3,3],[6,2],[8,8]] ],
-  afro:   [ [[0,3],[3,3],[6,2],[8,3],[11,3],[14,2]], [[0,2],[3,2],[6,3],[10,2],[12,4]] ]
+  afro:   [ [[0,3],[3,3],[6,2],[8,3],[11,3],[14,2]], [[0,2],[3,2],[6,3],[10,2],[12,4]] ],
+  // amapiano: short, singable phrases with room for a flute or whistle to breathe
+  ama:    [ [[0,2],[3,3],[6,2],[10,2],[12,4]], [[0,3],[3,3],[6,2],[8,4],[12,2]], [[2,2],[6,3],[10,3],[14,2]] ],
+  // street-pop: a chant that repeats, like a crowd line
+  chant:  [ [[0,2],[2,2],[4,2],[6,2],[8,4],[12,4]], [[0,2],[2,2],[4,2],[6,2],[8,2],[10,2],[12,4]] ],
+  // house: sparse stabs
+  house:  [ [[0,2],[6,2],[10,2]], [[2,2],[6,2],[11,3]], [[0,3],[6,2],[12,2]] ]
 };
 const MOVES = [-2, -1, -1, 0, 1, 1, 2];
 const MOVES_UP = [0, 1, 1, 2, -1];
@@ -524,8 +555,31 @@ function pickSound(t) {
   const s = t.sound;
   return {
     kit: pick(s.kit), chords: pick(s.chords), pad: pick(s.pad),
-    bass: pick(s.bass), lead: pick(s.lead), pluck: pick(s.pluck)
+    bass: pick(s.bass), lead: pick(s.lead), pluck: pick(s.pluck),
+    // Percussion, bell, shaker and log drum: a style that does not name one keeps the original single sound
+    perc: pick(s.perc || ["legacy"]), bellKind: pick(s.bellKind || ["bell"]),
+    shaker: pick(s.shaker || ["shaker"]), log: pick(s.log || ["classic"])
   };
+}
+
+// ---------- Sound packs (see packs.js) ----------
+// A beat picks ONE pack of matched sounds. In Auto mode, about 3 beats in 10 also borrow ONE colour part (lead, pluck,
+// percussion, bell or shaker) from another pack that suits the style. Never the kit, bass, keys, pad or log drum:
+// those decide the groove and weight, and mixing them is where "never meant to meet" sounds come from.
+const PACK_MIX_CHANCE = 0.3;
+function pickPack(t, packId) {
+  const packs = typeof packsFor === "function" ? packsFor(t.genre, t.styleId) : [];
+  if (!packs.length) return { sound: pickSound(t), pack: null };         // a style with no packs keeps the old way
+  const named = packId && packId !== "auto" ? packs.find(p => p.id === packId) : null;
+  const chosen = named || pick(packs);
+  const sound = packParts(chosen);
+  const swapped = [];
+  if (!named && packs.length > 1 && Math.random() < PACK_MIX_CHANCE) {
+    const other = pick(packs.filter(p => p.id !== chosen.id));
+    const part = pick(PACK_COLOUR_PARTS);
+    if (other[part] !== chosen[part]) { sound[part] = other[part]; swapped.push({ part, from: other.name }); }
+  }
+  return { sound, pack: { id: chosen.id, name: chosen.name, blurb: chosen.blurb, swapped } };
 }
 
 // ---------- Humanizing ----------
@@ -652,10 +706,11 @@ function songBarView(beat, bar) {
   const sec = beat.sections[at.index];
   const rules = t.rules[sec.kind];
   const names = Object.keys(t.tracks);
-  const pattern = beat.patterns[sec.kind];
   const rng = seededRandom((beat.seed ^ Math.imul(bar + 1, 2654435761)) >>> 0);
 
   const b = at.barIn, n = sec.bars;
+  // The answer bar of a two-bar phrase plays the style's B parts (when it has any)
+  const pattern = (b % 2 === 1 && beat.patterns[sec.kind].alt) ? beat.patterns[sec.kind].alt : beat.patterns[sec.kind];
   const isFirst = b === 0, isLast = b === n - 1;
   const hasNext = at.index < beat.sections.length - 1;
 
@@ -700,6 +755,13 @@ function songBarView(beat, bar) {
     isFill = true;
   }
 
+  // The stop: on the last beat before a chorus the drums, bass and chords drop out and only the light percussion
+  // carries on, so the chorus hits harder. A style asks for it with stopBeforeChorus: [the tracks that stop].
+  // (Not when the section already ends in a build-up with a snare roll.)
+  if (isLast && hasNext && !build && t.stopBeforeChorus && beat.sections[at.index + 1] && beat.sections[at.index + 1].kind === "chorus") {
+    t.stopBeforeChorus.forEach(name => { if (tracks[name]) for (let s = 12; s < 16; s++) tracks[name][s] = 0; });
+  }
+
   // Impact + crash on the first bar of a chorus (the old rising noise riser is gone)
   if (isFirst && sec.kind === "chorus") { fx.impact = true; fx.crash = true; tracks.kick[0] = present.kick ? 1 : 0; }
 
@@ -722,7 +784,7 @@ function songBarView(beat, bar) {
       const maybe = pattern.probs.kick || [];
       [3, 7, 10, 11, 14].forEach(s => { if (!tracks.kick[s] && rng() < (maybe[s] || 0) * 0.6) tracks.kick[s] = 1; });
     }
-    if (present.bass) {                                // the bass walks at the end of a phrase
+    if (present.bass && !(beat.riffs && beat.riffs.bass)) {   // the bass walks at the end of a phrase (a written riff does not)
       const live = beat.bassTones.map((tone, s) => (tracks.bass[s] ? s : -1)).filter(s => s >= 0);
       if (live.length) {
         bassTones = beat.bassTones.slice();
@@ -918,6 +980,9 @@ function generatePattern(genreKey, options = {}) {
   const styleId = options.style && g.styles[options.style] ? options.style : pick(g.styleOrder);
   const t = resolveTemplate(genreKey, styleId);
   const groove = chooseGroove(t);
+  const riffs = keeps("low") && from.riffs ? from.riffs : chooseRiffs(t);
+  const picked = pickPack(t, options.pack);             // a matched pack of kit, keys, percussion... (or the style's own mix)
+  const autoSound = picked.sound;
   const structure = _structures[options.structure] ? options.structure : "full";
 
   // Key, chords and hook
@@ -935,7 +1000,7 @@ function generatePattern(genreKey, options = {}) {
   }
 
   // The rhythm of every kind of section
-  const patterns = buildPatterns(t, groove, from, locked);
+  const patterns = buildPatterns(t, groove, from, locked, riffs);
   const loopProbs = patterns.chorus.probs;
   const tracks = {};
   Object.keys(patterns.chorus.hits).forEach(name => { tracks[name] = patterns.chorus.hits[name].slice(); });
@@ -966,7 +1031,10 @@ function generatePattern(genreKey, options = {}) {
       : Array.from({ length: STEPS_PER_BAR }, () => pick(t.bassTones)),
     logTones: keeps("low") ? from.logTones.slice()
       : Array.from({ length: STEPS_PER_BAR }, () => pick(t.logdrum.tones)),
-    sound: pickSound(t),
+    sound: Object.assign({}, autoSound, options.sound || {}),
+    autoSound,
+    pack: picked.pack,                                   // { id, name, blurb, swapped } or null
+    riffs,
     structure,
     sections: made.sections,
     sectionAt: made.sectionAt,

@@ -5,7 +5,7 @@
  * Rule: if the vocal does not have a problem, that tool is skipped and the report says so.
  * Creative flavours (doubles, crowd, echo throws, voice change) are only added when the person ticks them.
  *
- * Needs: fxrack-dsp.js (VLFx). Re-uses the Pipeline's own spectrum target (VocalVaultStudio.engine.planEq).
+ * Needs: fxrack-dsp.js (VLFx). Re-uses the Pipeline's own spectrum target (VLStudio.engine.planEq).
  */
 (function (root) {
     "use strict";
@@ -17,7 +17,7 @@
     const median = (a) => { if (!a.length) return NaN; const s = Float64Array.from(a).sort(); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
     const pct = (a, q) => { if (!a.length) return NaN; const s = Float64Array.from(a).sort(); return s[Math.min(s.length - 1, Math.floor(q * (s.length - 1)))]; };
     const mkItem = (type, over, reason) => ({ type, params: Object.assign(Fx.withPreset(type, "Default"), over || {}), reason: reason || "", bypass: false });
-    const engine = () => root.VocalVaultStudio && root.VocalVaultStudio.engine;
+    const engine = () => root.VLStudio && root.VLStudio.engine;
 
     // ---------------------------------------------------------------- key helpers
     function parseKey(label) {
@@ -131,7 +131,7 @@
 
     // The Pipeline's own genre sensor (so Studio and Pipeline agree on what the beat is). Returns null if unsure.
     function genreOf(chans, sr, bpm) {
-        const G = root.VocalVaultGenre;
+        const G = root.VLGenre;
         if (!(G && G.detect)) return null;
         try {
             const g = G.detect(chans.map((c) => c.subarray(0, Math.min(c.length, sr * 75))), sr, { bpm: bpm || 100 });
@@ -146,12 +146,12 @@
         if (!buf) return null;
         if (beatCache.has(buf)) return beatCache.get(buf);
         const info = { bpm: null, key: null, sections: [], busy: 0.5, loudDb: -20, source: {}, genreId: "universal", genre: null, bands: null };
-        const known = root.VocalVaultKnownBeat;
-        if (known && known.buffer === buf) {
+        const known = [root.VLStudioKnownBeat, root.VLKnownBeat].find((k) => k && k.buffer === buf);
+        if (known) {
             if (known.bpm > 30) { info.bpm = known.bpm; info.source.bpm = "Beat Lab"; }
             const k = parseKey(known.key); if (k) { info.key = k; info.source.key = "Beat Lab"; }
         }
-        const A = root.VocalVaultAnalysis;
+        const A = root.VLAnalysis;
         if (A && !info.bpm) { try { const r = await A.analyzeBpm(buf); if (r && r.bpm) { info.bpm = r.bpm; info.source.bpm = "listened"; } } catch (e) { /* ignore */ } }
         if (A && !info.key) { try { const r = A.detectKey(buf); const k = r && r.key ? parseKey(r.key + " " + r.scale) : null; if (k) {
             info.key = k; info.source.key = "listened"; info.keyConfidence = r.confidence;
@@ -174,6 +174,29 @@
         return info;
     }
 
+    // Mains hum (50 or 60 Hz and its harmonics) is heard in the QUIETEST parts of a take. Each quiet 0.25 s window is checked at
+    // 50 / 60 Hz and its first harmonics against the energy just beside them; a clear, steady peak is hum.
+    function detectHum(m, sr) {
+        const W = Math.round(0.25 * sr), nW = Math.floor(m.length / W); if (nW < 6) return null;
+        const wins = []; for (let w = 0; w < nW; w++) { let s2 = 0; for (let i = w * W; i < (w + 1) * W; i += 4) s2 += m[i] * m[i]; wins.push([s2, w]); }
+        wins.sort((a, b) => a[0] - b[0]);
+        const use = wins.slice(0, Math.max(4, Math.floor(nW * 0.25))).map((x) => x[1]);
+        const goert = (w, f) => { const k = 2 * Math.cos(2 * Math.PI * f / sr); let s1 = 0, s2 = 0; for (let i = 0; i < W; i++) { const han = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (W - 1)); const x = m[w * W + i] * han + k * s1 - s2; s2 = s1; s1 = x; } return s1 * s1 + s2 * s2 - k * s1 * s2; };
+        const score = (f0) => {
+            let best = -99, harm = 0, lvl = -120;
+            for (let h = 1; h <= 3; h++) {
+                const f = f0 * h; let pk = 0, nb = 0;
+                use.forEach((w) => { pk += goert(w, f); nb += (goert(w, f - 14 * h) + goert(w, f + 14 * h) + goert(w, f - 22 * h) + goert(w, f + 22 * h)) / 4; });
+                const db = 10 * Math.log10((pk + 1e-18) / (nb + 1e-18)); if (h === 1) { best = db; lvl = 20 * Math.log10(Math.max(1e-9, 4 * Math.sqrt(pk / use.length) / W / Math.SQRT2)); } else if (db > 8) harm++;
+            }
+            return { db: best, harm, lvl };
+        };
+        const a = score(50), b = score(60), pick = a.db >= b.db ? { hz: 50, s: a } : { hz: 60, s: b };
+        // both a clear peak AND loud enough to hear: hum that sits below about -68 dBFS is inaudible under a beat
+        const ok = pick.s.db >= 12 && (pick.s.harm >= 1 || pick.s.db >= 20) && pick.s.lvl >= -68;
+        return ok ? { hz: pick.hz, strengthDb: pick.s.db, harmonics: pick.s.harm, levelDb: pick.s.lvl } : null;
+    }
+
     // ---------------------------------------------------------------- the vocal: levels, tone, pitch, delivery, quality
     function measureVocal(ch, sr) {
         const m = U.mono(ch), blk = Math.round(0.05 * sr), nb = Math.floor(m.length / blk), db = [];
@@ -190,6 +213,7 @@
         let clip = 0, tot = 0; for (const c of ch) { for (let i = 0; i < c.length; i += 2) { if (Math.abs(c[i]) >= 0.985) clip++; tot++; } }
         out.clipPct = tot ? clip / tot * 100 : 0;
 
+        out.hum = detectHum(m, sr);
         const lowR = U.bqRun(U.bqRun(m, U.bqCoef("lp", 80, sr, 0.7)), U.bqCoef("lp", 80, sr, 0.7));
         out.rumbleDb = dbOf(U.rms(lowR)) - dbOf(U.rms(m));
 
@@ -316,6 +340,28 @@
             }
         } else say(true, "I couldn't track enough clear notes to judge the pitch, so I left tuning off.");
 
+        // ---- the room between lines: hiss, bleed and mains hum. A gate only helps when there really are gaps to quiet.
+        {
+            const gaps = meas.seconds - meas.activeSec > 0.8, noisy = meas.noiseDb != null && meas.noiseDb > -56;       // below about -56 dBFS the room between lines is barely audible
+            const nz = V.noise;
+            if (nz && nz.needed) {
+                // VL Clean goes first in the chain: tuning and compression would make the noise louder
+                chain.unshift(mkItem("clean", nz.params, nz.reason));
+                nz.kinds.forEach((k) => say(false, k.text));
+                say(true, "Background noise cleaned: " + (nz.params.steady ? "steady noise down by up to " + nz.params.steady + " dB" : "") + (nz.params.wind ? (nz.params.steady ? ", " : "") + "wind and rumble cut" : "") + (nz.params.events ? ((nz.params.steady || nz.params.wind) ? ", " : "") + "sudden noises between lines down by " + nz.params.events + " dB" : "") + ".");
+            } else if (nz && nz.reason) say(true, nz.reason);
+            const cleaned = !!(nz && nz.needed);
+            if ((noisy && gaps && !cleaned) || meas.hum) {
+                const thrG = clamp(Math.round(((meas.noiseDb != null ? meas.noiseDb : -60) + 9) * 2) / 2, -66, -34);
+                const shallow = B.busy != null && B.busy < 0.35;                      // a sparse beat would show a deep gate
+                const rangeG = noisy && gaps ? (shallow ? 9 : clamp(Math.round(meas.noiseDb + 62), 10, 18)) : 0;
+                const hum = meas.hum ? meas.hum.hz + " Hz" : "off";
+                chain.push(mkItem("gate", { thr: thrG, range: rangeG, hum, humDepth: 24, atk: 3, hold: 70, rel: 240 },
+                    (rangeG ? "Quiets the room between lines by " + rangeG + " dB (background noise sits around " + meas.noiseDb.toFixed(0) + " dB)" + (shallow ? ", kept shallow because the beat is sparse" : "") : "No gating needed") + (meas.hum ? (rangeG ? "; " : ": ") + "removes " + meas.hum.hz + " Hz mains hum (" + meas.hum.strengthDb.toFixed(0) + " dB above its surroundings)." : ".")));
+                say(true, "Heard " + (meas.hum ? meas.hum.hz + " Hz hum" : "background noise") + " in the quiet parts, so a gate" + (meas.hum ? " with hum removal" : "") + " was added.");
+            }
+        }
+
         // ---- who is singing (measured by voiceid.js; every number below that depends on the voice comes from this)
         const vh = prof.voice && prof.voice.hints && prof.voice.confidence >= 0.5 ? prof.voice.hints : null;
         if (prof.voice) {
@@ -428,12 +474,28 @@
             }
         }
         const prof = profileVocal(meas, pitch, { ch, sr, override: ctx.voiceOverride });
-        const r = decide(type, { meas, prof, pitch, keyNote, forceTune: ctx.forceTune }, B, style, key);
+        let noise = null;
+        try { noise = root.VLClean ? root.VLClean.analyze(ch, sr) : null; } catch (e) { noise = null; }      // background: fans, wind, cars, shouting
+        const r = decide(type, { meas, prof, pitch, keyNote, noise, forceTune: ctx.forceTune }, B, style, key);
         return { findings: r.findings, chain: r.chain, meas, key, pitch, prof };
     }
 
     // ---------------------------------------------------------------- flavour placement (only when asked): based on the singing's gaps and the beat's big moments
     const INTENSITY = { subtle: { echo: 0.2, crowd: 1, voice: 1, orbit: 40 }, normal: { echo: 0.4, crowd: 2, voice: 1, orbit: 60 }, lots: { echo: 0.7, crowd: 4, voice: 2, orbit: 80 } };
+
+    // ---------------------------------------------------------------- which extras belong in THIS song and on WHICH lines
+    // Autopilot does not wait for someone to switch extras on. From the style, how the vocal is delivered, whether the key is known and
+    // where the beat is biggest it decides which extras to use; flavourZones then places them (big sections, line endings) and skips
+    // any section whose lines are mostly rapped when the extra needs a sung line (harmony).
+    function autoFlavors(B, prof) {
+        const g = B.genreId || "universal", rapped = prof && prof.delivery === "rapped", sung = !rapped;
+        const f = { doubs: false, tails: false, crowd: false, voice: false, orbit: false, ride: true, resonance: true, harmony: false }, why = ["Fader ride on: the level follows the vocal line by line.", "Shimmer layer: only if it suits this song (it decides itself)."];
+        const big = (B.sections || []).length > 0;
+        if (big) { f.doubs = true; why.push("Doubles in the biggest sections of the beat" + (rapped ? " (rap ad-lib style)." : ".")); }
+        f.tails = true; why.push("A short echo on the last word of lines that have room for it.");
+        if (sung && B.key && (g === "rnb" || g === "afrobeats" || g === "amapiano")) { f.harmony = true; why.push("Key-locked backing harmony in the big sections, only on sung lines."); }
+        return { flavors: f, why };
+    }
 
     function flavourZones(meas, flavors, B, clipStart, clipDur, type, intensity, who) {
         const zones = [], rel = (t) => t - clipStart, inten = INTENSITY[intensity] || INTENSITY.normal;
@@ -461,6 +523,8 @@
                 (B.sections || []).forEach((s) => {
                     const a = Math.max(0, rel(s.start)), b = Math.min(clipDur, rel(s.end));
                     if (b - a < 1.5) return;
+                    // lines inside this section that are rapped cannot carry a harmony: skip the section when most of its sung time is rap
+                    { const L = (who && who.lines) || []; let r = 0, t = 0; L.forEach((l) => { const o = Math.min(b, l.end) - Math.max(a, l.start); if (o > 0) { t += o; if (l.delivery === "rapped") r += o; } }); if (t > 0 && r / t > 0.5) return; }
                     zones.push({ start: a, end: b, label: "Harmony in the big section", chain: [mkItem("harmony", { v1: v[0], v2: v[1], v3: "off", level, key: NOTE[B.key.rootPc], scale: B.key.scale, late: 14, spread: 70 }, "A " + v[0] + (v[1] !== "off" ? " and a " + v[1] : "") + " in " + B.key.label + " only where the beat is biggest, " + Math.abs(level) + " dB under the lead" + (high ? " (below, because this is a high voice)" : "") + ".")] });
                 });
             } else zones.skippedHarmony = true;
@@ -530,7 +594,17 @@
                 if (lane.mixLevel === "mute" || lane.muted) continue;
                 const chans = []; for (let c = 0; c < clip.buffer.numberOfChannels; c++) chans.push(clip.buffer.getChannelData(c));
                 const r = await analyzeClip(chans, clip.buffer.sampleRate, { type: lane.type, style: opts.style, beat, voiceOverride: opts.voiceOverride, beatKeyConfidence: beat.source && beat.source.key === "Beat Lab" ? 1 : 0 });
-                const extra = r.meas ? flavourZones(r.meas, opts.flavors || {}, beat, clip.start, clip.duration, lane.type, opts.intensity, { prof: r.prof, key: r.key }) : [];
+                // line by line (phrasebrain.js): which lines are rapped, which are sung (the extras below use it)
+                let lineInfo = null;
+                try { if (window.PhraseBrain && r.pitch && r.pitch.notes && r.key) lineInfo = window.PhraseBrain.analyze({ notes: r.pitch.notes, hopSec: r.pitch.hop / r.pitch.sr, key: { rootPc: r.key.rootPc, scale: r.key.scale }, refCents: r.key.refCents || 0, totalSec: clip.duration }); } catch (e) { lineInfo = null; }
+                let flv = opts.flavors || {}; const af = opts.autoFlavors && lane.type === "main" ? autoFlavors(beat, r.prof) : null;
+                if (af) { flv = af.flavors; r.findings.push({ ok: true, text: "Extras chosen by Autopilot: " + af.why.join(" ") }); }
+                if (lineInfo && lineInfo.summary.lines) {
+                    // notes that are outside the plain key on purpose are not "drift": the old whole-key finding would call them wrong
+                    if (lineInfo.summary.changedKey) { const ix = r.findings.findIndex((f) => f && /drifts more than a quarter-tone/.test(f.text || "")); if (ix >= 0) r.findings.splice(ix, 1); }
+                    r.findings.push({ ok: true, text: "Listened line by line: " + lineInfo.summary.lines + " lines" + (lineInfo.summary.rapped ? ", " + lineInfo.summary.rapped + " rapped (left as performed)" : "") + (lineInfo.summary.changedKey ? ", " + lineInfo.summary.changedKey + " use notes outside the plain key on purpose, which are kept" : ", all inside the key") + "." });
+                }
+                const extra = r.meas ? flavourZones(r.meas, flv, beat, clip.start, clip.duration, lane.type, opts.intensity, { prof: r.prof, key: r.key, lines: lineInfo ? lineInfo.phrases : null }) : [];
                 out.lanes.push({ laneId: lane.id, clipId: clip.id, laneName: lane.name, laneType: lane.type, clipName: clip.name, findings: r.findings, chain: r.chain, extra, meas: r.meas, vocal: r.prof ? r.prof.label : "", skippedCrowd: !!extra.skippedCrowd, skippedHarmony: !!extra.skippedHarmony, skippedResonance: extra.skippedResonance || "" });
                 if (opts.onProgress) opts.onProgress(lane.name);
             }
@@ -538,5 +612,5 @@
         return out;
     }
 
-    root.VLBrain = { vibeOf, genreOf, analyzeBeat, measureVocal, analyzeClip, planProject, parseKey, keyFromNotes, profileVocal, decide, flavourZones, bandProfile, GENRE, describeBeat };
+    root.VLBrain = { vibeOf, genreOf, analyzeBeat, measureVocal, analyzeClip, planProject, parseKey, keyFromNotes, profileVocal, decide, flavourZones, autoFlavors, bandProfile, GENRE, describeBeat };
 })(typeof window !== "undefined" ? window : globalThis);

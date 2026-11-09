@@ -1,5 +1,5 @@
 /**
- * automix.js - Vocal Vault Automated Processing Engine
+ * automix.js - Voxloop Studio Automated Processing Engine
  *
  * Everything is decided from the audio itself, so the user never sets
  * anything. Rendered offline, so it is deterministic.
@@ -16,7 +16,7 @@
  * compression + level matching; without levelmatch.js, one fixed balance.
  *
  * Entry point used by the Automix button:
- *     window.VocalVaultAutomix.process(window.VocalVaultState) -> AudioBuffer
+ *     window.VLAutomix.process(window.VLState) -> AudioBuffer
  *
  * Optional settings on the state object:
  *     state.masterTargetLufs   loudness target, default -12
@@ -293,13 +293,18 @@ function showReport(lines) {
   const status = document.getElementById("automix-status");
   if (!status) return;
 
-  let list = document.getElementById("automix-report");
-  if (!list) {
-    list = document.createElement("ul");
-    list.id = "automix-report";
-    list.style.cssText = "margin:12px 0 0;padding-left:20px;font-size:13px;line-height:1.7;opacity:.85";
-    status.parentNode.insertBefore(list, status.nextSibling);
+  // The summary of edits stays CLOSED until it is tapped: a finished master should not open with a wall of text.
+  let box = document.getElementById("automix-summary");
+  if (!box) {
+    box = document.createElement("details");
+    box.id = "automix-summary";
+    box.className = "edit-summary";
+    box.innerHTML = '<summary></summary><ul id="automix-report"></ul>';
+    status.parentNode.insertBefore(box, status.nextSibling);
   }
+  const list = box.querySelector("#automix-report");
+  box.querySelector("summary").textContent = "What Voxloop changed (" + lines.length + " edit" + (lines.length === 1 ? "" : "s") + ")";
+  box.open = false;
   list.innerHTML = "";
   for (const line of lines) {
     const li = document.createElement("li");
@@ -515,7 +520,7 @@ function listenAndCorrect(channels, sr, harshness) {
 
   // 2) Harsh top: measured as the 4-9 kHz band against the 0.3-3 kHz body over the parts that are playing
   //    (a smooth mix reads about -15 dB or lower). If it is too bright, a gentle, limited dip around 6 kHz.
-  const studio = window.VocalVaultStudio && window.VocalVaultStudio.engine;
+  const studio = window.VLStudio && window.VLStudio.engine;
   if (studio && studio.calmMixTop && fixes < 2 && harshness !== "off") {
     const before = studio.measureTop(chs, sr);
     const top = studio.calmMixTop(chs, sr);
@@ -674,13 +679,13 @@ async function processAutomix(state, options) {
 
   if (!vocal || !beat) throw new Error("Both a vocal and a beat are needed.");
 
-  const Levels = window.VocalVaultLevels;
-  const Studio = window.VocalVaultStudio;
-  const Presets = window.VocalVaultPresets;
+  const Levels = window.VLLevels;
+  const Studio = window.VLStudio;
+  const Presets = window.VLPresets;
   // Genre sensor: "Auto" listens to the beat and picks the style. It also tells Amapiano from Afrobeats for the fill.
   let styleId = opt.style || "universal";
   let genreInfo = null;
-  const Genre = window.VocalVaultGenre;
+  const Genre = window.VLGenre;
   if (Genre && Genre.detect && (styleId === "auto" || (opt.fillInstruments && styleId === "afrobeats"))) {
     try {
       const bch = [];
@@ -889,7 +894,7 @@ async function processAutomix(state, options) {
   }
 
   // Optional fill: synthesize missing/thin instruments under the real beat
-  if (opt.fillInstruments && window.VocalVaultFill && window.VocalVaultFill.fillMissing) {
+  if (opt.fillInstruments && window.VLFill && window.VLFill.fillMissing) {
     setStatus("Checking for missing instruments…");
     await nextFrame();
     let rootPc = 0;
@@ -907,7 +912,7 @@ async function processAutomix(state, options) {
     }
     const bpm = state.beatBpm || state.bpm || 90;
     // if the key is not known the fill estimates it from the beat's own audio instead of guessing C major
-    const fill = window.VocalVaultFill.fillMissing(beatChannels, sr, {
+    const fill = window.VLFill.fillMissing(beatChannels, sr, {
       bpm: bpm,
       rootPc: rootPc,
       scale: scaleName,
@@ -923,7 +928,7 @@ async function processAutomix(state, options) {
   }
 
   if (studioStack) {
-    const SLv = window.VocalVaultStudioLevels;
+    const SLv = window.VLStudioLevels;
     if (SLv && SLv.leadLikeProcessed && engine.hopPowers) {
       const refCh = channelsOf(studioStack.leadReference).map((c) => engine.resample(c, studioStack.leadReference.sampleRate, sr));
       const rawCh = channelsOf(vocal).map((c) => engine.resample(c, vocal.sampleRate, sr));
@@ -953,7 +958,7 @@ async function processAutomix(state, options) {
   // 4. Space: reverb + echo, placed using the vocal's own fader.
   // Amounts are NOT fixed — they come from listening to how dry/rough the
   // vocal already is and how dense the beat is.
-  const Fx = window.VocalVaultFxPlus && window.VocalVaultFxPlus.engine;
+  const Fx = window.VLFxPlus && window.VLFxPlus.engine;
   let fx = null, stems = [], beatForMix = beatChannels;
   let space = null;
   if (opt.effects) {
@@ -1038,7 +1043,7 @@ async function processAutomix(state, options) {
       await nextFrame();
       // optional: a higher harmony layer, built from the finished vocal and kept inside the key
       const degrees = state.harmonyDegrees || 0;
-      const Tune = window.VocalVaultTune;
+      const Tune = window.VLTune;
       if (degrees && Tune && Tune.harmonizeVocal) {
         const keyOpts = state.tuneOptions || (state.beatKey && state.beatKey.key
           ? { rootPc: Tune.noteNames.indexOf(state.beatKey.key), scale: String(state.beatKey.scale).toLowerCase(), refCents: 0 } : null);
@@ -1086,7 +1091,7 @@ async function processAutomix(state, options) {
               let haloPlaced = null;
               const hp = rp.params;
               if (hp.halo !== "off") {
-                const Tune2 = window.VocalVaultTune;
+                const Tune2 = window.VLTune;
                 const keyO = state.tuneOptions || (state.beatKey && state.beatKey.key && Tune2
                   ? { rootPc: Tune2.noteNames.indexOf(state.beatKey.key), scale: String(state.beatKey.scale).toLowerCase(), refCents: 0 } : null);
                 let hCh;
@@ -1134,7 +1139,7 @@ async function processAutomix(state, options) {
 
   // 4b. Instrument balance: the beat's piano, keys, guitars, pads, snare and hats, so they are heard under the voice.
   // Measured against the voice as it is placed (after the mid dip above), and only as far as needed.
-  const Bal = window.VocalVaultBalance;
+  const Bal = window.VLBalance;
   const balancePreset = typeof state.instrumentBalance === "string" ? state.instrumentBalance : "balanced";
   if (Bal && Bal.balanceBeat && balancePreset !== "off") {
     setStatus("Balancing the instruments…");
@@ -1354,13 +1359,13 @@ async function processAutomix(state, options) {
     samplesOut: targetLen,
     samplesBeforeTrim: lengthBeforeTrim
   };
-  window.dispatchEvent(new Event("vv-levels-updated"));
+  window.dispatchEvent(new Event("vl-levels-updated"));
   showReport(lines);
 
   return out;
 }
 
-window.VocalVaultAutomix = {
+window.VLAutomix = {
   process: processAutomix,
   analyzeAudioBuffer,
   calculateAutoMixParams,

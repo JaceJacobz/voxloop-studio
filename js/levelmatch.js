@@ -1,5 +1,5 @@
 /* =========================================================
-   VOCAL VAULT — LEVEL MATCHING
+   VOXLOOP STUDIO — LEVEL MATCHING
 
    Decides how loud the vocal should sit against the beat, and WHEN to
    raise or lower it, then renders the balanced mix.
@@ -18,7 +18,7 @@
 
    Everything lives in createLevelEngine() on plain Float32Arrays. The
    browser wrapper at the bottom adapts AudioBuffers and exposes
-   window.VocalVaultLevels.
+   window.VLLevels.
    ========================================================= */
 
 function createLevelEngine() {
@@ -504,10 +504,10 @@ if (typeof window !== "undefined") {
         return engine.plan(vocal, channelsOf(beatBuffer), beatBuffer.sampleRate, offsetSec || 0, options);
     }
 
-    // Same signature as VocalVaultAutomix.process(state): returns an AudioBuffer.
+    // Same signature as VLAutomix.process(state): returns an AudioBuffer.
     async function processLevels(state, options, vocalOverride) {
 
-        if (!options && window.VocalVaultLevels && window.VocalVaultLevels.readOptions) options = window.VocalVaultLevels.readOptions();
+        if (!options && window.VLLevels && window.VLLevels.readOptions) options = window.VLLevels.readOptions();
 
         const beat = state.beatBuffer;
         // vocalOverride: a vocal that has already been through EQ/compression
@@ -529,12 +529,12 @@ if (typeof window !== "undefined") {
         thePlan.masterTrimDb = mixed.masterTrimDb;
         thePlan.peakBeforeDb = mixed.peakBeforeDb;
         state.levelPlan = thePlan;
-        window.dispatchEvent(new Event("vv-levels-updated"));
+        window.dispatchEvent(new Event("vl-levels-updated"));
 
         return out;
     }
 
-    window.VocalVaultLevels = {
+    window.VLLevels = {
         defaults: engine.DEFAULTS,
         plan: planLevels,
         process: processLevels,
@@ -569,7 +569,7 @@ if (typeof window !== "undefined") {
     function setupPanel() {
 
         const anchor = document.getElementById("automix-button");
-        const S = window.VocalVaultState;
+        const S = window.VLState;
 
         if (!anchor || !S || document.getElementById("level-panel")) return;
 
@@ -628,7 +628,7 @@ if (typeof window !== "undefined") {
             rangeDb: parseFloat(el.range.value),
             strength: parseFloat(el.strength.value) / 100
         });
-        window.VocalVaultLevels.readOptions = readOptions;
+        window.VLLevels.readOptions = readOptions;
 
         const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
         let lastKey = null, timer = 0;
@@ -747,7 +747,7 @@ if (typeof window !== "undefined") {
         const soon = () => { readouts(); clearTimeout(timer); timer = setTimeout(refresh, 250); };
         [el.mode, el.above, el.range, el.strength].forEach((c) => c.addEventListener("input", soon));
         window.addEventListener("resize", () => { if (S.levelPlan && !panel.classList.contains("hidden")) draw(S.levelPlan); });
-        window.addEventListener("vv-levels-updated", () => {
+        window.addEventListener("vl-levels-updated", () => {
             const p = S.levelPlan; if (!p) return;
             show(p, !!S.tunedVocal, { masterTrimDb: p.masterTrimDb });
         });
@@ -761,8 +761,8 @@ if (typeof window !== "undefined") {
 
     // If no automix stage is loaded yet, offer this one under its name.
     // (A real automix.js loaded later simply replaces it and can call
-    // VocalVaultLevels.process from inside.)
-    if (!window.VocalVaultAutomix) {
-        window.VocalVaultAutomix = { process: processLevels };
+    // VLLevels.process from inside.)
+    if (!window.VLAutomix) {
+        window.VLAutomix = { process: processLevels };
     }
 }

@@ -74,7 +74,7 @@
 
         // the beat on its own: how loud, and how much louder its peaks are than its average
         let beatLufs = null, beatPlr = null;
-        const L = root.VocalVaultLevels && root.VocalVaultLevels.engine;
+        const L = root.VLLevels && root.VLLevels.engine;
         if (L) {
             try {
                 beatLufs = L.integrated(L.momentary(L.hopPowers(bch, beat.sampleRate)));

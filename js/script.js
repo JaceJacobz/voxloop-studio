@@ -69,7 +69,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let vocalOffset = 0;
 
     // Read-only window onto the audio state, used by tune.js (step 4).
-    window.VocalVaultState = {
+    window.VLState = {
         get vocalBuffer() { return vocalBuffer; },
         get beatBuffer() { return beatBuffer; },
         get audioContext() { return audioContext; },
@@ -93,12 +93,12 @@ document.addEventListener("DOMContentLoaded", () => {
         beatBuffer = buffer;
         // The Beat Lab made this beat, so it KNOWS its tempo and key. Using those is exact; re-detecting them from the audio
         // was wrong about one beat in two (a dorian beat read as a major key, a fifth off, the tempo off by 25%).
-        window.VocalVaultKnownBeat = meta ? { buffer, bpm: meta.bpm, key: meta.key } : null;
+        window.VLKnownBeat = meta ? { buffer, bpm: meta.bpm, key: meta.key } : null;
         if (beatFileName) beatFileName.textContent = name || "Beat Lab instrumental";
         const chip = document.getElementById("role-beat-chip");
         if (chip) chip.textContent = "Beat: " + (name || "Beat Lab");
         // Clear stale analysis tied to a previous beat
-        window.VocalVaultState.beatKey = null;
+        window.VLState.beatKey = null;
         try {
             if (typeof drawWaveform === "function" && beatCanvas) drawWaveform(beatCanvas, beatBuffer);
         } catch (e) {}
@@ -145,8 +145,8 @@ document.addEventListener("DOMContentLoaded", () => {
         // Vocal is required; beat can come from file or Beat Lab.
         if (!vocalFile || !hasBeat) {
 
-            if (window.VocalVaultModal) {
-                window.VocalVaultModal.alert(
+            if (window.VLModal) {
+                window.VLModal.alert(
                     hasBeat
                         ? "Select a vocal track to continue."
                         : "Select a vocal track and an instrumental beat (or create one in Beat Lab).",
@@ -217,8 +217,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
             console.error(error);
 
-            if (window.VocalVaultModal) {
-                window.VocalVaultModal.alert(
+            if (window.VLModal) {
+                window.VLModal.alert(
                     "Could not read one of the audio files. Try another format (WAV, MP3, M4A).",
                     "Could not load audio"
                 );
@@ -918,7 +918,7 @@ continueAnalysisButton.addEventListener("click", () => {
     let bpmAlternatives = [];
 
     // Prep (or other steps) can set BPM when analysis missed it
-    window.VocalVaultSetBeatBpm = function (bpm, meta) {
+    window.VLSetBeatBpm = function (bpm, meta) {
         const n = Number(bpm);
         if (!(n > 30 && n < 400)) return;
         detectedBpm = n;
@@ -931,7 +931,7 @@ continueAnalysisButton.addEventListener("click", () => {
         }
         // Unlock prep timing immediately
         try {
-            window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: n } }));
+            window.dispatchEvent(new CustomEvent("vl-bpm-changed", { detail: { bpm: n } }));
         } catch (e) { /* ignore */ }
     };
 
@@ -952,10 +952,10 @@ continueAnalysisButton.addEventListener("click", () => {
 
         try {
 
-            const known = window.VocalVaultKnownBeat;
+            const known = window.VLKnownBeat;
             const result = (known && known.buffer === currentBeat && known.bpm > 30)
                 ? { bpm: known.bpm, confidence: 1, alternatives: [] }          // told by the Beat Lab: no guessing
-                : await window.VocalVaultAnalysis.analyzeBpm(currentBeat);
+                : await window.VLAnalysis.analyzeBpm(currentBeat);
 
             // Ignore the result if a different beat was loaded meanwhile.
             if (analyzedBeatBuffer !== currentBeat) return;
@@ -986,7 +986,7 @@ continueAnalysisButton.addEventListener("click", () => {
             }
 
             try {
-                window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: result.bpm } }));
+                window.dispatchEvent(new CustomEvent("vl-bpm-changed", { detail: { bpm: result.bpm } }));
             } catch (e) { /* ignore */ }
 
             // Second opinion from music knowledge (only for tempos we listened for, not ones the Beat Lab told us).
@@ -1011,7 +1011,7 @@ continueAnalysisButton.addEventListener("click", () => {
     function refineTempoByStyle(beat, bpm) {
         setTimeout(function () {
             try {
-                const MT = window.MusicTheory, G = window.VocalVaultGenre;
+                const MT = window.MusicTheory, G = window.VLGenre;
                 if (!(MT && G && G.detect) || analyzedBeatBuffer !== beat || detectedBpm !== bpm || originalBpm !== bpm) return;
                 const chans = []; for (let c = 0; c < Math.min(2, beat.numberOfChannels); c++) chans.push(beat.getChannelData(c).subarray(0, Math.min(beat.length, beat.sampleRate * 75)));
                 const g = G.detect(chans, beat.sampleRate, { bpm: bpm });
@@ -1022,7 +1022,7 @@ continueAnalysisButton.addEventListener("click", () => {
                 showBpm();
                 beatBpmStatus.textContent = rt.reason + ". (Tap Double speed if this beat feels faster to you.)";
                 if (analysisManualBpm) analysisManualBpm.value = String(Math.round(rt.bpm * 10) / 10);
-                window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: rt.bpm } }));
+                window.dispatchEvent(new CustomEvent("vl-bpm-changed", { detail: { bpm: rt.bpm } }));
             } catch (e) { /* the first answer stands */ }
         }, 60);
     }
@@ -1120,7 +1120,7 @@ continueAnalysisButton.addEventListener("click", () => {
                 showBpm();
                 if (analysisManualBpm) analysisManualBpm.value = key;
                 try {
-                    window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: b } }));
+                    window.dispatchEvent(new CustomEvent("vl-bpm-changed", { detail: { bpm: b } }));
                 } catch (e) { /* ignore */ }
             });
             bpmAltChips.appendChild(btn);
@@ -1137,7 +1137,7 @@ continueAnalysisButton.addEventListener("click", () => {
         showBpm();
         if (analysisManualBpm) analysisManualBpm.value = formatBpm(detectedBpm);
         try {
-            window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: detectedBpm } }));
+            window.dispatchEvent(new CustomEvent("vl-bpm-changed", { detail: { bpm: detectedBpm } }));
         } catch (e) { /* ignore */ }
 
     });
@@ -1151,7 +1151,7 @@ continueAnalysisButton.addEventListener("click", () => {
         showBpm();
         if (analysisManualBpm) analysisManualBpm.value = formatBpm(detectedBpm);
         try {
-            window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: detectedBpm } }));
+            window.dispatchEvent(new CustomEvent("vl-bpm-changed", { detail: { bpm: detectedBpm } }));
         } catch (e) { /* ignore */ }
 
     });
@@ -1166,7 +1166,7 @@ continueAnalysisButton.addEventListener("click", () => {
             bpmConfidence = 1;
             showBpm();
             try {
-                window.dispatchEvent(new CustomEvent("vv-bpm-changed", { detail: { bpm: n } }));
+                window.dispatchEvent(new CustomEvent("vl-bpm-changed", { detail: { bpm: n } }));
             } catch (e) { /* ignore */ }
         };
         analysisManualBpm.addEventListener("change", applyManual);
@@ -1212,7 +1212,7 @@ async function runBeatKeyAnalysis() {
 
     analyzedKeyBuffer = currentBeat;
 
-    window.VocalVaultState.beatKey = null;
+    window.VLState.beatKey = null;
 
     beatKeyValue.textContent = "…";
 
@@ -1223,10 +1223,10 @@ async function runBeatKeyAnalysis() {
 
     try {
 
-        const knownBeat = window.VocalVaultKnownBeat;
+        const knownBeat = window.VLKnownBeat;
         const result = (knownBeat && knownBeat.buffer === currentBeat && knownBeat.key)
             ? Object.assign({ confidence: 1, source: "Beat Lab" }, knownBeat.key)       // told by the Beat Lab: exact
-            : await window.VocalVaultAnalysis.detectKey(
+            : await window.VLAnalysis.detectKey(
                 currentBeat
             );
 
@@ -1258,7 +1258,7 @@ async function runBeatKeyAnalysis() {
             `${result.key} ${result.scale}`;
 
         // Step 4 (pitch correction) reads this.
-        window.VocalVaultState.beatKey = result;
+        window.VLState.beatKey = result;
 
         if (beatKeyStatus) {
 
@@ -1339,7 +1339,7 @@ async function runVocalPitchAnalysis() {
         currentVocal;
 
     // A new vocal: forget the old one's pitch until this analysis finishes.
-    window.VocalVaultState.vocalPitch = null;
+    window.VLState.vocalPitch = null;
 
     vocalPitchValue.textContent = "…";
 
@@ -1351,7 +1351,7 @@ async function runVocalPitchAnalysis() {
     try {
 
         const result =
-            await window.VocalVaultAnalysis
+            await window.VLAnalysis
                 .detectVocalPitch(
                     currentVocal
                 );
@@ -1388,7 +1388,7 @@ async function runVocalPitchAnalysis() {
             result;
 
         // Share it with the mix stage (the high-pass sits below the lowest note).
-        window.VocalVaultState.vocalPitch = result;
+        window.VLState.vocalPitch = result;
 
         // Display the detected vocal range.
         vocalPitchValue.textContent =
@@ -1483,7 +1483,7 @@ async function runVocalTempoAnalysis() {
     try {
 
         const result =
-            await window.VocalVaultAnalysis
+            await window.VLAnalysis
                 .analyzeVocalTempo(currentVocal);
 
         // Ignore stale results.
@@ -1528,7 +1528,7 @@ function showVocalTempo() {
         return;
     }
 
-    const analysis = window.VocalVaultAnalysis;
+    const analysis = window.VLAnalysis;
 
     // Beat tempo not known yet: show the vocal's own best guess.
     if (!detectedBpm) {
@@ -1548,8 +1548,30 @@ function showVocalTempo() {
         return;
     }
 
-    const near =
+    let near =
         analysis.findTempoNear(vocalTempoAnalysis, detectedBpm);
+
+    // The vocal's overall tempo (read over the whole performance) is the strongest evidence there is. If it already sits on the
+    // beat's tempo (within 6%), that IS a match, even when the narrower search around the beat is unsure or lands on its edge.
+    // (A cover sung over a beat that still has the original vocals in it gave a flat tempogram near the beat, which flagged a
+    // vocal that was in time as "doesn't match".)
+    const overall =
+        vocalTempoAnalysis.confidence >= MIN_VOCAL_TEMPO_CONFIDENCE
+            ? vocalTempoAnalysis.bpm
+            : null;
+    const closeOverall =
+        overall && Math.abs(overall - detectedBpm) / detectedBpm <= 0.06;
+    const nearIsFine =
+        near && near.confidence >= MIN_VOCAL_TEMPO_CONFIDENCE && !near.atEdge &&
+        Math.abs(near.bpm - detectedBpm) / detectedBpm <= 0.06;
+
+    if (closeOverall && !nearIsFine) {
+        near = {
+            bpm: Math.round(overall * 10) / 10,
+            confidence: Math.max(MIN_VOCAL_TEMPO_CONFIDENCE, vocalTempoAnalysis.confidence),
+            atEdge: false
+        };
+    }
 
     if (!near || near.confidence < MIN_VOCAL_TEMPO_CONFIDENCE || near.atEdge) {
 
@@ -1565,11 +1587,28 @@ function showVocalTempo() {
 
         if (ownGuess) {
 
-            vocalTempoStatus.textContent = "Doesn't match the beat";
-            vocalTempoCompare.textContent =
-                `This vocal reads as about ${formatBpm(ownGuess)} BPM, ` +
-                `more than 20% away from the beat. If the beat BPM ` +
-                `looks half or double, press ÷2 or ×2.`;
+            // Say what is actually true: how far is it, and is it half or double time?
+            const ratio = ownGuess / detectedBpm;
+            const octave = Math.abs(ratio - 2) < 0.12 ? "double" : Math.abs(ratio - 0.5) < 0.06 ? "half" : null;
+            const far = Math.abs(ratio - 1) > 0.2;
+
+            if (octave) {
+                vocalTempoStatus.textContent = octave === "double" ? "Vocal feels double-time" : "Vocal feels half-time";
+                vocalTempoCompare.textContent =
+                    `This vocal reads as about ${formatBpm(ownGuess)} BPM, ${octave} the beat (${formatBpm(detectedBpm)} BPM). ` +
+                    `The beat BPM may be ${octave === "double" ? "half" : "double"} what it should be: try ${octave === "double" ? "×2" : "÷2"} on the beat BPM.`;
+            } else if (far) {
+                vocalTempoStatus.textContent = "Doesn't match the beat";
+                vocalTempoCompare.textContent =
+                    `This vocal reads as about ${formatBpm(ownGuess)} BPM, ` +
+                    `more than 20% away from the beat (${formatBpm(detectedBpm)} BPM). If the beat BPM ` +
+                    `looks half or double, press ÷2 or ×2.`;
+            } else {
+                vocalTempoStatus.textContent = "Not sure about the vocal's timing";
+                vocalTempoCompare.textContent =
+                    `This vocal reads as about ${formatBpm(ownGuess)} BPM, close to the beat (${formatBpm(detectedBpm)} BPM), ` +
+                    `but the rhythm is not steady enough to be sure. You can continue as it is.`;
+            }
 
         } else {
 
@@ -2220,8 +2259,8 @@ function showVocalTempo() {
     if (autoMixButton) {
         autoMixButton.addEventListener("click", async () => {
             if (!vocalBuffer || !beatBuffer) {
-                if (window.VocalVaultModal) {
-                    window.VocalVaultModal.alert(
+                if (window.VLModal) {
+                    window.VLModal.alert(
                         "Load both a vocal and a beat first.",
                         "Missing tracks"
                     );
@@ -2262,13 +2301,13 @@ function showVocalTempo() {
                 const ambience = document.getElementById("mix-ambience")
                     ? document.getElementById("mix-ambience").value
                     : "auto";
-                if (!window.VocalVaultAutomix || !window.VocalVaultAutomix.process) {
+                if (!window.VLAutomix || !window.VLAutomix.process) {
                     throw new Error("Automix engine not loaded (check automix.js / presets.js script tags).");
                 }
-                if (!window.VocalVaultState.vocalBuffer || !window.VocalVaultState.beatBuffer) {
+                if (!window.VLState.vocalBuffer || !window.VLState.beatBuffer) {
                     throw new Error("Vocal or beat buffer missing from state.");
                 }
-                const mixedBuffer = await window.VocalVaultAutomix.process(window.VocalVaultState, {
+                const mixedBuffer = await window.VLAutomix.process(window.VLState, {
                     beatEnhance,
                     style,
                     polishLevel,
@@ -2297,8 +2336,8 @@ function showVocalTempo() {
                     }
 
                     // mixui.js builds the 16/24-bit download and the fair before/after from this.
-                    window.VocalVaultState.mixBuffer = mixedBuffer;
-                    window.dispatchEvent(new Event("vv-mix-ready"));
+                    window.VLState.mixBuffer = mixedBuffer;
+                    window.dispatchEvent(new Event("vl-mix-ready"));
                 }
 
             } catch (error) {

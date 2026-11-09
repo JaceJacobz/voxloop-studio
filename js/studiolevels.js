@@ -1,5 +1,5 @@
 /**
- * Vocal Vault — Studio lane levels
+ * Voxloop Studio — Studio lane levels
  *
  * How loud should an adlib, tag, harmony or soft intro sit against the lead?
  *
@@ -32,7 +32,7 @@
     const AUTO_REL_DB = { main: 0, adlib: -6, tag: -7.5, harmony: -4.5, other: -3.5 };
 
     const MIX_LEVELS = {
-        auto: { label: "Auto", blurb: "Vocal Vault places this lane where that kind of lane usually sits against the lead" },
+        auto: { label: "Auto", blurb: "Voxloop Studio places this lane where that kind of lane usually sits against the lead" },
         lower: { label: "Relatively lower", blurb: "A bit under the lead (" + Math.abs(REL_DB.lower) + " dB), measured against how loud the lead really sounds" },
         higher: { label: "Relatively higher", blurb: "A bit over the lead (+" + REL_DB.higher + " dB), so it shines out" },
         match: { label: "Same as the lead", blurb: "Brought to the same loudness as the lead, e.g. a soft intro that should not sound smaller" },
@@ -129,6 +129,6 @@
     }
 
     const api = { MIX_LEVELS, REL_DB, AUTO_REL_DB, normalizeMode, activeLevel, resolveGain, leadLikeProcessed, frameDb };
-    if (typeof window !== "undefined") window.VocalVaultStudioLevels = api;
+    if (typeof window !== "undefined") window.VLStudioLevels = api;
 
 })(typeof window !== "undefined" ? window : this);

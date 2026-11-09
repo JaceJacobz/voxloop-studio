@@ -8,7 +8,7 @@
  *    the reference plays from its own spot (click the strip to pick the chorus).
  *  - Tone, loudness, width and punch are compared in plain language, with one-tap fixes in the FX Rack.
  *
- * Needs: daw.js (VocalVaultDAW.api.renderMix), levelmatch.js (VocalVaultLevels), studio.js (fft).
+ * Needs: daw.js (VLDAW.api.renderMix), levelmatch.js (VLLevels), studio.js (fft).
  */
 (function () {
     "use strict";
@@ -19,7 +19,7 @@
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const fmtT = (s) => { const m = Math.floor(s / 60); return m + ":" + (s - m * 60).toFixed(1).padStart(4, "0"); };
     const sgn = (v, d) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d == null ? 1 : d);
-    const D = () => window.VocalVaultDAW;
+    const D = () => window.VLDAW;
     const api = () => (D() && D().api) || {};
 
     const BANDS = [
@@ -39,7 +39,7 @@
         const maxN = Math.min(ch[0].length, Math.floor(sr * 360));          // look at up to six minutes
         const cut = ch.map((c) => c.subarray(0, maxN));
         const out = {};
-        const L = window.VocalVaultLevels && window.VocalVaultLevels.engine;
+        const L = window.VLLevels && window.VLLevels.engine;
         out.lufs = L ? L.integrated(L.momentary(L.hopPowers(cut, sr))) : -20;
         await tick();
 
@@ -57,7 +57,7 @@
         await tick();
 
         // long-term tone: average spectrum in 8 bands (louder parts only, so silence does not skew it)
-        const eng = window.VocalVaultStudio && window.VocalVaultStudio.engine;
+        const eng = window.VLStudio && window.VLStudio.engine;
         const N = 4096, hop = 8192, win = new Float64Array(N);
         for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
         const bins = new Float64Array(N / 2);

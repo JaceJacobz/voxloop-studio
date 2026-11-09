@@ -1,5 +1,5 @@
 /**
- * Vocal Vault — Style + Polish recipes
+ * Voxloop Studio — Style + Polish recipes
  * Maps UI choices to numbers the existing mix chain already understands.
  *
  * READ THIS BEFORE EDITING A NUMBER. Several knobs are capped downstream, so a value above the cap does nothing
@@ -286,7 +286,7 @@
         }));
     }
 
-    window.VocalVaultPresets = {
+    window.VLPresets = {
         STYLES,
         POLISH,
         resolve,

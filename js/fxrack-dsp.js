@@ -40,6 +40,7 @@
         let b0, b1, b2, a0, a1, a2;
         if (type === "lp") { b0 = (1 - cs) / 2; b1 = 1 - cs; b2 = b0; a0 = 1 + al; a1 = -2 * cs; a2 = 1 - al; }
         else if (type === "hp") { b0 = (1 + cs) / 2; b1 = -(1 + cs); b2 = b0; a0 = 1 + al; a1 = -2 * cs; a2 = 1 - al; }
+        else if (type === "notch") { b0 = 1; b1 = -2 * cs; b2 = 1; a0 = 1 + al; a1 = -2 * cs; a2 = 1 - al; }
         else if (type === "bp") { b0 = al; b1 = 0; b2 = -al; a0 = 1 + al; a1 = -2 * cs; a2 = 1 - al; }
         else if (type === "peak") { b0 = 1 + al * A; b1 = -2 * cs; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * cs; a2 = 1 - al / A; }
         else { // high shelf
@@ -319,7 +320,8 @@
             // This lowers the noise between the voice's harmonics (and a little everywhere) so the take stays clean. 60 = the tested default.
             R("clean", "Noise cleanup", 0, 100, 1, 60, " %", { easyLabel: "Remove tuning noise" }),
             R("transpose", "Transpose", -12, 12, 1, 0, " st", {}),
-            R("detune", "Detune (A = Hz)", 420, 460, 0.5, 440, " Hz", {})
+            R("detune", "Detune (A = Hz)", 420, 460, 0.5, 440, " Hz", {}),
+            S("lines", "Line by line", ["auto", "off"], "auto", { easyLabel: "Allow each line's own notes" })
         ],
         presets: {
             "Default": {},
@@ -340,7 +342,18 @@
                 cleanDb: 5 * (p.clean == null ? 60 : p.clean) / 100, cleanComb: 16.7 * (p.clean == null ? 60 : p.clean) / 100,
                 adaptive: false, autoTranspose: false
             };
+            // Line by line: each line is checked for notes that belong to the song but not to its plain key (a blue note, a lift
+            // to the 4th) and keeps them; rapped lines are left as performed. Only for a major or minor key that is known.
+            let lineInfo = null;
+            if (p.lines !== "off" && !chromatic && (scale === "major" || scale === "minor") && root.PhraseBrain) {
+                try {
+                    const a = await runTask("analyze", { mono: mono(ch), sr, rootPc, scale, refCents: options.refCents });
+                    const res = root.PhraseBrain.analyze({ notes: a.notes, hopSec: a.hop / sr, key: { rootPc, scale }, refCents: options.refCents, totalSec: ch[0].length / sr });
+                    if (res.zones.length && !res.globalMismatch && res.keyCoverage >= 0.55) { options.zones = res.zones; lineInfo = res; }
+                } catch (e) { lineInfo = null; }
+            }
             const r = await runTask("tune", { channels: ch, sr, options });
+            if (lineInfo) r.lineInfo = { lines: lineInfo.summary.lines, changedKey: lineInfo.summary.changedKey, rapped: lineInfo.summary.rapped, notes: lineInfo.lines };
             let out = r.channels;
             if (p.amount < 100) {
                 const w = p.amount / 100;
@@ -417,6 +430,61 @@
                 idx++;
             }
             return { channels: [L, Rr], info: { skipped, usedKey: haveKey } };
+        }
+    };
+
+
+    // ---- Gate (downward expander with look-ahead, plus an optional mains-hum notch) ----
+    P.gate = {
+        id: "gate", name: "VL Gate", cat: "Clean", icon: "p-gate",
+        blurb: "Quiets the room between lines (hiss, breaths, bleed) without chopping word starts: it looks a few milliseconds ahead. The hum option removes mains hum (50 or 60 Hz and its harmonics).",
+        likeA: "Noise gate / expander",
+        easy: ["thr", "range", "hum"],
+        params: [
+            R("thr", "Opens above", -70, -20, 0.5, -48, " dB", { easyLabel: "Opens above (lower = more open)" }),
+            R("range", "Quiets by", 0, 40, 0.5, 12, " dB", { easyLabel: "How much quieter between lines" }),
+            R("atk", "Attack", 0.5, 30, 0.5, 3, " ms", {}),
+            R("hold", "Hold", 0, 300, 5, 60, " ms", {}),
+            R("rel", "Release", 20, 800, 5, 220, " ms", {}),
+            S("hum", "Remove hum", ["off", "50 Hz", "60 Hz"], "off", { easyLabel: "Remove mains hum" }),
+            R("humDepth", "Hum removal", 6, 40, 1, 24, " dB", {})
+        ],
+        presets: { "Default": {}, "Gentle": { range: 8, rel: 300 }, "Tight (dry takes)": { thr: -42, range: 20, rel: 150 }, "Hum only": { range: 0, hum: "50 Hz" } },
+        process(ch, sr, p) {
+            const n = ch[0].length, out = ch.map((c) => Float32Array.from(c));
+            if (p.hum && p.hum !== "off") {
+                const f0 = p.hum === "60 Hz" ? 60 : 50, q = 30 + (40 - p.humDepth) * 0.5;   // deeper cut = a slightly wider notch
+                // A notch takes about a second to settle, so a clip that starts mid-hum would leak at its start. The filter is first run over
+                // a whole number of hum cycles (1.5 s) and its state kept, so it starts the clip already settled.
+                const warmN = Math.min(n, Math.round(sr * Math.ceil(1.5 * f0) / f0));
+                for (const o of out) for (let h = 1; h <= 5; h++) {
+                    const f = f0 * h; if (f >= sr * 0.45) continue;
+                    const c = bqCoef("notch", f, sr, q); let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+                    for (let pass = 0; pass < 2; pass++) {
+                        const lim = pass === 0 ? warmN : n;
+                        for (let i = 0; i < lim; i++) { const v = o[i], w = c[0] * v + c[1] * x1 + c[2] * x2 - c[3] * y1 - c[4] * y2; x2 = x1; x1 = v; y2 = y1; y1 = w; if (pass === 1) o[i] = w; }
+                        if (pass === 0 && warmN >= n) { x1 = x2 = y1 = y2 = 0; }
+                    }
+                }
+            }
+            if (p.range <= 0.01) return { channels: out };
+            // detector: the louder of the channels, peak-held for ~6 ms so the gate follows the envelope, not the waveform
+            const hold = Math.exp(-1 / (0.006 * sr)), env = new Float32Array(n); let e = 0;
+            for (let i = 0; i < n; i++) { let v = 0; for (let c = 0; c < out.length; c++) { const a = Math.abs(out[c][i]); if (a > v) v = a; } e = v > e ? v : e * hold; env[i] = e; }
+            const thr = p.thr, rng = p.range, knee = 6, g = new Float32Array(n);
+            const aA = Math.exp(-1 / (Math.max(0.2, p.atk) / 1000 * sr)), aR = Math.exp(-1 / (p.rel / 1000 * sr)), holdN = Math.round(p.hold / 1000 * sr);
+            let gr = rng, heldFor = 1e9;                                          // gain reduction in dB (starts closed)
+            for (let i = 0; i < n; i++) {
+                const lv = 20 * Math.log10(Math.max(env[i], 1e-9));
+                const want = lv >= thr ? 0 : lv <= thr - knee ? rng : rng * (thr - lv) / knee;   // soft knee below the threshold
+                if (want < gr - 0.001) { gr = aA * gr + (1 - aA) * want; heldFor = 0; }          // opening: attack
+                else { heldFor++; if (heldFor > holdN) gr = aR * gr + (1 - aR) * want; }          // closing: after the hold, release
+                g[i] = Math.pow(10, -gr / 20);
+            }
+            // look-ahead: the gain that was worked out for the sound a few ms from now is applied to the sound now
+            const L = Math.round(0.004 * sr);
+            for (const o of out) for (let i = 0; i < n; i++) o[i] *= g[Math.min(n - 1, i + L)];
+            return { channels: out };
         }
     };
 
@@ -529,7 +597,7 @@
         ],
         presets: { "Default": {}, "Gentle": { amount: 4, sens: 8 }, "Strong": { amount: 9, sens: 4.5 } },
         process(ch, sr, p) {
-            const eng = root.VocalVaultStudio && root.VocalVaultStudio.engine;
+            const eng = root.VLStudio && root.VLStudio.engine;
             if (!eng) return { channels: copy(ch) };
             const r = eng.deEss(ch, sr, { freq: p.freq, maxCutDb: p.amount, aboveMedianDb: p.sens, maxActivePct: 30 });
             return { channels: r && r.channels ? r.channels : copy(ch) };
@@ -545,7 +613,7 @@
         params: [R("drive", "Drive", 1.05, 2.2, 0.05, 1.35, "", { easyLabel: "Warmth" }), R("mix", "Mix", 0, 22, 1, 10, "%", {})],
         presets: { "Default": {}, "Subtle": { drive: 1.2, mix: 6 }, "Thick": { drive: 1.9, mix: 20 } },
         process(ch, sr, p) {
-            const eng = root.VocalVaultStudio && root.VocalVaultStudio.engine;
+            const eng = root.VLStudio && root.VLStudio.engine;
             if (!eng) return { channels: copy(ch) };
             return { channels: eng.saturate(ch, { drive: p.drive, mix: p.mix / 100 }) };
         }
@@ -560,7 +628,7 @@
         params: [R("gain", "Gain", 0, 12, 0.5, 0, " dB", { easyLabel: "Make louder" }), R("ceiling", "Ceiling", -6, 0, 0.1, -1, " dB", {}), R("release", "Release", 40, 600, 5, 220, " ms", {})],
         presets: { "Default": {}, "Safety only": { gain: 0, ceiling: -1 }, "Loud": { gain: 5, ceiling: -1 } },
         process(ch, sr, p) {
-            const eng = root.VocalVaultStudio && root.VocalVaultStudio.engine;
+            const eng = root.VLStudio && root.VLStudio.engine;
             const g = dbLin(p.gain);
             const boosted = ch.map((c) => c.map((v) => v * g));
             if (!eng) { const cl = dbLin(p.ceiling); return { channels: boosted.map((c) => c.map((v) => Math.max(-cl, Math.min(cl, v)))) }; }
@@ -874,7 +942,7 @@
         }
     };
 
-    const ORDER = ["tune", "pitchedit", "harmony", "deess", "eq", "comp", "sat", "voice", "doubler", "resonance", "crowd", "imager", "orbit", "delay", "reverb", "limit"];
+    const ORDER = ["tune", "pitchedit", "gate", "harmony", "deess", "eq", "comp", "sat", "voice", "doubler", "resonance", "crowd", "imager", "orbit", "delay", "reverb", "limit"];
 
     function defaults(id) {
         const pl = P[id], o = {};
