@@ -1705,7 +1705,125 @@ function createTuneEngine() {
         return { audio: { harmony: out }, contours: {}, notes: notes.length, degrees: o.degrees };
     }
 
+    // ---------------------------------------------------------
+    // Octave lift: a vocal sung an octave below where the song wants it (a cover sung low).
+    //   octaveProfile  where each line of the vocal sits: a median pitch per line and for the whole take.
+    //   octaveRaise    moves the low lines up with the PSOLA shifter (which keeps the voice's own tone) and leaves lines already sung high alone.
+    // Every note of a raised line moves by the same amount, so the way the melody dips and lifts (and the singer's vibrato) is kept
+    // exactly; only the register changes. Breaths and consonants (unvoiced) pass through untouched. A line is a stretch of singing
+    // with no gap of 0.35 s or more, so the raise changes only in the pauses between lines, never in the middle of a phrase.
+    // ---------------------------------------------------------
+    function octaveLines(midi, hop, sr, gapSec) {
+        const gapFrames = Math.max(2, Math.round((gapSec || 0.35) * sr / hop)), n = midi.length, lines = [];
+        let k = 0;
+        while (k < n) {
+            if (isNaN(midi[k])) { k++; continue; }
+            let a = k, last = k, j = k;
+            while (j < n && (j - last) <= gapFrames) { if (!isNaN(midi[j])) last = j; j++; }
+            const vals = [];
+            for (let i = a; i <= last; i++) if (!isNaN(midi[i])) vals.push(midi[i]);
+            vals.sort((x, y) => x - y);
+            const q = (f) => vals[Math.min(vals.length - 1, Math.floor(vals.length * f))];
+            lines.push({ start: a, end: last + 1, voiced: vals.length, median: q(0.5), p05: q(0.05), p95: q(0.95), startSec: a * hop / sr, endSec: (last + 1) * hop / sr });
+            k = last + 1;
+        }
+        return lines;
+    }
+    function weightedQuantile(lines, f, key) {
+        const all = []; lines.forEach((L) => all.push([L[key], L.voiced]));
+        all.sort((x, y) => x[0] - y[0]);
+        const tot = all.reduce((t, v) => t + v[1], 0); let acc = 0;
+        for (const v of all) { acc += v[1]; if (acc >= tot * f) return v[0]; }
+        return all.length ? all[all.length - 1][0] : NaN;
+    }
+    function octaveProfile(channels, sr, o) {
+        o = o || {};
+        const mono = mixDown(channels), track = trackClean(mono, sr);
+        const lines = octaveLines(track.midi, track.hop, sr, o.gapSec).filter((L) => L.voiced >= Math.round(0.1 * sr / track.hop));
+        if (!lines.length) return { lines: [], median: NaN, p05: NaN, p95: NaN, voicedSec: 0 };
+        return {
+            lines: lines.map((L) => ({ startSec: L.startSec, endSec: L.endSec, median: L.median, p05: L.p05, p95: L.p95, voicedSec: L.voiced * track.hop / sr })),
+            median: weightedQuantile(lines, 0.5, "median"), p05: weightedQuantile(lines, 0.05, "p05"), p95: weightedQuantile(lines, 0.95, "p95"),
+            voicedSec: lines.reduce((t, L) => t + L.voiced, 0) * track.hop / sr
+        };
+    }
+    function octaveRaise(channels, sr, o) {
+        o = Object.assign({ semis: 12, skipAbove: 6, ceilingMidi: 88, floorMidi: 34, gapSec: 0.35 }, o || {});
+        const mono = mixDown(channels), track = trackClean(mono, sr), frames = track.midi.length;
+        const lines = octaveLines(track.midi, track.hop, sr, o.gapSec);
+        const report = { lines: [], shifted: 0, skipped: 0, medianBefore: NaN, medianAfter: NaN, semis: o.semis };
+        if (!lines.length) return { channels: channels.map((c) => Float32Array.from(c)), report };
+        const M = weightedQuantile(lines, 0.5, "median"), shift = new Float32Array(frames);
+        const after = [];
+        lines.forEach((L) => {
+            let why = null;
+            if (o.semis > 0) {
+                if (L.median >= M + o.skipAbove) why = "already sung high, left where it was";
+                else if (L.p95 + o.semis > o.ceilingMidi) why = "would go too high, left where it was";
+            } else {
+                if (L.median <= M - o.skipAbove) why = "already sung low, left where it was";
+                else if (L.p05 + o.semis < o.floorMidi) why = "would go too low, left where it was";
+            }
+            const info = { startSec: +L.startSec.toFixed(2), endSec: +L.endSec.toFixed(2), medianBefore: +L.median.toFixed(1), shifted: !why, reason: why };
+            if (!why) { for (let k = L.start; k < L.end; k++) shift[k] = o.semis * 100; report.shifted++; } else report.skipped++;
+            report.lines.push(info);
+            after.push({ median: L.median + (why ? 0 : o.semis), voiced: L.voiced });
+        });
+        const srt = after.slice().sort((a, b) => a.median - b.median), tot = srt.reduce((t, v) => t + v.voiced, 0); let acc = 0, mA = NaN;
+        for (const v of srt) { acc += v.voiced; if (acc >= tot / 2) { mA = v.median; break; } }
+        report.medianBefore = M; report.medianAfter = mA;
+        if (!report.shifted) return { channels: channels.map((c) => Float32Array.from(c)), report };
+        const out = applyShift(channels, mono, sr, track, shift, { force: true });
+        return { channels: out, report };
+    }
+
+    // ---------------------------------------------------------
+    // Where does the beat's pitched body live? (what a producer hears as "where the bass and chords sit")
+    // Looks at up to 45 s from the middle of the beat (past the intro) and keeps, for every frequency, the MEDIAN level over time:
+    // drums come and go, bass, pads and chords stay, so the median is the sustained harmonic body. That is folded into semitone
+    // bins (MIDI 28..84) and read as: where the bass sits, where the middle of the body sits, and how crowded each stretch of the
+    // range is (share of the sustained energy), so a vocal's spot can be compared with the room the beat leaves.
+    // ---------------------------------------------------------
+    const BR_LO = 28, BR_HI = 84;
+    function beatRegister(channels, sr, o) {
+        o = o || {};
+        const mono = mixDown(channels), N = 8192, hopN = N;
+        const len = Math.min(mono.length, Math.round((o.maxSec || 45) * sr)), start = Math.max(0, Math.floor((mono.length - len) / 2));
+        if (len < N * 8) return null;
+        const fft = fftFor(N), win = new Float64Array(N);
+        for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / N);
+        const kLo = Math.max(2, Math.floor((28 * N) / sr)), kHi = Math.min(N / 2 - 2, Math.ceil((1700 * N) / sr));
+        const frames = [], re = new Float64Array(N), im = new Float64Array(N);
+        for (let p = start; p + N <= start + len; p += hopN) {
+            let e = 0; for (let i = 0; i < N; i++) { const v = mono[p + i]; re[i] = v * win[i]; im[i] = 0; e += v * v; }
+            if (e / N < 1e-9) continue;                                           // silence tells nothing
+            fft(re, im);
+            const mag = new Float32Array(kHi - kLo + 1);
+            for (let k = kLo; k <= kHi; k++) mag[k - kLo] = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+            frames.push(mag);
+        }
+        if (frames.length < 6) return null;
+        const nb = kHi - kLo + 1, med = new Float64Array(nb), col = new Float32Array(frames.length);
+        for (let b = 0; b < nb; b++) { for (let f = 0; f < frames.length; f++) col[f] = frames[f][b]; const srt = Float32Array.from(col).sort(); med[b] = srt[srt.length >> 1]; }
+        const E = new Float64Array(BR_HI - BR_LO + 1);
+        for (let b = 0; b < nb; b++) { const hz = ((b + kLo) * sr) / N, m = Math.round(69 + 12 * Math.log2(hz / 440)); if (m >= BR_LO && m <= BR_HI) E[m - BR_LO] += med[b] * med[b]; }
+        let tot = 0; for (let i = 0; i < E.length; i++) tot += E[i];
+        if (!(tot > 0)) return null;
+        const share = Array.from(E, (v) => v / tot);
+        const smooth = (i) => (share[Math.max(0, i - 1)] + 2 * share[i] + share[Math.min(share.length - 1, i + 1)]) / 4;
+        let bi = 0, bv = -1, meanLow = 0, nl = 0;
+        for (let m = 28; m <= 52; m++) { const v = smooth(m - BR_LO); meanLow += v; nl++; if (v > bv) { bv = v; bi = m; } }
+        meanLow /= nl;
+        const wq = (lo, hi, f) => { let t = 0; for (let m = lo; m <= hi; m++) t += share[m - BR_LO]; let a = 0; for (let m = lo; m <= hi; m++) { a += share[m - BR_LO]; if (a >= t * f) return m; } return hi; };
+        return {
+            bassMidi: bi, bassStrength: meanLow > 0 ? bv / meanLow : 1,
+            bodyMidi: wq(43, 84, 0.5), bodyP25: wq(43, 84, 0.25), bodyP75: wq(43, 84, 0.75), topMidi: wq(43, 84, 0.9),
+            share, firstMidi: BR_LO, frames: frames.length, confidence: Math.min(1, frames.length / 40)
+        };
+    }
+
     return {
+        octaveProfile, octaveRaise, beatRegister,
         NOTE_NAMES, SCALES, harmonize,
         estimateTuning, trackPitch, trackClean, cleanTrack, segmentNotes,
         measure, planCorrection, smartTargets, bestTransposition, makeDetune, applyShift, applyWarp, buildPlan, process,

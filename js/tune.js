@@ -148,7 +148,7 @@ document.addEventListener("DOMContentLoaded", () => {
         statusLine.textContent = "Starting…";
 
         const vocal = S.preparedVocal || S.vocalBuffer;     // the cleaned-up vocal when step 4 changed it
-        const channels = [];
+        let channels = [];
         for (let c = 0; c < vocal.numberOfChannels; c++) channels.push(vocal.getChannelData(c));
 
         const selectiveBox = $("tune-selective");
@@ -156,13 +156,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const naturalBox = $("tune-natural");
 
         // Auto: speed, strength, vibrato flattening and how picky "selective" is come from the beat's style and this voice (mixbrain.js)
-        let autoTune = null;
+        let autoTune = null, tuneCtx = null;
         const autoTuneBox = $("tune-auto");
         if (autoTuneBox && autoTuneBox.checked && window.VLMixBrain && window.VLMixBrain.ready() && S.beatBuffer) {
             try {
                 statusLine.textContent = "Listening to your beat and vocal to set the tuning…";
                 const styleSel = document.getElementById("mix-style");
                 const ctx = await window.VLMixBrain.profile(S, { beat: S.beatBuffer, vocal, styleId: styleSel ? styleSel.value : "auto", key: { rootPc: parseInt(rootSelect.value, 10), scale: scaleSelect.value } });
+                tuneCtx = ctx;
                 if (ctx) {
                     autoTune = window.VLMixBrain.tune(ctx);
                     const setSlider = (el, v) => { el.value = String(v); el.dispatchEvent(new Event("input")); };
@@ -170,6 +171,53 @@ document.addEventListener("DOMContentLoaded", () => {
                     const why = $("tune-auto-why"); if (why) why.textContent = autoTune.notes.join(" ");
                 }
             } catch (error) { console.error("Auto tune settings failed, using the sliders as they are:", error); autoTune = null; }
+        }
+        // ---- octave: a vocal sung an octave below where the song wants it is raised BEFORE it is tuned, so the tuner then settles
+        // the raised notes into the key. Auto only acts when the singing is clearly very low; "Raise one octave" always does it.
+        // Only the low lines move (a line already sung high stays), and each raised line moves as a whole, so its own dips and
+        // lifts are kept. Rap is never moved.
+        S.octaveResult = null;
+        let abOriginal = vocal;
+        const octSel = $("tune-octave"), octNote = $("tune-octave-note");
+        if (octNote) octNote.textContent = "";
+        const octMode = octSel ? octSel.value : "off";
+        if (octMode !== "off" && window.VLFx && window.VLFx.runTask && window.AutoDecide && window.AutoDecide.octaveBrain) {
+            try {
+                statusLine.textContent = "Listening to where you sing and where the beat sits…";
+                const prof = await window.VLFx.runTask("octaveProfile", { channels, sr: vocal.sampleRate });
+                const delivery = (tuneCtx && tuneCtx.prof && tuneCtx.prof.delivery) || S.autopilotDelivery || "unknown";
+                // where the beat's bass and chords sit (measured once per beat, from 45 s in the middle of it)
+                let beatReg = null;
+                if (octMode === "auto" && S.beatBuffer) {
+                    try {
+                        if (S.beatRegisterCache && S.beatRegisterCache.buf === S.beatBuffer) beatReg = S.beatRegisterCache.reg;
+                        else {
+                            const bd = S.beatBuffer.getChannelData(0), n = Math.min(bd.length, Math.round(45 * S.beatBuffer.sampleRate)), st0 = Math.max(0, Math.floor((bd.length - n) / 2));
+                            beatReg = await window.VLFx.runTask("beatRegister", { channels: [bd.subarray(st0, st0 + n)], sr: S.beatBuffer.sampleRate });
+                            S.beatRegisterCache = { buf: S.beatBuffer, reg: beatReg };
+                        }
+                    } catch (error) { console.warn("Could not measure the beat's register, judging by the voice alone:", error); }
+                }
+                const dec = window.AutoDecide.octaveBrain({
+                    median: prof.median, p05: prof.p05, p95: prof.p95, delivery, mode: octMode,
+                    beat: beatReg, genreId: tuneCtx ? tuneCtx.genreId : null, vibe: tuneCtx ? tuneCtx.vibe : null
+                });
+                S.octaveResult = { action: dec.action, score: dec.score, heard: dec.heard.slice(), why: dec.why.slice(), median: prof.median, applied: false, evidence: dec.evidence };
+                if (dec.action === "raise" || dec.action === "lower") {
+                    const up = dec.action === "raise";
+                    statusLine.textContent = up ? "Raising the low lines one octave…" : "Lowering the high lines one octave…";
+                    const r = await window.VLFx.runTask("octaveRaise", { channels, sr: vocal.sampleRate, options: { semis: dec.semis } });
+                    if (r && r.report && r.report.shifted) {
+                        channels = r.channels;
+                        const ab = S.audioContext.createBuffer(channels.length, channels[0].length, vocal.sampleRate);
+                        channels.forEach((ch, i) => ab.copyToChannel(ch, i));
+                        abOriginal = ab;                                       // "Original" in the before/after player is the moved take
+                        S.octaveResult.applied = true; S.octaveResult.report = r.report;
+                        S.octaveResult.why.push((up ? "Raised " : "Lowered ") + r.report.shifted + " of " + (r.report.shifted + r.report.skipped) + " lines" + (r.report.skipped ? " (" + r.report.skipped + " already in the right register, left alone)" : "") + ". The take now sits around note " + Math.round(r.report.medianAfter) + " instead of " + Math.round(r.report.medianBefore) + ".");
+                    } else { S.octaveResult.why.push("No line needed moving."); }
+                }
+                if (octNote) octNote.textContent = S.octaveResult.heard.concat(S.octaveResult.why).join(" ");
+            } catch (error) { console.warn("Octave check failed, carried on without it:", error); }
         }
         const options = {
             rootPc: parseInt(rootSelect.value, 10),
@@ -217,7 +265,7 @@ document.addEventListener("DOMContentLoaded", () => {
             );
 
             lastResult = result;
-            buildBuffers(result, vocal);
+            buildBuffers(result, vocal, abOriginal);
             showResults(result);
             if (result.selective) {
                 const s = result.selective;
@@ -259,10 +307,10 @@ document.addEventListener("DOMContentLoaded", () => {
         box.querySelector("ul").innerHTML = res.lines.map((l) => "<li>" + l.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>").join("");
     }
 
-    function buildBuffers(result, vocal) {
+    function buildBuffers(result, vocal, original) {
 
         const ctx = S.audioContext;
-        audioBuffers = { original: vocal };
+        audioBuffers = { original: original || vocal };
 
         for (const name of ["detuned", "tuned"]) {
 
@@ -434,11 +482,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const height = canvas.clientHeight;
         if (!width) return;
 
-        canvas.width = Math.round(width * dpr);
-        canvas.height = Math.round(height * dpr);
+        // Only resize the canvas when its size really changed: setting width/height reallocates the bitmap, and doing that
+        // every frame during playback froze low-end phones.
+        const cw = Math.round(width * dpr), ch = Math.round(height * dpr);
+        if (canvas.width !== cw) canvas.width = cw;
+        if (canvas.height !== ch) canvas.height = ch;
 
         const g = canvas.getContext("2d");
-        g.scale(dpr, dpr);
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
         g.clearRect(0, 0, width, height);
 
         const hopSec = lastResult.hop / lastResult.sampleRate;
@@ -627,7 +678,12 @@ function updatePitchPosition(time) {
         scrollSlider.value =
             String(desired);
 
-        drawContour();
+        // Redraw at most ~10 times a second while playing (every frame is too heavy for slow phones).
+        const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+        if (!pitchPlaying || nowMs - (updatePitchPosition._last || 0) >= 100) {
+            updatePitchPosition._last = nowMs;
+            drawContour();
+        }
     }
 }
 

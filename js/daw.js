@@ -1806,8 +1806,13 @@
             return;
         }
 
-        status("Rendering composite vocal…");
         try {
+            const ap = window.VLStudioAutopilot;
+            if (ap && ap.on && ap.runNow) {                                     // Autopilot runs here only, right before the hand-over
+                status("Autopilot is producing your vocals…");
+                try { await ap.runNow(); } catch (apErr) { console.warn("Autopilot before send failed", apErr); }
+            }
+            status("Rendering composite vocal…");
             const composite = await renderCompositeVocal();
             if (!composite || !composite.file) {
                 status("Nothing to send");

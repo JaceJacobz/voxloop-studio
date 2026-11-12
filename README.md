@@ -382,3 +382,20 @@ Every pack was run through the Mix Doctor (peak about -6 dBFS, low end 21-59%). 
 - **Match:** notes are in the key and land on the chord's notes; pitch register differs per instrument and sits above the voice; a light swing from the beat's groove; fuller replies after louder sung lines; keys play a two-note chord; all lines are levelled together against the beat and the vocal and checked in the 1-4 kHz band.
 - Beat Lab now sends the beat's sound, style and swing to Studio.
 - Tested with a synthetic beat and vocal (in key, none over the singing, fills skipped where the beat is busy, levels about 12-13 dB under the voice). NOT heard by ear.
+
+## Autopilot decisions (Pipeline)
+- **Align** (`autodecide.js`): searches the whole song (up to ±30 s) for where the vocal's rhythm fits the beat, refines to 10 ms, and only makes a big move when the evidence is strong (or rhythm and first-sound agree). A vocal with no clear rhythm is left where it was recorded; it is never pushed seconds late on a guess.
+- **Tone guard** (`studio.js restoreTop`, used in `automix-vl.js`): after clean-up, tuning and compression, the vocal's top end is compared with the untouched take; lost shine is put back (capped by take quality and beat brightness).
+- **Mix polish**: clean R&B/Afrobeats takes use the lively "radio" tone; "natural" is only for rough takes.
+- **Tune**: unclear sung/rapped → gentler strength cap (75%).
+- Tests: `node tests/align.test.js`, `node tests/tone.test.js`.
+
+## Octave brain (Pipeline, Tune step)
+The Octave select (Auto / Raise one octave / Lower one octave / Off) runs a small "producer" decision (`autodecide.js octaveBrain`):
+- **Listens to the voice**: where it sits overall and per line (`pitchcorrect.js octaveProfile`).
+- **Listens to the beat**: where the sustained bass and chord body sit (`beatRegister`: median spectrum over ~45 s from the middle of the beat, folded into semitones). Genre and vibe (energy, space) come from the mix brain.
+- **Weighs evidence** (voice register, voice vs the beat's chords, voice on the bass line), nudged by genre (trap tolerates deep; pop/afrobeats want it forward) and vibe, scored from "too high" (-1) to "too low" (+1).
+- **Listens back**: tries the move on paper (scores again as if the voice already sat there) and only acts if that fixes the problem.
+- Acts automatically only on strong, agreeing evidence on a sung vocal (raise >= 0.62, lower >= 0.75 and stricter); otherwise it just suggests. A rap is never moved. It explains itself in the Tune note and in Autopilot's summary.
+- The move (`octaveRaise`, +/-12) is per line: lines already in the right register stay, each moved line keeps its own ups, downs and vibrato; unvoiced sounds pass through. Pitch correction runs after it.
+- Tests: `node tests/octave.test.js`. Known limits: tested on synthetic voices and beats only; the pitch tracker can make an octave error on a short isolated note; the beat thresholds are judgment calls, not tuned on a library of real songs; tone/timbre after the move needs ears. A formant-following variant was tried and removed (it measured worse).

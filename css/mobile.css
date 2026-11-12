@@ -52,6 +52,10 @@ button .ico { pointer-events: none; }
     .studio-beat-slot .studio-tool-btn .btn-label { display: inline; }                       /* "Load beat" keeps its word */
     .studio-select { flex: none; height: 36px; min-height: 36px; width: auto; min-width: 104px; font-size: 12.5px; padding: 0 28px 0 10px; border-radius: 10px; }
     .studio-send { padding: 0 12px; }
+    /* the action strip scrolls sideways; keep "Send mix to Pipeline" pinned to the right edge so it is never out of reach */
+    .studio-toolbar-actions { padding-right: 0; overscroll-behavior-x: contain; scroll-padding-right: 56px; }
+    .studio-toolbar-actions .studio-send { position: sticky; right: 0; z-index: 2; box-shadow: -10px 0 10px -4px var(--bg, #12101c); }
+    .studio-toolbar { padding-right: max(var(--tl-pad), env(safe-area-inset-right)); }
     .studio-send .btn-ico { width: 16px; height: 16px; }
 
     /* ---------- studio: slim timeline ---------- */

@@ -740,6 +740,16 @@
                 </span>
             </label>
             <div class="tune-row">
+                <label for="tune-octave">Octave</label>
+                <select id="tune-octave" aria-label="Octave">
+                    <option value="auto" selected>Auto: listen to the beat and decide (up or down)</option>
+                    <option value="up">Raise one octave</option>
+                    <option value="down">Lower one octave</option>
+                    <option value="off">Off</option>
+                </select>
+            </div>
+            <small id="tune-octave-note" class="nudge-hint" aria-live="polite">Auto listens to where you sing and where the beat's bass and chords sit, weighs the genre and energy, and only moves the voice when the evidence is strong (otherwise it just suggests). Only lines in the wrong register move, and each keeps its own ups and downs. Raps are never moved.</small>
+            <div class="tune-row">
                 <label for="tune-shift">Move the whole vocal</label>
                 <strong id="tune-shift-value">0 (automatic)</strong>
                 <input type="range" id="tune-shift" class="tune-slider" min="-12" max="12" value="0" step="1">

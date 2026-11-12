@@ -673,6 +673,15 @@ function applyAdaptiveRecipe(recipe, assessment, balanceMode) {
 
 async function processAutomix(state, options) {
   const opt = Object.assign({ polish: true, effects: true, master: true, beatEnhance: true, fillInstruments: false, style: "universal", polishLevel: "radio" }, options || {});
+  // Low-memory phones (e.g. Tecno Pop 20) crash the tab ("Aw, Snap!") when the optional extras each hold full-length copies of the
+  // song. On those devices the optional extras are skipped so the core mix + master still finishes. Tap "Full quality" in code via
+  // options.lowMemory = false to override.
+  const dm = typeof navigator !== "undefined" && navigator.deviceMemory ? navigator.deviceMemory : 8;
+  const lowMem = opt.lowMemory != null ? !!opt.lowMemory : dm <= 4;
+  if (lowMem) {
+    opt.fillInstruments = false; opt.beatEnhance = false; opt.resonance = "off"; opt.ambience = "off";
+    try { setStatus("This phone has limited memory, so Voxloop is using a lighter mix to avoid crashing."); } catch (e) { /* status is optional */ }
+  }
   const vocal = state.tunedVocal || state.preparedVocal || state.vocalBuffer;   // corrected, else cleaned-up, else as recorded
   const beat = state.beatBuffer;
   const offset = state.vocalOffset || 0;
@@ -880,6 +889,28 @@ async function processAutomix(state, options) {
   }
   const vocalChannels = channelsOf(finished).map((c) => engine.resample(c, finished.sampleRate, sr));
   let beatChannels = channelsOf(beat);
+
+  // Tone guard: clean-up, tuning and compression can leave the vocal duller than it was recorded (a cover sung over a bright
+  // original is where this shows most). Measure the top end against the untouched take and put back what was lost.
+  try {
+    const eng = Studio && Studio.engine;
+    if (opt.toneGuard !== false && eng && eng.restoreTop && state.vocalBuffer) {
+      const q = brain && brain.prof && brain.prof.quality != null ? brain.prof.quality : 0.7;
+      const brightBeat = brain && brain.vibe && brain.vibe.bright != null ? brain.vibe.bright : 0.5;
+      const maxBoost = q < 0.5 ? 1.5 : q < 0.7 ? 3 : 4.5;                                   // a rough take would only get its noise lifted
+      const floorDb = brightBeat > 0.65 ? -19 : brightBeat < 0.35 ? -16.5 : -17.5;           // a dark beat lets the voice carry more shine
+      // if the vocal was raised an octave the untouched take is in another register, so it is no fair reference: use the lively floor only
+      const raised = !!(state.octaveResult && state.octaveResult.applied);
+      const rawCh = raised ? null : channelsOf(state.vocalBuffer);
+      const tg = eng.restoreTop(vocalChannels, sr, rawCh, raised ? sr : state.vocalBuffer.sampleRate, { maxBoostDb: maxBoost, floorDb });
+      if (tg.applied) {
+        for (let c = 0; c < vocalChannels.length; c++) vocalChannels[c] = tg.channels[c];
+        lines.push(`Tone guard: the vocal had lost some shine (top end ${tg.beforeDb.toFixed(1)} dB against the body${tg.rawDb != null ? `, ${tg.rawDb.toFixed(1)} dB as recorded` : ""}), so a gentle ${tg.boostDb.toFixed(1)} dB lift was added up high (now ${tg.afterDb.toFixed(1)} dB).`);
+      } else if (tg.beforeDb !== null) {
+        lines.push("Tone guard: the vocal kept its brightness through the processing, so nothing was added.");
+      }
+    }
+  } catch (toneErr) { console.warn("Tone guard failed", toneErr); }
 
   // Auto beat enhance: only acts when kick/low end is thin vs the mids
   if (Studio && opt.beatEnhance !== false && Studio.engine && Studio.engine.enhanceBeat) {

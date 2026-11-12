@@ -133,7 +133,10 @@
                 const shift = new Float32Array(track.midi.length).fill(a.cents);
                 const out = engine.applyShift(a.channels, mono, a.sr, track, shift, { force: true });
                 return { channels: out };
-            }
+            },
+            beatRegister(a) { return engine.beatRegister(a.channels, a.sr, a.options || {}); },
+            octaveProfile(a) { return engine.octaveProfile(a.channels, a.sr, a.options || {}); },
+            octaveRaise(a) { const r = engine.octaveRaise(a.channels, a.sr, a.options || {}); return { channels: r.channels, report: r.report }; }
         };
     }
 

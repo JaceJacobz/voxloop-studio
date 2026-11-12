@@ -704,7 +704,7 @@
             '<details class="fx-flav"' + (Object.values(st.flavors).some(Boolean) ? " open" : "") + "><summary>Optional extras (style, not needs)</summary>" +
             fl.map((f) => '<label class="fx-chk"><input type="checkbox" data-flav="' + f[0] + '"' + (st.flavors[f[0]] ? " checked" : "") + "> " + f[1] + "</label>").join("") +
             '<div class="fx-intens"><span>How much:</span><div class="fx-seg" id="fx-intens" role="group" aria-label="How much">' + [["subtle", "Subtle"], ["normal", "Normal"], ["lots", "Lots"]].map((i) => '<button type="button" data-int="' + i[0] + '" class="' + (st.intensity === i[0] ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div></details>" +
-            '<label class="fx-ap-row"><input type="checkbox" id="fx-ap"' + (apOn() ? " checked" : "") + '> <span><b>Autopilot</b>: produce every new take automatically</span></label>' +
+            '<label class="fx-ap-row"><input type="checkbox" id="fx-ap"' + (apOn() ? " checked" : "") + '> <span><b>Autopilot</b>: produce my vocals automatically when I send the mix to Pipeline</span></label>' +
                         '<div class="fx-intens"><span>Voice:</span><div class="fx-seg" id="fx-voice" role="group" aria-label="Voice type (Auto detects it; tap to correct it)">' + [["auto", "Auto"], ["sung", "Sung"], ["rapped", "Rapped"], ["low", "Low"], ["mid", "Mid"], ["high", "High"]].map((i) => '<button type="button" data-vc="' + i[0] + '" class="' + ((i[0] === "auto" && !st.voice) || (st.voice && (st.voice.delivery === i[0] || st.voice.range === i[0])) ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div>" +
             '<button type="button" class="fx-btn fx-auto" id="fx-listen">' + VLI("sparkle", 15) + ' Listen & make a plan</button> <span class="fx-busy" id="fx-plan-busy" hidden></span>' +
             '<div id="fx-plan"></div></div>';
@@ -818,29 +818,29 @@
     function apPrefs() { try { return JSON.parse(localStorage.getItem("vl-autopilot") || "{}"); } catch (e) { return {}; } }
     function apOn() { return apPrefs().studio !== false; }
     function apSet(v) { const p = apPrefs(); p.studio = !!v; try { localStorage.setItem("vl-autopilot", JSON.stringify(p)); } catch (e) { /* private mode */ } }
-    const apDone = new WeakSet(); let apBusy = false, apSig = "";
-    async function apTick() {
-        if (apBusy || !apOn() || !D) return;
-        const b = beat(); if (!b || !b.buffer) return;
-        if ($("#fx-listen") && $("#fx-listen").disabled) return;                 // a plan is already being made
+    const apDone = new WeakSet(); let apBusy = false;
+    // Autopilot no longer polls. It runs once, from "Send mix to Pipeline" (daw.js awaits VLStudioAutopilot.runNow()),
+    // so recording or importing a lane never triggers a production pass by itself.
+    async function apRunNow() {
+        if (apBusy || !apOn() || !D) return false;
+        const b = beat(); if (!b || !b.buffer) return false;
         const fresh = lanes().filter((l) => l.clips.some((c) => c.buffer && !apDone.has(c)));
-        if (!fresh.length) { apSig = ""; return; }
-        const sig = fresh.map((l) => l.id + ":" + l.clips.map((c) => (c.id || "") + (c.duration || 0).toFixed(2)).join(",")).join("|");
-        if (sig !== apSig) { apSig = sig; return; }                                // wait until the take stops changing (still recording / importing)
+        if (!fresh.length) return false;
         apBusy = true;
+        let ran = false;
         try {
             fresh.forEach((l) => l.clips.forEach((c) => apDone.add(c)));
             if (!st.open) openRack("auto");
             st.apRun = true;                                                       // lets the brain choose the extras too
             await makePlan();
-            if (st.plan) await applyPlan();
+            if (st.plan) { await applyPlan(); ran = true; }
         } catch (e) { console.warn("Studio autopilot", e); }
         st.apRun = false;
         apBusy = false;
+        return ran;
     }
     window.VLFxRack = { st, select, openEffects: () => { if (st.sel) select(Object.assign({}, st.sel, { openPanel: true })); }, autoPlugin, autoThis, addPlugin };      // also lets tests drive the rack without pointer gestures
-    window.VLStudioAutopilot = { markDone: (c) => apDone.add(c), isDone: (c) => apDone.has(c), tick: apTick, get on() { return apOn(); }, set: apSet };
-    setInterval(apTick, 1500);
+    window.VLStudioAutopilot = { markDone: (c) => apDone.add(c), isDone: (c) => apDone.has(c), runNow: apRunNow, get on() { return apOn(); }, set: apSet };
 
     // ------------------------------------------------------------------ boot
     function init() {

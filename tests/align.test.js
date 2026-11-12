@@ -23,4 +23,23 @@ for (const [bpm, pattern, seed] of [[92, "rnb", 1], [105, "afroAnticipate", 2], 
     console.log((ok ? "PASS " : "FAIL "), (bpm + " " + pattern).padEnd(18), name.padEnd(24), "error", (err * 1000).toFixed(0).padStart(4), "ms (old auto-align:", (oldErr * 1000).toFixed(0) + " ms)", "| conf", d.confidence.toFixed(2), d.method);
   }
 }
+
+// ---- the "way late" cases: the old fallback moved the vocal later by the gap between the files' first sounds
+{
+  const bpm = 100, beat = B.render({ bpm, pattern: "rnb", prog: "minor4", bars: 12, seed: 7 });
+  const quiet = beat.channels.map((c) => { const o = Float32Array.from(c), n = Math.round(5 * beat.sr); for (let i = 0; i < n && i < o.length; i++) o[i] *= 0.004; return o; });   // beat with a near-silent 5 s intro
+  // a held-note vocal with no rhythm to match: slow sine swells starting 0.2 s in
+  const sr = 44100, v = new Float32Array(sr * 30); for (let i = Math.round(0.2 * sr); i < v.length; i++) { const t = i / sr; v[i] = 0.25 * Math.sin(2 * Math.PI * 220 * t) * (0.6 + 0.4 * Math.sin(2 * Math.PI * 0.11 * t)); }
+  const d = AD.alignDecision([v], sr, quiet, beat.sr, {});
+  const naive = (() => { const first = (z, r) => { let pk = 0; for (const q of z) pk = Math.max(pk, Math.abs(q)); const th = pk * 0.06; for (let i = 0; i < z.length; i++) if (Math.abs(z[i]) >= th) return i / r; return 0; }; return first(quiet[0], beat.sr) - first(v, sr); })();
+  const ok = d.offsetSec >= 0 && d.offsetSec <= 0.25; ok ? pass++ : fail++;
+  console.log(ok ? "PASS " : "FAIL ", "no-rhythm vocal over quiet-intro beat".padEnd(42), "moved", d.offsetSec.toFixed(2), "s (old fallback:", naive.toFixed(2) + " s late)");
+}
+{
+  const bpm = 96, beat = B.render({ bpm, pattern: "halftime", prog: "minor4", bars: 12, seed: 5 }), plan = S.rappedOnGrid(bpm, 12, 14, 1), v = S.render(plan, { tract: 1, sibHz: 5400, seed: 3 });
+  const quiet = beat.channels.map((c) => { const o = Float32Array.from(c), n = Math.round(3 * beat.sr); for (let i = 0; i < n && i < o.length; i++) o[i] *= 0.004; return o; });
+  const d = AD.alignDecision([v.x], v.sr, quiet, beat.sr, {});
+  const ok = Math.abs(d.offsetSec) <= 0.05; ok ? pass++ : fail++;
+  console.log(ok ? "PASS " : "FAIL ", "in-sync vocal, beat with a quiet intro".padEnd(42), "moved", d.offsetSec.toFixed(3), "s");
+}
 console.log(pass + " passed, " + fail + " failed");

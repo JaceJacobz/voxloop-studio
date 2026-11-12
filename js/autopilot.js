@@ -153,6 +153,7 @@
         const slider = $("offset-slider"), v = Math.max(-15, Math.min(15, d.offsetSec));
         slider.value = v.toFixed(3); fire(slider, "input");
         const lines = d.why.slice(); if (Math.abs(d.offsetSec) > 15) lines.push("The offset was limited to 15 s.");
+        lines.push("Placed the vocal " + (Math.abs(v) < 0.0005 ? "exactly where it was recorded" : (v > 0 ? "later" : "earlier") + " by " + Math.abs(v).toFixed(3) + " s") + " (" + Math.round(d.confidence * 100) + "% sure).");
         note("align", lines); window.VLAutopilot.alignment = d;
     }
     async function stepAnalyze() {
@@ -196,7 +197,7 @@
         await waitFor(() => shown("tune-section"), 15000, "the pitch step");
         stepBar("tune");
         const S = window.VLState, AD = window.AutoDecide;
-        S.autopilotTuneCap = null;
+        S.autopilotTuneCap = null; S.autopilotDelivery = A.prof.delivery;
         if (A.stepAuto.tune) {
             const d = AD.tuneDecision({ delivery: A.prof.delivery, voiceConfidence: A.prof.voiceConfidence });
             setCheck("tune-auto", true); setCheck("tune-auto-key", true); setCheck("tune-phrases", true);
@@ -208,6 +209,8 @@
         $("tune-run-button").click();
         await waitFor(() => /done|Tuned|failed|corrected/i.test(st.textContent) && !$("tune-run-button").disabled, 300000, "pitch correction");
         note("tune", st.textContent);
+        const oc = S.octaveResult;
+        if (oc && (oc.heard || oc.why)) note("tune", ["Octave check. " + (oc.heard || []).join(" ")].concat(oc.why || []));
         const pr = S.phraseResult;
         if (pr) {
             note("tune", "Listened line by line: " + pr.summary.lines + " lines" + (pr.summary.changedKey ? ", " + pr.summary.changedKey + " use notes outside the plain key" : ", all inside the beat's key") + (pr.summary.rapped ? ", " + pr.summary.rapped + " rapped (left alone)" : "") + ".");

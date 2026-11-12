@@ -1502,6 +1502,36 @@ function createStudioEngine() {
         return { medianDb: ratios[ratios.length >> 1], p90Db: ratios[Math.floor(ratios.length * 0.9)], frames: ratios.length };
     }
 
+    // Bring back top end that clean-up, tuning and compression took out. The processed vocal is compared with the take as it was
+    // recorded (same measure as calmMixTop: 4-9 kHz against 0.3-3 kHz, median over the singing). If it is now duller than the
+    // recording, or duller than a lively vocal should be, a gentle high shelf puts it back. Never louder than a bright mix would
+    // want, and only as much as the take can take (noisy takes get less).
+    function restoreTop(channels, sr, refChannels, refSr, options) {
+        const o = Object.assign({ maxBoostDb: 4.5, floorDb: -17.5, ceilingDb: -13, keepDb: 0.5, strength: 0.85, shelfHz: 5600 }, options || {});
+        const res = { applied: false, boostDb: 0, beforeDb: null, afterDb: null, rawDb: null, channels };
+        const m = measureTop(channels, sr); res.beforeDb = m.medianDb;
+        if (m.medianDb === null) return res;
+        const r = refChannels && refChannels.length ? measureTop(refChannels, refSr || sr) : { medianDb: null };
+        res.rawDb = r.medianDb;
+        // wanted level: as bright as the recording was (minus a hair), and at least a lively floor, but never past the ceiling
+        let want = r.medianDb !== null ? r.medianDb - o.keepDb : o.floorDb;
+        want = Math.max(want, o.floorDb); want = Math.min(want, o.ceilingDb);
+        const gap = want - m.medianDb;
+        if (gap < 0.8) return res;
+        const render = (b) => { const k1 = design.highShelf(o.shelfHz, b, sr), k2 = design.peaking(3400, b * 0.25, 0.8, sr); return channels.map((x) => runBiquad(runBiquad(x, k1), k2)); };
+        let boost = Math.min(o.maxBoostDb, gap * o.strength);
+        let out = render(boost), after = measureTop(out, sr).medianDb;
+        // a shelf only partly lands inside the measured 4-9 kHz band: check what it achieved and correct once
+        const got = after - m.medianDb;
+        if (got < gap * 0.75 && boost < o.maxBoostDb) {
+            const b2 = Math.min(o.maxBoostDb, boost * Math.min(2.2, gap / Math.max(got, 0.3)));
+            const out2 = render(b2), a2 = measureTop(out2, sr).medianDb;
+            if (a2 <= o.ceilingDb + 0.5) { boost = b2; out = out2; after = a2; }
+        }
+        res.channels = out; res.applied = true; res.boostDb = boost; res.afterDb = after;
+        return res;
+    }
+
     // Ease the top end if the mix is too bright: a broad dip around 6 kHz, at most 3.5 dB, only as much as it is over
     function calmMixTop(channels, sr, options) {
         const o = Object.assign({ triggerDb: -12.5, targetDb: -14, maxCutDb: 3.5, strength: 0.8 }, options || {});
@@ -2380,7 +2410,7 @@ function createStudioEngine() {
 
     return {
         fft, design, biquadMagDb, runBiquad, runCascade,
-        highPass, deEss, calmVoice, measureTop, calmMixTop, deStrain, deResonate, tidyLowEnd, bandSpectrum, planEq, applyEq, saturate,
+        highPass, deEss, calmVoice, measureTop, restoreTop, calmMixTop, deStrain, deResonate, tidyLowEnd, bandSpectrum, planEq, applyEq, saturate,
         prepareVocal, finishVocal,
         makeReverbIR, makeEcho, duckCurve, applyDuck, levelBelowVocal,
         glue, limiter, truePeakDb, master,
