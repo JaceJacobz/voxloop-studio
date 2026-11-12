@@ -1503,7 +1503,7 @@ window.VoxloopBeatLab = {
       this.pause();
       const buffer = await this.renderCurrentBuffer();
       window.dispatchEvent(new CustomEvent("vl-set-beat-studio", {
-        detail: { buffer, noMelody: !melodyOn, bpm: current.bpm, key: ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][current.key.root] + " " + current.key.scale, name: exportFileName(current).replace(/\.wav$/i, "") + " (Beat Lab)" }
+        detail: { buffer, noMelody: !melodyOn, engine: current.sound ? { genre: current.genre, styleId: current.style, sound: JSON.parse(JSON.stringify(current.sound)) } : null, swing: swing, bpm: current.bpm, key: ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][current.key.root] + " " + current.key.scale, name: exportFileName(current).replace(/\.wav$/i, "") + " (Beat Lab)" }
       }));
       if (window.VLDAW && typeof window.VLDAW.setMode === "function") {
         window.VLDAW.setMode("studio");

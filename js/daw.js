@@ -351,11 +351,11 @@
         }
     }
 
-    function loadBeatBuffer(buffer, name, bpm, key, noMelody) {
+    function loadBeatBuffer(buffer, name, bpm, key, noMelody, engineInfo, swingAmt) {
         if (!buffer) return;
         ensureCtx();
         melody = null;                                              // a melody belongs to the beat it was written for
-        beat = { file: null, buffer, name: name || "Beat Lab", duration: buffer.duration, bpm: bpm > 0 ? bpm : 0, noMelody: noMelody === true };
+        beat = { file: null, buffer, name: name || "Beat Lab", duration: buffer.duration, bpm: bpm > 0 ? bpm : 0, noMelody: noMelody === true, engine: engineInfo || null, swing: typeof swingAmt === "number" ? swingAmt : null };
         if (els.beatName) els.beatName.textContent = beat.name;
         refreshRoles();
         drawRuler();
@@ -454,7 +454,7 @@
 
     window.addEventListener("vl-set-beat-studio", (ev) => {
         const d = ev.detail || {};
-        if (d.buffer) loadBeatBuffer(d.buffer, d.name, d.bpm, d.key, d.noMelody);
+        if (d.buffer) loadBeatBuffer(d.buffer, d.name, d.bpm, d.key, d.noMelody, d.engine, d.swing);
     });
 
     async function importAudioFiles(fileList) {
@@ -1292,6 +1292,11 @@
     }
 
     async function onRecordStop() {
+        const prog = window.VLProgress ? window.VLProgress.start("Saving your take…") : null;
+        try { await onRecordStopInner(); } finally { if (prog) prog.done(); }
+    }
+
+    async function onRecordStopInner() {
         const engine = recEngine;
         recEngine = null;
         isRecording = false;
@@ -1343,7 +1348,7 @@
         const duration = buffer.duration;
         try {
             // Lift quiet takes; light high-pass to cut DC / rumble
-            buffer = polishTake(buffer);
+            buffer = await polishTake(buffer);
         } catch (e) {
             console.warn("polish rec", e);
         }
@@ -1363,12 +1368,13 @@
             duration
         };
         lane.clips.push(newClip);
+        window.dispatchEvent(new CustomEvent("vl-take-saved", { detail: { clipId: newClip.id } }));
         // Take check: measure the raw recording (before any lift or cleaning) and tell the singer what limits it
         const rawForCheck = samples, rawRate = result.sampleRate, micLabel = recMic && recMic.label, micProc = !!(recMic && recMic.processing);
-        setTimeout(() => {
+        setTimeout(async () => {
             if (!window.VLTakeCheck) return;
             try {
-                const q = window.VLTakeCheck.check({ samples: rawForCheck, sr: rawRate, micRate, label: micLabel, processing: micProc, beat: beat.buffer ? { buffer: beat.buffer, start: songStart } : null });
+                const q = await window.VLTakeCheck.check({ samples: rawForCheck, sr: rawRate, micRate, label: micLabel, processing: micProc, beat: beat.buffer ? { buffer: beat.buffer, start: songStart } : null });
                 newClip.quality = q;
                 window.dispatchEvent(new CustomEvent("vl-take-checked", { detail: { clipId: newClip.id } }));
                 const issues = q.findings.filter((f) => f.status !== "good").length;
@@ -1391,7 +1397,8 @@
     // Brings the take to a healthy level. The lift is worked out from how loud the SINGING is (not from one stray peak),
     // so a quiet singer is lifted properly; a take that is too loud is brought down. Stray peaks that would go over
     // the top are caught by a small limiter instead of holding the whole take back. Also a light 80 Hz high-pass.
-    function polishTake(buffer) {
+    async function polishTake(buffer) {
+        const Y = () => (window.VLYield ? window.VLYield() : null);
         const sr = buffer.sampleRate;
         const ch = buffer.numberOfChannels;
         const len = buffer.length;
@@ -1402,7 +1409,7 @@
         const blk = Math.max(1, Math.round(0.05 * sr)), nb = Math.floor(len / blk), lv = [];
         const m0 = buffer.getChannelData(0);
         let peak = 0;
-        for (let c = 0; c < ch; c++) { const d = buffer.getChannelData(c); for (let i = 0; i < len; i++) { const v = Math.abs(d[i]); if (v > peak) peak = v; } }
+        for (let c = 0; c < ch; c++) { const d = buffer.getChannelData(c); for (let i = 0; i < len; i++) { if ((i & 524287) === 0) await Y(); const v = Math.abs(d[i]); if (v > peak) peak = v; } }
         for (let b = 0; b < nb; b++) { let e = 0; for (let i = b * blk; i < (b + 1) * blk; i++) e += m0[i] * m0[i]; lv.push(10 * Math.log10(e / blk + 1e-12)); }
         const sorted = lv.slice().sort((a, b) => a - b);
         const top = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : -60;
@@ -1426,6 +1433,7 @@
             const la = Math.round(0.004 * sr);
             const need = new Float32Array(len).fill(1);
             for (let i = 0; i < len; i++) {
+                if ((i & 262143) === 0) await Y();
                 let v = 0; for (let c = 0; c < ch; c++) { const a = Math.abs(buffer.getChannelData(c)[i]); if (a > v) v = a; }
                 const w = v * gain;
                 if (w > CEIL) need[i] = CEIL / w;
@@ -1445,6 +1453,7 @@
             const dst = out.getChannelData(c);
             let prevIn = 0, prevOut = 0;
             for (let i = 0; i < len; i++) {
+                if ((i & 524287) === 0) await Y();
                 const x = src[i];
                 const y = alpha * (prevOut + x - prevIn);
                 prevIn = x;

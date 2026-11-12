@@ -1,0 +1,16 @@
+{
+  "name": "Voxloop Studio",
+  "short_name": "VL Studio",
+  "description": "Make a beat, record your vocal, and finish the song.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#110f18",
+  "theme_color": "#110f18",
+  "categories": ["music", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

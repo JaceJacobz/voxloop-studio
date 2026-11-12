@@ -9,6 +9,11 @@
     <link rel="icon" type="image/png" sizes="32x32" href="logo-mark.png">
     <link rel="icon" type="image/png" sizes="16x16" href="assets/logo.png">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="VL Studio">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script>
         /* The app used to be called Vocal Vault: carry saved preferences over to the new names once. */
         try {
@@ -1012,6 +1017,7 @@
             <!-- Studio toolbar -->
             <div class="studio-toolbar">
                 <div class="studio-beat-slot">
+                    <span id="autosave-pill" class="autosave-pill" aria-live="polite"></span>
                     <span class="studio-label">Beat / instrumental</span>
                     <button type="button" id="studio-load-beat" class="secondary-button studio-tool-btn" aria-label="Load beat"><svg class="ico ico-beat" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M5 15v-4M9 19V5M13 16V8M17 14v-4M20.5 12.5v-1"/></svg><span class="btn-label">Load beat</span></button>
                     <span id="studio-beat-name" class="studio-file-name">No beat loaded</span>
@@ -1197,6 +1203,16 @@
                     <p class="settings-now" id="st-last"></p>
                 </fieldset>
 
+                <fieldset class="settings-group" id="pwa-card">
+                    <legend>Install and offline</legend>
+                    <p class="settings-now" id="pwa-offline" role="status"></p>
+                    <p class="settings-note" id="pwa-install-note"></p>
+                    <div class="settings-row"><button type="button" class="primary-button" id="pwa-install" hidden>Install app</button></div>
+                    <p class="settings-now" id="pwa-storage"></p>
+                    <p class="settings-note" id="pwa-protect-note"></p>
+                    <div class="settings-row"><button type="button" class="secondary-button" id="pwa-protect" hidden>Protect my drafts</button></div>
+                </fieldset>
+
                 <button type="button" class="secondary-button" id="st-reset">Back to defaults</button>
             </section>
         </div>
@@ -1221,6 +1237,7 @@
 </script>
 <script src="lib/Tone.js"></script>
 <script src="js/icons.js"></script>
+<script src="js/yield.js"></script>
 <script src="js/settings.js"></script>
 <script>
     (function () {
@@ -1269,6 +1286,8 @@
 <script src="js/melody.js"></script>
 <script src="js/nav.js"></script>
 <script src="js/drafts.js"></script>
+<script src="js/autosave.js"></script>
+<script src="js/pwa.js"></script>
 <script src="js/reference.js"></script>
 <script src="js/studioui.js"></script>
 <script src="js/beatlab.js"></script>

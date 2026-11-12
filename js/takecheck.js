@@ -41,7 +41,8 @@
     }
     const pct = (a, q) => { if (!a.length) return NaN; const s = Float64Array.from(a).sort(); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; };
 
-    function check(o) {
+    async function check(o) {
+        const Y = () => (root.VLYield ? root.VLYield() : null);
         const x = o.samples, sr = o.sr, findings = [];
         const add = (id, status, title, detail, tip) => findings.push({ id, status, title, detail, tip: tip || "" });
         if (!x || x.length < sr * 1.0) return { verdict: "short", findings };
@@ -52,6 +53,7 @@
         const re = new Float64Array(N), im = new Float64Array(N), w = new Float64Array(N);
         for (let i = 0; i < N; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
         for (let f = 0; f < frames; f++) {
+            if ((f & 31) === 0) await Y();
             let e = 0;
             for (let i = 0; i < N; i++) { const v = x[f * HOP + i]; e += v * v; re[i] = v * w[i]; im[i] = 0; }
             lvl[f] = db(e / N);
@@ -80,7 +82,7 @@
 
         // ---- clipping: samples stuck at the top
         let flat = 0, run = 0, maxRun = 0;
-        for (let i = 0; i < x.length; i++) { if (Math.abs(x[i]) >= 0.985) { run++; flat++; if (run > maxRun) maxRun = run; } else run = 0; }
+        for (let i = 0; i < x.length; i++) { if ((i & 1048575) === 0) await Y(); if (Math.abs(x[i]) >= 0.985) { run++; flat++; if (run > maxRun) maxRun = run; } else run = 0; }
         if (maxRun >= 3 || flat / x.length > 0.0005) add("clip", maxRun >= 6 ? "bad" : "warn", "Distortion from clipping", "Some peaks are flattened (" + flat + " samples at the maximum). This cannot be repaired afterwards.", "Sing a bit softer or move the phone a little further away, then record that part again.");
         else add("clip", "good", "No clipping", "No flattened peaks.");
 

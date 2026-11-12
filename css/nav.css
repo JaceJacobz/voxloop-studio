@@ -118,3 +118,13 @@
 .tr-phone { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--muted); font: 600 12px var(--font); cursor: pointer; }
 .tr-phone.is-on { background: var(--accent); border-color: var(--accent); color: #fff; }
 @media (max-width: 720px) { .tr-phone span { display: none; } .tr-phone { width: 32px; height: 32px; padding: 0; justify-content: center; } }
+
+/* progress bar for heavy work */
+.vl-progress { position: fixed; left: 0; right: 0; top: 0; z-index: 1300; padding-top: env(safe-area-inset-top, 0px); pointer-events: none; opacity: 0; transform: translateY(-100%); transition: opacity .15s, transform .2s; }
+.vl-progress.is-on { opacity: 1; transform: none; }
+.vl-progress-label { display: inline-block; margin: 8px 12px 6px; padding: 5px 12px; border-radius: 999px; background: #2d2840; border: 1px solid var(--line-strong); color: var(--text); font: 600 12.5px/1.2 var(--font); box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.vl-progress-track { height: 3px; background: rgba(255,255,255,.1); }
+.vl-progress-track i { display: block; height: 100%; width: 4%; background: var(--accent-hi); transition: width .15s linear; }
+
+.autosave-pill { order: 9; margin-left: auto; padding: 3px 9px; border-radius: 999px; font: 600 11.5px/1.2 var(--font); color: #7fe0a8; background: rgba(69, 192, 122, .12); opacity: 0; transition: opacity .25s; pointer-events: none; white-space: nowrap; }
+.autosave-pill.is-on { opacity: 1; }

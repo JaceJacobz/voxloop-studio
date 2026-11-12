@@ -51,22 +51,34 @@
         const d = await db();
         await new Promise((res, rej) => { const tx = d.transaction(["meta", "data"], "readwrite"); tx.objectStore("meta").delete(id); tx.objectStore("data").delete(id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
     }
+    // plain key/value access to the data store (used by autosave.js)
+    const dataOps = {
+        async get(k) { return reqP((await store("data", "readonly")).get(k)); },
+        async put(k, v) { await reqP((await store("data", "readwrite")).put(v, k)); },
+        async del(k) { await reqP((await store("data", "readwrite")).delete(k)); },
+        async keys() { return reqP((await store("data", "readonly")).getAllKeys()); }
+    };
     const newId = () => "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     async function announce() { try { const n = (await listMeta()).length; window.dispatchEvent(new CustomEvent("vl-drafts-changed", { detail: { count: n } })); } catch (e) { /* no storage */ } }
 
     // ---------------------------------------------------------------- audio as compact PCM
-    function pack(ab) {
+    const Y = () => (root.VLYield ? root.VLYield() : null);
+    async function pack(ab) {
         const ch = [];
         for (let c = 0; c < ab.numberOfChannels; c++) {
             const f = ab.getChannelData(c), i16 = new Int16Array(f.length);
-            for (let i = 0; i < f.length; i++) { const v = f[i] < -1 ? -1 : f[i] > 1 ? 1 : f[i]; i16[i] = v < 0 ? v * 32768 : v * 32767; }
+            for (let i = 0; i < f.length; i++) { if ((i & 1048575) === 0) await Y(); const v = f[i] < -1 ? -1 : f[i] > 1 ? 1 : f[i]; i16[i] = v < 0 ? v * 32768 : v * 32767; }
             ch.push(i16);
         }
         return { sr: ab.sampleRate, ch };
     }
-    function unpack(p) {
+    async function unpack(p) {
         const ctx = api().ensureCtx(), len = p.ch[0].length, ab = ctx.createBuffer(p.ch.length, len, p.sr);
-        p.ch.forEach((i16, c) => { const f = new Float32Array(len); for (let i = 0; i < len; i++) f[i] = i16[i] / (i16[i] < 0 ? 32768 : 32767); ab.copyToChannel(f, c); });
+        for (let c = 0; c < p.ch.length; c++) {
+            const i16 = p.ch[c], f = new Float32Array(len);
+            for (let i = 0; i < len; i++) { if ((i & 1048575) === 0) await Y(); f[i] = i16[i] / (i16[i] < 0 ? 32768 : 32767); }
+            ab.copyToChannel(f, c);
+        }
         return ab;
     }
     const bytesOf = (p) => (p ? p.ch.reduce((n, c) => n + c.byteLength, 0) : 0);
@@ -113,13 +125,14 @@
         }
         const snap = api().snapshotProject();
         const dur = Math.max(snap.beat && snap.beat.buffer ? snap.beat.buffer.duration : 0, ...snap.lanes.flatMap((l) => l.clips.map((k) => k.start + k.duration)), 0);
-        const data = {
-            kind: "song",
-            beat: snap.beat ? Object.assign({}, snap.beat, { buffer: pack(snap.beat.buffer) }) : null,
-            lanes: snap.lanes.map((l) => Object.assign({}, l, { clips: l.clips.map((c) => Object.assign({}, c, { buffer: pack(c.buffer) })) })),
-            melody: snap.melody ? Object.assign({}, snap.melody, { buffer: pack(snap.melody.buffer) }) : null,
-            playhead: snap.playhead, zoom: snap.zoom
-        };
+        const data = { kind: "song", beat: null, lanes: [], melody: null, playhead: snap.playhead, zoom: snap.zoom };
+        if (snap.beat) data.beat = Object.assign({}, snap.beat, { buffer: await pack(snap.beat.buffer) });
+        for (const l of snap.lanes) {
+            const lane = Object.assign({}, l, { clips: [] });
+            for (const c of l.clips) lane.clips.push(Object.assign({}, c, { buffer: await pack(c.buffer) }));
+            data.lanes.push(lane);
+        }
+        if (snap.melody) data.melody = Object.assign({}, snap.melody, { buffer: await pack(snap.melody.buffer) });
         const bytes = bytesOf(data.beat && data.beat.buffer) + data.lanes.reduce((n, l) => n + l.clips.reduce((m, c) => m + bytesOf(c.buffer), 0), 0) + bytesOf(data.melody && data.melody.buffer);
         const takes = snap.lanes.reduce((n, l) => n + l.clips.length, 0);
         const summary = { beatName: snap.beat ? snap.beat.name : "", bpm: snap.beat ? Math.round(snap.beat.bpm) : 0, key: snap.beat ? snap.beat.keyLabel : "", lanes: snap.lanes.filter((l) => l.clips.length).length, takes, seconds: Math.round(dur), melody: !!snap.melody };
@@ -171,19 +184,22 @@
                 root.VLDAW.setMode("beatlab"); ui.toast("Opened “" + meta.name + "” in Beat Lab");
                 return;
             }
-            const go = () => {
-                ui.toast("Opening your song…");
-                setTimeout(() => {
-                    const snap = {
-                        beat: data.beat ? Object.assign({}, data.beat, { buffer: unpack(data.beat.buffer) }) : null,
-                        lanes: data.lanes.map((l) => Object.assign({}, l, { clips: l.clips.map((c) => Object.assign({}, c, { buffer: unpack(c.buffer) })) })),
-                        melody: data.melody ? Object.assign({}, data.melody, { buffer: unpack(data.melody.buffer) }) : null,
-                        playhead: data.playhead, zoom: data.zoom
-                    };
+            const go = async () => {
+                const prog = root.VLProgress ? root.VLProgress.start("Opening your song…") : null;
+                try {
+                    const snap = { beat: null, lanes: [], melody: null, playhead: data.playhead, zoom: data.zoom };
+                    if (data.beat) snap.beat = Object.assign({}, data.beat, { buffer: await unpack(data.beat.buffer) });
+                    let k = 0; const total = data.lanes.reduce((n, l) => n + l.clips.length, 0) || 1;
+                    for (const l of data.lanes) {
+                        const lane = Object.assign({}, l, { clips: [] });
+                        for (const c of l.clips) { lane.clips.push(Object.assign({}, c, { buffer: await unpack(c.buffer) })); if (prog) prog.set(0.2 + 0.7 * (++k / total)); }
+                        snap.lanes.push(lane);
+                    }
+                    if (data.melody) snap.melody = Object.assign({}, data.melody, { buffer: await unpack(data.melody.buffer) });
                     api().restoreProject(snap);
                     active.studio = id; savedSig.studio = studioSignature();
                     root.VLDAW.setMode("studio"); ui.toast("Opened “" + meta.name + "” in Studio");
-                }, 30);
+                } finally { if (prog) prog.done(); }
             };
             const dirty = api().isEmpty && !api().isEmpty() && studioSignature() !== savedSig.studio;
             if (!dirty) { go(); return; }
@@ -273,5 +289,5 @@
     }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 
-    root.VLDrafts = { saveCurrent, open, list: listMeta, render, _pack: pack, _unpack: unpack };
+    root.VLDrafts = { saveCurrent, open, list: listMeta, render, _pack: pack, _unpack: unpack, _data: dataOps };
 })(window);

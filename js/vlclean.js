@@ -23,6 +23,7 @@
     const U = Fx.util, clamp = U.clamp;
     const db = (x) => 20 * Math.log10(Math.max(x, 1e-12));
     const dbP = (x) => 10 * Math.log10(Math.max(x, 1e-20));
+    const Y = () => (root.VLYield ? root.VLYield() : null);                 // let the screen breathe during long loops (yield.js)
 
     // ---------------------------------------------------------------- FFT (radix 2, cached tables)
     const fftCache = {};
@@ -50,12 +51,13 @@
     function mono(ch) { return ch.length === 1 ? ch[0] : U.mono(ch); }
 
     // Power spectrum of every frame plus the frame's level (dB) in a few bands
-    function spectra(m, sr) {
+    async function spectra(m, sr) {
         const frames = Math.max(0, Math.floor((m.length - N) / HOP) + 1);
         const P = new Array(frames), lvl = new Float32Array(frames), lf = new Float32Array(frames), mid = new Float32Array(frames), hf = new Float32Array(frames);
         const re = new Float64Array(N), im = new Float64Array(N), fft = fftFor(N);
         const hz = sr / N, kLf = Math.round(200 / hz), kMid0 = Math.round(300 / hz), kMid1 = Math.round(3800 / hz), kHf = Math.round(5000 / hz);
         for (let f = 0; f < frames; f++) {
+            if ((f & 15) === 0) await Y();
             for (let i = 0; i < N; i++) { re[i] = m[f * HOP + i] * WIN[i]; im[i] = 0; }
             fft(re, im);
             const p = new Float32Array(BINS); let e = 0, el = 0, em = 0, eh = 0;
@@ -109,12 +111,12 @@
     }
 
     // ---------------------------------------------------------------- ANALYSIS
-    function analyze(channels, sr) {
+    async function analyze(channels, sr) {
         const out = { needed: false, kinds: [], params: null, reason: "", notes: [], noiseDb: null, snrDb: null };
         try {
             const m = mono(channels);
             if (m.length < sr * 1.2) return out;
-            const S = spectra(m, sr);
+            const S = await spectra(m, sr);
             if (S.frames < 12) return out;
             const vm = voiceMask(S.lvl, sr);
             const gapIdx = []; for (let f = 0; f < S.frames; f++) if (!vm.guard[f]) gapIdx.push(f);
@@ -194,13 +196,15 @@
     }
 
     // ---------------------------------------------------------------- THE PLUGIN
-    function process(ch, sr, p) {
+    async function process(ch, sr, p) {
         const n = ch[0].length;
         const copyOut = () => ch.map((c) => Float32Array.from(c));
         if (!(p.steady > 0 || p.wind > 0 || p.events > 0) || n < N * 4) return { channels: copyOut(), info: { skipped: "nothing to clean" } };
 
         const m = mono(ch);
-        const S = spectra(m, sr), F = S.frames;
+        const long = n > sr * 6, prog = long && root.VLProgress ? root.VLProgress.start("Cleaning background noise…") : null;
+        const S = await spectra(m, sr), F = S.frames;
+        if (prog) prog.set(0.25);
         if (F < 8) return { channels: copyOut(), info: { skipped: "too short" } };
         const vm = voiceMask(S.lvl, sr);
 
@@ -209,6 +213,7 @@
         const winF = Math.max(8, Math.round(1.5 * sr / HOP)), stepF = Math.max(2, Math.round(0.4 * sr / HOP));
         const centres = [], profiles = [];
         for (let c0 = 0; c0 < F + stepF; c0 += stepF) {
+            await Y();
             const a = Math.max(0, c0 - winF), b = Math.min(F - 1, c0 + winF);
             let idx = []; for (let f = a; f <= b; f++) if (!vm.guard[f]) idx.push(f);
             let bias = 1.0;
@@ -250,7 +255,9 @@
         const floorG = Math.pow(10, -Math.max(0, p.steady) / 20), floorSing = Math.pow(10, -0.55 * Math.max(0, p.steady) / 20);   // while singing the voice masks the noise, so cut less
         const G = new Array(F), prevG = new Float64Array(BINS).fill(1), prevSnr = new Float64Array(BINS);
         const beta = 0.94;
+        if (prog) prog.set(0.4);
         for (let f = 0; f < F; f++) {
+            if ((f & 7) === 0) await Y();
             const g = new Float32Array(BINS), P = S.P[f];
             for (let k = 0; k < BINS; k++) {
                 if (p.steady > 0) {
@@ -280,9 +287,11 @@
         const outCh = [];
         const wsum = new Float32Array(n);
         for (let f = 0; f < F; f++) for (let i = 0; i < N; i++) wsum[f * HOP + i] += WIN[i] * WIN[i];
+        if (prog) prog.set(0.6);
         for (const x of ch) {
             const out = new Float32Array(n), re = new Float64Array(N), im = new Float64Array(N), fft = fftFor(N);
             for (let f = 0; f < F; f++) {
+                if ((f & 7) === 0) await Y();
                 for (let i = 0; i < N; i++) { re[i] = x[f * HOP + i] * WIN[i]; im[i] = 0; }
                 fft(re, im);
                 const g = G[f];
@@ -305,13 +314,14 @@
                 runs.forEach((r) => { const a = Math.max(0, r.a * HOP - pad), b = Math.min(n, (r.b + 1) * HOP + N / 2 + pad); for (let i = a; i < b; i++) want[i] = reduce; });
                 const att = Math.exp(-1 / (0.012 * sr)), rel = Math.exp(-1 / (0.06 * sr));
                 const g = new Float32Array(n); let cur = 1;
-                for (let i = 0; i < n; i++) { cur = want[i] < cur ? att * cur + (1 - att) * want[i] : rel * cur + (1 - rel) * want[i]; g[i] = cur; }
+                for (let i = 0; i < n; i++) { if ((i & 65535) === 0) await Y(); cur = want[i] < cur ? att * cur + (1 - att) * want[i] : rel * cur + (1 - rel) * want[i]; g[i] = cur; }
                 const la = Math.round(0.012 * sr);
                 for (const o of outCh) for (let i = 0; i < n; i++) o[i] *= g[Math.min(n - 1, i + la)];
             }
         }
 
         let sum = 0, cnt = 0; for (let f = 0; f < F; f += 3) { let a = 0; for (let k = 6; k < 300; k++) a += G[f][k]; sum += a / 294; cnt++; }
+        if (prog) prog.done();
         return { channels: outCh, info: { avgGain: sum / Math.max(cnt, 1) } };
     }
 

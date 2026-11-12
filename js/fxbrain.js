@@ -475,7 +475,7 @@
         }
         const prof = profileVocal(meas, pitch, { ch, sr, override: ctx.voiceOverride });
         let noise = null;
-        try { noise = root.VLClean ? root.VLClean.analyze(ch, sr) : null; } catch (e) { noise = null; }      // background: fans, wind, cars, shouting
+        try { noise = root.VLClean ? await root.VLClean.analyze(ch, sr) : null; } catch (e) { noise = null; }      // background: fans, wind, cars, shouting
         const r = decide(type, { meas, prof, pitch, keyNote, noise, forceTune: ctx.forceTune }, B, style, key);
         return { findings: r.findings, chain: r.chain, meas, key, pitch, prof };
     }
