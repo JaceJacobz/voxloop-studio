@@ -29,6 +29,7 @@
     <link rel="stylesheet" href="css/ui-polish.css">
     <link rel="stylesheet" href="css/mobile.css">
     <link rel="stylesheet" href="css/nav.css">
+    <link rel="stylesheet" href="css/apdeck.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=Instrument+Sans:wght@400..700&display=swap" rel="stylesheet">
@@ -739,16 +740,23 @@
                     <small>On: rap and talk-sing lines are pulled onto notes. Off (default): they are left exactly as performed. Sung notes are never affected by this.</small>
                 </span>
             </label>
-            <div class="tune-row">
+            <label class="tune-check">
+                <input type="checkbox" id="tune-spoken-auto" checked>
+                <span>
+                    Tune melodic lines that clash with the beat
+                    <small>On (default): a line that clearly holds notes is sung, even if it slides, so it is tuned when it clashes with the key. Rap-like lines still stay as performed. Off: every line the app hears as talk-sing is left alone.</small>
+                </span>
+            </label>
+            <div class="tune-row tune-row-stack">
                 <label for="tune-octave">Octave</label>
                 <select id="tune-octave" aria-label="Octave">
-                    <option value="auto" selected>Auto: listen to the beat and decide (up or down)</option>
+                    <option value="auto" selected>Auto (listens to the beat)</option>
                     <option value="up">Raise one octave</option>
                     <option value="down">Lower one octave</option>
                     <option value="off">Off</option>
                 </select>
             </div>
-            <small id="tune-octave-note" class="nudge-hint" aria-live="polite">Auto listens to where you sing and where the beat's bass and chords sit, weighs the genre and energy, and only moves the voice when the evidence is strong (otherwise it just suggests). Only lines in the wrong register move, and each keeps its own ups and downs. Raps are never moved.</small>
+            <small id="tune-octave-note" class="nudge-hint tune-note" aria-live="polite">Auto listens to where you sing and where the beat's bass and chords sit, weighs the genre and energy, and only moves the voice when the evidence is strong (otherwise it just suggests). Only lines in the wrong register move, and each keeps its own ups and downs. Raps are never moved.</small>
             <div class="tune-row">
                 <label for="tune-shift">Move the whole vocal</label>
                 <strong id="tune-shift-value">0 (automatic)</strong>
@@ -1033,6 +1041,7 @@
                     <span id="studio-beat-name" class="studio-file-name">No beat loaded</span>
                     <input type="file" id="studio-beat-input" accept="audio/*" hidden>
                 </div>
+                <div class="studio-actions-row">
                 <div class="studio-toolbar-actions">
                     <button type="button" id="studio-add-lane" class="secondary-button studio-tool-btn" aria-label="Add vocal lane" title="Add a vocal lane"><svg class="ico ico-plus" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14"/></svg><span class="btn-label">Vocal lane</span></button>
                     <select id="studio-lane-type" class="studio-select" aria-label="Lane type">
@@ -1044,6 +1053,7 @@
                     </select>
                     <button type="button" id="studio-import-audio" class="secondary-button studio-tool-btn" title="Import an existing vocal file onto the armed lane (or a new lane)" aria-label="Import audio"><svg class="ico ico-folder" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg><span class="btn-label">Import audio</span></button>
                     <input type="file" id="studio-import-input" accept="audio/*" multiple hidden>
+                    </div>
                     <button type="button" id="studio-to-pipeline" class="primary-button studio-tool-btn studio-send" title="Composite lanes and open Pipeline to finish" aria-label="Send mix to Pipeline">
                         <svg class="btn-ico" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h8M7 3l4 4-4 4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         <span class="btn-label">Send mix to Pipeline</span>
@@ -1581,6 +1591,7 @@
 })();
 </script>
 <script src="js/autodecide.js"></script>
+<script src="js/apdeck.js"></script>
 <script src="js/autopilot.js"></script>
 
 </body>

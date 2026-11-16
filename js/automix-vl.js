@@ -897,8 +897,15 @@ async function processAutomix(state, options) {
     if (opt.toneGuard !== false && eng && eng.restoreTop && state.vocalBuffer) {
       const q = brain && brain.prof && brain.prof.quality != null ? brain.prof.quality : 0.7;
       const brightBeat = brain && brain.vibe && brain.vibe.bright != null ? brain.vibe.bright : 0.5;
-      const maxBoost = q < 0.5 ? 1.5 : q < 0.7 ? 3 : 4.5;                                   // a rough take would only get its noise lifted
-      const floorDb = brightBeat > 0.65 ? -19 : brightBeat < 0.35 ? -16.5 : -17.5;           // a dark beat lets the voice carry more shine
+      const maxBoost = 1.5 + 3 * Math.max(0, Math.min(1, (q - 0.3) / 0.5));                                  // a rough take would only get its noise lifted: the cleaner the take, the more it can take
+      // how bright should the voice be? As bright as the music it sits in: read the beat's own top end (the same measure) and use
+      // that as the floor. Only if it cannot be measured does the beat's brightness reading stand in.
+      let floorDb = brightBeat > 0.65 ? -19 : brightBeat < 0.35 ? -16.5 : -17.5;
+      try {
+        const bd = beatChannels, n = Math.min(bd[0].length, Math.round(45 * sr)), st0 = Math.max(0, Math.floor((bd[0].length - n) / 2));
+        const bm = eng.measureTop(bd.map((c) => c.subarray(st0, st0 + n)), sr);
+        if (bm && bm.medianDb != null && isFinite(bm.medianDb)) floorDb = Math.max(-24, Math.min(-12.5, bm.medianDb));
+      } catch (beatTopErr) { /* keep the brightness-reading floor */ }
       // if the vocal was raised an octave the untouched take is in another register, so it is no fair reference: use the lively floor only
       const raised = !!(state.octaveResult && state.octaveResult.applied);
       const rawCh = raised ? null : channelsOf(state.vocalBuffer);

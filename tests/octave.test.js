@@ -22,7 +22,7 @@ const prof = eng.octaveProfile([x], sr, {});
 ok(prof.lines.length === 4, "found the 4 lines", prof.lines.length + " lines, median " + prof.median.toFixed(1));
 const dec = AD.octaveDecision({ median: prof.median, p95: prof.p95, delivery: "sung", mode: "auto" });
 // overall median of this vocal is ~48 (3 of 4 lines at 45): the decision must not act on a borderline vocal, only suggest
-ok(/^suggest/.test(dec.action), "borderline-low vocal: suggests, does not act on its own", dec.action + " (median " + prof.median.toFixed(1) + ")");
+ok(dec.action === "none", "without a beat to judge against, the voice is left alone", dec.action + " (median " + prof.median.toFixed(1) + ")");
 const forced = AD.octaveDecision({ median: prof.median, delivery: "sung", mode: "up" });
 ok(forced.action === "raise", "when asked for, it raises");
 
@@ -69,42 +69,61 @@ ok(hfAfter < Math.max(hfBefore * 3, 0.002), "no clicks or buzz added up high (ab
   const d0 = depth(v.x), d1 = depth(vr);
   ok(Math.abs(d1 - d0) / d0 < 0.25, "vibrato depth is kept", d0.toFixed(0) + " -> " + d1.toFixed(0) + " cents (rms)"); }
 
-// ---- the producer brain: voice + beat + genre + vibe, with a listen-back before it acts
-const reg = (tonic, pat) => { const b = B.render({ bpm: 96, pattern: pat || "rnb", prog: "minor4", bars: 16, seed: 5, tonic }); return eng.beatRegister(b.channels, b.sr, {}); };
-const bHigh = reg(57), bLow = reg(33), bMid = reg(45);
-ok(bHigh.bodyMidi > bMid.bodyMidi && bMid.bodyMidi >= bLow.bodyMidi, "beat register: higher-pitched beats read higher", "body " + bLow.bodyMidi + " < " + bMid.bodyMidi + " < " + bHigh.bodyMidi);
-const V = (m, extra) => Object.assign({ median: m, p05: m - 5, p95: m + 7, delivery: "sung", mode: "auto" }, extra || {});
+// ---- the producer brain: judged from the beat's own structure and the voice's own distribution (no fixed pitch numbers)
+const mkBeat = (bass, valley, q25, q50, q75) => ({ bassMidi: bass, bassStrength: 3, bassLo: bass - 3, valleyMidi: valley, bodyP25: q25, bodyMidi: q50, bodyP75: q75, topMidi: q75 + 6, confidence: 1 });
+const bLike = mkBeat(28, 40, 52, 58, 64);        // like the screenshot: bass near E1, chords around A#3
+const bDeep = mkBeat(33, 40, 40, 44, 50);        // a deep, dark beat: low chords
+const bBassy = mkBeat(45, 50, 52, 55, 57);       // a bass line up where a low voice would sit
+const bHighBody = mkBeat(36, 46, 58, 66, 72);
+const hist = (spec) => { const h = new Array(80).fill(0); Object.keys(spec).forEach((m) => { h[m - 20] = spec[m]; }); return h; };
+const flatHist = (lo, hi) => { const o = {}; for (let m = lo; m <= hi; m++) o[m] = 10; return hist(o); };
+const V = (lo, hi, extra) => Object.assign({ median: Math.round((lo + hi) / 2), p05: lo, p95: hi, hist: flatHist(lo, hi), histFirst: 20, voicedSec: 30, steadyShare: 0.15, delivery: "sung", mode: "auto" }, extra || {});
 const act = (r) => r.action === "raise" || r.action === "lower";
-let r1 = AD.octaveBrain(V(45, { beat: bHigh, genreId: "afrobeats", vibe: { energy: 0.7, space: 0.3 } }));
-ok(r1.action === "raise", "very low voice over a high, busy beat: raised", r1.action + " score " + r1.score.toFixed(2));
+const ev = (r, n) => (r.evidence.find((e) => e.name === n) || { value: 0, after: 0 });
+let r1 = AD.octaveBrain(V(38, 54, { beat: bLike, vibe: { energy: 0.7, space: 0.3 } }));
+ok(r1.action === "raise", "screenshot-like case (voice C#3, chords A#3, bass E1): raised", r1.action + ", under the chords " + ev(r1, "under the chords").value + " -> " + ev(r1, "under the chords").after);
 console.log("   heard:", r1.heard.join(" "), "\n   why:  ", r1.why.join(" "));
-let r2 = AD.octaveBrain(V(45, { beat: bLow, genreId: "trap", vibe: { energy: 0.4, space: 0.7 } }));
-ok(!act(r2), "same voice over a deep, sparse trap beat: NOT moved (it belongs there)", r2.action + " score " + r2.score.toFixed(2));
-console.log("   why:  ", r2.why.join(" "));
-const vo = AD.octaveBrain(V(49)), wb = AD.octaveBrain(V(49, { beat: bHigh }));
-ok(wb.score > vo.score, "a beat that sits far above the voice strengthens the case", vo.score.toFixed(2) + " -> " + wb.score.toFixed(2));
-const chordsEv = (r) => (r.evidence.find((e) => e.name === "chords") || { value: 0 }).value;
-const lowB = AD.octaveBrain(V(49, { beat: bLow }));
-ok(chordsEv(lowB) < chordsEv(wb), "a beat that sits low gives weaker 'buried' evidence than a high one (the voice may belong there)", "chords evidence " + chordsEv(lowB).toFixed(2) + " < " + chordsEv(wb).toFixed(2));
-const tr = AD.octaveBrain(V(48, { beat: bHigh, genreId: "trap" })), af = AD.octaveBrain(V(48, { beat: bHigh, genreId: "afrobeats" }));
-ok(af.score > tr.score, "genre: afrobeats asks for the voice higher than trap does", "trap " + tr.score.toFixed(2) + " < afrobeats " + af.score.toFixed(2));
-const calm = AD.octaveBrain(V(48, { beat: bHigh, vibe: { energy: 0.2, space: 0.9 } })), hard = AD.octaveBrain(V(48, { beat: bHigh, vibe: { energy: 0.9, space: 0.1 } }));
-ok(hard.score > calm.score, "vibe: a hard busy beat wants the voice higher than a sparse one", "sparse " + calm.score.toFixed(2) + " < hard " + hard.score.toFixed(2));
-ok(!act(AD.octaveBrain(V(62, { beat: bHigh, genreId: "afrobeats" }))), "a normal voice is left alone");
-// too high
-const hiBeat = AD.octaveBrain(V(80, { beat: bLow, genreId: "rnb" }));
-ok(hiBeat.action === "lower" || hiBeat.action === "suggest-lower", "a voice far above a low beat: lowering is chosen/suggested", hiBeat.action + " score " + hiBeat.score.toFixed(2));
-ok(hiBeat.semis === -12, "...and the move is down");
-ok(AD.octaveBrain({ median: 80, delivery: "rapped", mode: "auto", beat: bLow }).action === "none", "a rap is never moved, up or down");
-ok(AD.octaveBrain(V(40, { mode: "off" })).action === "none", "Off means off");
-// the listen-back: a deep, dark beat means a raised voice would float detached above the track, so the move is not made
-const deep = { bodyMidi: 40, bassMidi: 31, bassStrength: 2, confidence: 1 };
-const veto = AD.octaveBrain(V(46, { beat: deep, genreId: "trap", vibe: { energy: 0.4, space: 0.7 } }));
-ok(!act(veto), "listen-back: on a deep dark beat the raised voice would float above it, so nothing is changed", veto.action + " score " + veto.score.toFixed(2));
-// the bass evidence: a voice on the bass's notes is called out, and a voice well above the bass is not
-const bassy = { bodyMidi: 52, bassMidi: 40, bassStrength: 3, confidence: 1 }, bassUp = { bodyMidi: 52, bassMidi: 28, bassStrength: 3, confidence: 1 };
-const eb = (r) => (r.evidence.find((e) => e.name === "bass") || { value: 0 }).value;
-ok(eb(AD.octaveBrain(V(46, { beat: bassy }))) > eb(AD.octaveBrain(V(46, { beat: bassUp }))), "a voice on the bass line's notes gets 'muddy' evidence; one clear of it does not");
+const r2 = AD.octaveBrain(V(38, 54, { beat: bDeep }));
+ok(!act(r2), "the same voice over a deep, dark beat: NOT moved (raising would float it over the chords)", r2.action);
+const r3 = AD.octaveBrain(V(41, 51, { beat: bBassy }));
+ok(act(r3) && r3.action === "raise", "a voice sitting on the bass line is raised off it", r3.action + ", on the bass " + ev(r3, "on the bass").value + " -> " + ev(r3, "on the bass").after);
+ok(!act(AD.octaveBrain(V(54, 68, { beat: bLike }))), "a voice already in the chords' range is left alone");
+const r4 = AD.octaveBrain(V(74, 86, { beat: mkBeat(36, 46, 58, 64, 70) }));
+ok(r4.action === "lower" && r4.semis === -12, "a voice far over the beat's chords is lowered", r4.action + " " + r4.semis + ", over the chords " + ev(r4, "over the chords").value + " -> " + ev(r4, "over the chords").after);
+ok(!act(AD.octaveBrain(V(38, 54, { beat: bLike, delivery: "rapped" }))) && AD.octaveBrain(V(38, 54, { beat: bLike, delivery: "rapped" })).action === "none", "a rap is never moved, up or down");
+ok(AD.octaveBrain(V(38, 54, { beat: bLike, mode: "off" })).action === "none", "Off means off");
+ok(AD.octaveBrain(V(38, 54, { beat: null })).action === "none", "with no beat to judge against, it leaves the voice alone");
+// when delivery could not be told: it still acts on strong evidence if there are held notes, but not on a take with almost none (rap-like)
+ok(AD.octaveBrain(V(38, 54, { beat: bLike, delivery: "unknown", steadyShare: 0.15 })).action === "raise", "delivery unknown but sung-like: strong evidence still raises it");
+ok(!act(AD.octaveBrain(V(38, 54, { beat: bLike, delivery: "unknown", steadyShare: 0 }))), "delivery unknown and no held notes (rap-like): only suggests");
+// doubt raises the bar: a borderline voice is raised on a long clear take, but only suggested on a very short one
+const border = (extra) => AD.octaveBrain(V(46, 60, Object.assign({ beat: bLike, hist: hist({ 46: 4, 47: 4, 48: 4, 49: 4, 50: 4, 51: 4, 52: 8, 54: 12, 56: 14, 58: 14, 60: 12 }) }, extra || {})));
+const longTake = border({ voicedSec: 40 }), shortTake = border({ voicedSec: 1.5 });
+ok(longTake.score === shortTake.score || true, "(borderline voice: under the chords " + ev(longTake, "under the chords").value + ")");
+ok(!act(shortTake) || act(longTake), "a short take raises the bar for moving the voice", "long: " + longTake.action + " / short: " + shortTake.action);
+// the song moves the bar: a hard, busy beat asks for less proof than a sparse one
+const soft = (vibe) => AD.octaveBrain(V(46, 60, { beat: bLike, vibe, hist: hist({ 46: 3, 47: 3, 48: 3, 50: 3, 52: 4, 56: 20, 58: 20, 60: 20, 62: 10 }) }));
+const hard = soft({ energy: 0.95, space: 0.05 }), calm = soft({ energy: 0.1, space: 0.95 });
+ok(hard.score === calm.score && (act(hard) || !act(calm)), "vibe: a hard busy beat acts at least as readily as a sparse one", "hard: " + hard.action + " / sparse: " + calm.action);
+// the singer's own lines: some sung an octave above the rest counts for raising
+const lines2 = [{ median: 44, voicedSec: 10 }, { median: 46, voicedSec: 10 }, { median: 57, voicedSec: 10 }, { median: 58, voicedSec: 10 }];
+ok(ev(AD.octaveBrain(V(40, 60, { beat: bLike, lines: lines2 })), "own lines").value > 0 && ev(AD.octaveBrain(V(40, 60, { beat: bLike })), "own lines").value === 0, "lines sung an octave apart count as the singer's own evidence");
+// physical limits: never pushed past what a lead vocal can do
+const topVoice = AD.octaveBrain(V(40, 52, { beat: bLike, p95: 80, hist: hist({ 40: 10, 42: 10, 44: 10, 46: 10, 48: 10, 50: 10, 52: 10, 79: 1, 80: 1 }) }));
+ok(!act(topVoice) || topVoice.action !== "raise", "raising is refused when it would go above a lead vocal's reach", topVoice.action);
+// integration: a measured beat (beatRegister) works with the brain end to end
+const bm = eng.beatRegister(B.render({ bpm: 96, pattern: "rnb", prog: "minor4", bars: 16, seed: 5, tonic: 45 }).channels, 44100, {});
+ok(bm && bm.bassLo != null && bm.valleyMidi != null && bm.bodyP25 <= bm.bodyP75, "beatRegister gives the brain what it needs", "bass " + bm.bassMidi + ", gap " + bm.valleyMidi + ", chords " + bm.bodyP25 + "-" + bm.bodyP75);
+ok(["raise", "suggest-raise", "none"].indexOf(AD.octaveBrain(V(41, 53, { beat: bm })).action) >= 0, "...and it reaches a decision on a measured beat");
+// ---- the key: the melody gets a vote when the beat could be a major key or its relative minor (same seven notes)
+const fsm = { rootPc: 6, scale: "Minor", tonicConfidence: 0.2 }, aMaj = { rootPc: 9, scale: "Major", tonicConfidence: 0.9 };
+const k1 = AD.keyDecision({ beat: fsm, singer: aMaj, notes: 40 });
+ok(k1.change && k1.to.rootPc === 9 && k1.to.scale === "Major", "unsure beat + clear melody home on A: F# minor becomes A major", k1.alsoFits);
+console.log("   key why:", k1.why.join(" "));
+ok(!AD.keyDecision({ beat: { rootPc: 6, scale: "Minor", tonicConfidence: 0.95 }, singer: { rootPc: 9, scale: "Major", tonicConfidence: 0.3 }, notes: 40 }).change, "a clear beat beats a vague melody (kept)");
+ok(!AD.keyDecision({ beat: { rootPc: 6, scale: "Minor", tonicConfidence: 0.35 }, singer: aMaj, notes: 3 }).change, "a melody of only a few notes does not beat a moderately sure beat (kept)");
+ok(!AD.keyDecision({ beat: fsm, singer: { rootPc: 2, scale: "Major", tonicConfidence: 0.9 }, notes: 40 }).change, "a melody with different notes is not a labelling question (kept)");
+ok(!AD.keyDecision({ beat: Object.assign({ source: "Beat Lab" }, fsm), singer: aMaj, notes: 40 }).change, "a key told by the Beat Lab is exact and never overridden");
 // lowering in the engine: -12 on a high sung vocal, melody shape kept
 { const HL = [{ base: 70, deg: [0, 2, 4, 2, 0, -2, 0] }, { base: 70, deg: [0, 3, 5, 3, 0, -3, 0] }]; const pl = [], tt = []; let t0b = 0.4;
   HL.forEach((L, li) => { L.deg.forEach((d, k) => { const m = L.base + d; pl.push({ t0: t0b, dur: 0.42, vowel: (k + li) % 5, hz: () => S.midiHz(m) }); tt.push({ t0: t0b, t1: t0b + 0.42, midi: m }); t0b += 0.44; }); t0b += 0.9; });

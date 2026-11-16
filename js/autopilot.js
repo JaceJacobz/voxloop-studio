@@ -18,6 +18,19 @@
     const STEPS = [["load", "Load"], ["align", "Align"], ["analyze", "Analyze"], ["clean", "Clean-up"], ["tune", "Tune"], ["mix", "Mix & master"]];
     const SECTION = { align: "alignment-section", analyze: "analysis-section", clean: "prep-section", tune: "tune-section", mix: "mix-section" };
     const KEY = "vl-autopilot";
+    const Deck = () => window.VLApDeck;
+    const DECK_STEPS = [{ key: "align", label: "Align" }, { key: "parts", label: "Choose" }, { key: "analyze", label: "Analyze" }, { key: "clean", label: "Clean-up" }, { key: "tune", label: "Tune" }, { key: "mix", label: "Mix" }];
+    const TITLES = { align: "Align", analyze: "Analyze", clean: "Clean-up", tune: "Tune", mix: "Mix & master" };
+    // While Autopilot drives, nothing may scroll the page to the section it just opened (that is what made you chase the progress up and
+    // down the page). The steps still open underneath; only the jump is skipped. A part you do yourself scrolls there once, on purpose.
+    window.VLNoAutoScroll = false;
+    (function guardScroll() {
+        const orig = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = function () {
+            if (window.VLNoAutoScroll && this && this.id && /^(upload|alignment|analysis|prep|tune|mix)-section$/.test(this.id)) return;
+            return orig.apply(this, arguments);
+        };
+    })();
 
     const prefs = (() => { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } })();
     const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ on: A.on, stepAuto: A.stepAuto })); } catch (e) { /* private mode */ } };
@@ -94,7 +107,7 @@
             $("ap-summary-body").innerHTML = Object.keys(by).map((k) => "<h4>" + (names[k] || k) + "</h4><ul>" + by[k].map((t) => "<li>" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>").join("") + "</ul>").join("");
         }
     }
-    function say(t) { const n = $("ap-now"); if (n) n.textContent = t; paint(); }
+    function say(t) { const n = $("ap-now"); if (n) n.textContent = t; if (A.card) A.card.say(t); paint(); }
 
     // per-step "Auto" bars: the same switch exists at every step
     function stepBar(step, text) {
@@ -122,6 +135,94 @@
         if (A.stepAuto[step]) { A.stepAuto[step] = false; save(); stepBar(step); }
     }
 
+    // ------------------------------------------------------------------ the deck: ask, confirm, hand back
+    const clip = (t) => (String(t).length > 150 ? String(t).slice(0, 147) + "…" : String(t));
+    async function runStep(key, fn) {
+        const D = Deck();
+        const h = D && D.isOpen ? D.progress({ key, title: TITLES[key] || key, text: "" }) : null;
+        A.card = h;
+        try { await fn(); } finally { A.card = null; }
+        if (h) await h.finish(A.summary.filter((x) => x.step === key).map((x) => clip(x.text)));
+    }
+    // a part the person chose to do themselves: hide the deck, take them to that step once, wait for "Continue"
+    async function manualGate(key) {
+        const D = Deck(); if (!D || !D.isOpen) return;
+        const sec = $(SECTION[key]), name = (STEPS.find((x) => x[0] === key) || [0, key])[1];
+        window.VLNoAutoScroll = false;
+        // the deck locks the page's scroll; take the person to the step once the deck is out of the way
+        await D.handBack({ title: "Your turn: " + name, text: "Do it your way, then tap Continue.", resumeLabel: "Continue Autopilot", onHidden: () => { if (sec) sec.scrollIntoView({ behavior: "auto", block: "start" }); } });
+        window.VLNoAutoScroll = true;
+        if (A.cancelled) throw new Cancelled();
+    }
+    // a few seconds of the vocal against the beat at the chosen offset, so the alignment can be judged by ear
+    function startPreview(offsetSec) {
+        const S = window.VLState, ctx = S && S.audioContext, vb = S && S.vocalBuffer, bb = S && S.beatBuffer;
+        if (!ctx || !vb || !bb) return null;
+        try { if (ctx.state === "suspended") ctx.resume(); } catch (e) { /* ignore */ }
+        const vd = vb.getChannelData(0); let pk = 0; for (let i = 0; i < vd.length; i += 64) pk = Math.max(pk, Math.abs(vd[i]));
+        let first = 0; for (let i = 0; i < vd.length; i++) if (Math.abs(vd[i]) >= pk * 0.1) { first = i / vb.sampleRate; break; }
+        const t0 = Math.max(0, offsetSec + first - 1.5), dur = 10, now = ctx.currentTime + 0.05, nodes = [];
+        const play = (buf, startAt, offIn, gain) => { const src = ctx.createBufferSource(), g = ctx.createGain(); src.buffer = buf; g.gain.value = gain; src.connect(g); g.connect(ctx.destination); src.start(now + startAt, Math.max(0, offIn), dur - startAt); nodes.push(src); return src; };
+        play(bb, 0, t0, 0.7);
+        const vOff = t0 - offsetSec;                                           // where in the vocal to start
+        play(vb, Math.max(0, -vOff), Math.max(0, vOff), 1);
+        return { stop() { nodes.forEach((n) => { try { n.stop(); } catch (e) { /* already ended */ } }); } };
+    }
+    const fmtOffset = (v) => (Math.abs(v) < 0.0005 ? "exactly as recorded" : Math.abs(v).toFixed(3) + " s " + (v > 0 ? "later" : "earlier"));
+    async function confirmAlignment() {
+        const D = Deck(); if (!D || !D.isOpen) return;
+        const slider = $("offset-slider"), d = window.VLAutopilot.alignment || { confidence: 0, why: [] };
+        let prev = null;
+        const stopPrev = () => { if (prev) { prev.stop(); prev = null; } const b = document.getElementById("apd-prev"); if (b) b.querySelector("span").textContent = "▶ Hear it"; };
+        await D.ask({
+            key: "align", title: "Is the vocal lined up?",
+            html: '<p class="apd-text">' + (d.why && d.why[0] ? d.why[0].replace(/&/g, "&amp;").replace(/</g, "&lt;") : "") + (d.confidence < 0.45 ? " I am not very sure about this one, so listen and nudge it if it feels off." : "") + "</p>" +
+                '<div class="apd-align-offset" id="apd-off" aria-live="polite"></div>' +
+                '<div class="apd-nudge" role="group" aria-label="Nudge the vocal"><button type="button" class="secondary-button" data-ms="-100">−100</button><button type="button" class="secondary-button" data-ms="-10">−10</button><button type="button" class="secondary-button" data-ms="10">+10</button><button type="button" class="secondary-button" data-ms="100">+100</button></div><p class="apd-hint">Nudge the vocal earlier or later, in milliseconds</p>' +
+                '<button type="button" class="secondary-button apd-btn apd-preview" id="apd-prev"><span>▶ Hear it</span></button>',
+            buttons: [{ id: "ok", label: "Looks right", kind: "primary" }],
+            onMount(el) {
+                const off = el.querySelector("#apd-off"), show = () => { off.textContent = fmtOffset(parseFloat(slider.value) || 0); };
+                show();
+                const restart = () => { if (prev) { prev.stop(); prev = startPreview(parseFloat(slider.value) || 0); } };
+                el.querySelectorAll("[data-ms]").forEach((b) => b.addEventListener("click", () => {
+                    const v = Math.max(-15, Math.min(15, (parseFloat(slider.value) || 0) + parseInt(b.dataset.ms, 10) / 1000));
+                    slider.value = v.toFixed(3); fire(slider, "input"); show(); restart();
+                }));
+                el.querySelector("#apd-prev").addEventListener("click", () => {
+                    if (prev) { stopPrev(); return; }
+                    prev = startPreview(parseFloat(slider.value) || 0);
+                    if (prev) el.querySelector("#apd-prev span").textContent = "■ Stop";
+                });
+            },
+            onDone() { stopPrev(); }
+        });
+        if (A.cancelled) throw new Cancelled();
+        const v = parseFloat(slider.value) || 0;
+        note("align", "Confirmed: vocal placed " + fmtOffset(v) + ".");
+    }
+    const PARTS = [["clean", "Clean-up", "Noise, tempo and timing of your recording"], ["tune", "Tune", "Pitch correction, octave and key"], ["mix", "Mix & master", "Balance, tone, effects and loudness"]];
+    async function pickParts() {
+        const D = Deck(); if (!D || !D.isOpen) return;
+        const pick = {}; PARTS.forEach((x) => { pick[x[0]] = A.stepAuto[x[0]] !== false; });
+        await D.ask({
+            key: "parts", title: "Anything you want to do yourself?",
+            html: '<p class="apd-text">Autopilot does the rest. For the parts you pick, it stops and waits for you.</p><div class="apd-parts">' +
+                PARTS.map((x) => '<div class="apd-part" data-part="' + x[0] + '"><strong>' + x[1] + "</strong><small>" + x[2] + '</small><span class="apd-seg" role="group" aria-label="' + x[1] + '"><button type="button" data-v="auto" aria-pressed="' + pick[x[0]] + '">Auto</button><button type="button" data-v="me" aria-pressed="' + !pick[x[0]] + '">Me</button></span></div>').join("") + "</div>",
+            buttons: [{ id: "go", label: "Start", kind: "primary" }],
+            onMount(el) {
+                el.querySelectorAll(".apd-part").forEach((row) => row.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+                    pick[row.dataset.part] = b.dataset.v === "auto";
+                    row.querySelectorAll("button").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+                })));
+            },
+            onDone() { PARTS.forEach((x) => { A.stepAuto[x[0]] = !!pick[x[0]]; }); A.stepAuto.align = true; A.stepAuto.analyze = true; save(); Object.keys(SECTION).forEach((k) => stepBar(k)); }
+        });
+        if (A.cancelled) throw new Cancelled();
+        const mine = PARTS.filter((x) => !A.stepAuto[x[0]]).map((x) => x[1]);
+        if (mine.length) note("align", "You are doing " + mine.join(", ") + " yourself.");
+    }
+
     // ------------------------------------------------------------------ the steps
     async function profileNow() {
         const S = window.VLState; let genreId = "universal", delivery = "unknown", voice = null, keyKnown = false, quality = null;
@@ -147,7 +248,6 @@
     async function stepAlign() {
         A.current = "align"; say("Lining the vocal up with the beat…");
         stepBar("align");
-        if (!A.stepAuto.align) { note("align", "Using the position you set."); return; }
         const S = window.VLState, AD = window.AutoDecide;
         const d = AD.alignDecision(chans(S.vocalBuffer), S.vocalBuffer.sampleRate, chans(S.beatBuffer), S.beatBuffer.sampleRate, {});
         const slider = $("offset-slider"), v = Math.max(-15, Math.min(15, d.offsetSec));
@@ -155,6 +255,28 @@
         const lines = d.why.slice(); if (Math.abs(d.offsetSec) > 15) lines.push("The offset was limited to 15 s.");
         lines.push("Placed the vocal " + (Math.abs(v) < 0.0005 ? "exactly where it was recorded" : (v > 0 ? "later" : "earlier") + " by " + Math.abs(v).toFixed(3) + " s") + " (" + Math.round(d.confidence * 100) + "% sure).");
         note("align", lines); window.VLAutopilot.alignment = d;
+    }
+    // A second opinion on which note is home: the singer's melody. The beat alone can be ambiguous between a major key and its
+    // relative minor (same seven notes), so where the melody lands and rests gets a vote (AutoDecide.keyDecision weighs the two).
+    async function refineKey(S) {
+        A.keyNotes = null;
+        try {
+            const MT = window.MusicTheory, Fx = window.VLFx, vb = S.preparedVocal || S.vocalBuffer, bk = S.beatKey;
+            if (!MT || !MT.keyFromMelody || !Fx || !Fx.runTask || !vb || !bk || !bk.key || bk.source === "Beat Lab" || bk.source === "set by you") return;      // told to it: not second-guessed
+            const sr = vb.sampleRate, d = vb.getChannelData(0), mono = Float32Array.from(d.subarray(0, Math.min(d.length, Math.round(90 * sr))));
+            const r = await Fx.runTask("analyze", { mono, sr });
+            if (!r || !r.notes || r.notes.length < 6) return;
+            const g = MT.keyFromMelody(r.notes, r.hop / r.sr);
+            const bkO = keyOf(bk);
+            if (!g || !bkO) return;
+            const dec = window.AutoDecide.keyDecision({ beat: { rootPc: bkO.rootPc, scale: bkO.scale, tonicConfidence: bk.tonicConfidence, source: bk.source }, singer: { rootPc: g.rootPc, scale: g.scale, tonicConfidence: g.tonicConfidence }, notes: r.notes.length });
+            if (dec.change) {
+                const NN = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+                S.beatKey = Object.assign({}, bk, { key: NN[dec.to.rootPc], scale: dec.to.scale, rootPc: dec.to.rootPc, mode: dec.to.scale === "Minor" ? "aeolian" : "ionian", modeRoot: NN[dec.to.rootPc], source: "beat + melody", alsoFits: dec.alsoFits });
+                const kv = $("beat-key"); if (kv) { kv.textContent = NN[dec.to.rootPc] + " " + dec.to.scale; const sm = kv.parentElement && kv.parentElement.querySelector("small"); if (sm) sm.textContent = "Chords and melody together • also fits " + dec.alsoFits + " (same notes)"; }
+            }
+            A.keyNotes = dec.why;
+        } catch (e) { console.warn("Key second opinion failed, kept the beat's key:", e); }
     }
     async function stepAnalyze() {
         A.current = "analyze"; say("Listening: tempo, key and the voice…");
@@ -164,10 +286,12 @@
         // done when the beat tempo is shown and the vocal pitch has been read (the key may legitimately stay unknown)
         await waitFor(() => { const b = $("beat-bpm"); return b && !/^[…\s]*$/.test(b.textContent) && b.textContent.trim() !== "—" && S.vocalPitch; }, 90000, "the analysis");
         await waitFor(() => S.beatKey || ($("beat-key") && $("beat-key").textContent.trim() !== "—" && $("beat-key").textContent.trim() !== "…"), 30000, "the key").catch(() => { /* unknown key is allowed */ });
+        await refineKey(S);
         const bpm = S.beatBpm, k = keyOf(S.beatKey);
         const prof = await profileNow(); A.prof = prof;
         const lines = [];
         lines.push("Beat tempo " + (bpm ? Math.round(bpm * 10) / 10 + " BPM" : "not found") + (k ? ", key " + k.label : ", key not found") + ".");
+        if (A.keyNotes && A.keyNotes.length) A.keyNotes.forEach((t) => lines.push(t));
         if (prof.voice) lines.push("Heard: " + prof.voice.label + ".");
         lines.push("Style heard in the beat: " + prof.genreId + ".");
         note("analyze", lines);
@@ -178,13 +302,17 @@
         await waitFor(() => shown("prep-section"), 15000, "the clean-up step");
         stepBar("clean");
         const AD = window.AutoDecide;
+        const stC = $("prep-status"), beforeC = stC.textContent;
+        if (!A.stepAuto.clean) await manualGate("clean");
+        const ranC = !A.stepAuto.clean && stC.textContent !== beforeC && /Done|Nothing/i.test(stC.textContent) && !$("prep-run-button").disabled;
         if (A.stepAuto.clean) {
             const d = AD.cleanDecision({ genreId: A.prof.genreId, delivery: A.prof.delivery });
             setCheck("prep-denoise", d.denoise); setCheck("prep-tempo", d.tempo);
             // timing needs a beat tempo
             const bpmOk = !!window.VLState.beatBpm; setCheck("prep-timing", d.timing && bpmOk);
             note("clean", d.why.concat(d.timing && !bpmOk ? ["Timing tighten skipped: the beat's tempo is not known."] : []));
-        } else note("clean", "Using the clean-up options you ticked.");
+        } else note("clean", ranC ? "You ran the clean-up yourself; Autopilot kept your result." : "Using the clean-up options you ticked.");
+        if (ranC) return;
         const st = $("prep-status"); st.textContent = "";
         $("prep-run-button").click();
         await waitFor(() => /Done|Nothing|failed/i.test(st.textContent) && !$("prep-run-button").disabled, 240000, "the clean-up");
@@ -198,6 +326,10 @@
         stepBar("tune");
         const S = window.VLState, AD = window.AutoDecide;
         S.autopilotTuneCap = null; S.autopilotDelivery = A.prof.delivery;
+        const stT = $("tune-status"), beforeT = stT.textContent;
+        if (!A.stepAuto.tune) await manualGate("tune");
+        const ranT = !A.stepAuto.tune && stT.textContent !== beforeT && /done|Tuned|corrected/i.test(stT.textContent) && !$("tune-run-button").disabled && !!S.tunedVocal;
+        if (ranT) { note("tune", "You corrected the pitch yourself; Autopilot kept your result."); return; }
         if (A.stepAuto.tune) {
             const d = AD.tuneDecision({ delivery: A.prof.delivery, voiceConfidence: A.prof.voiceConfidence });
             setCheck("tune-auto", true); setCheck("tune-auto-key", true); setCheck("tune-phrases", true);
@@ -209,6 +341,7 @@
         $("tune-run-button").click();
         await waitFor(() => /done|Tuned|failed|corrected/i.test(st.textContent) && !$("tune-run-button").disabled, 300000, "pitch correction");
         note("tune", st.textContent);
+        if (S.tuneWhy && S.tuneWhy.length) note("tune", "Why: " + S.tuneWhy.join("; ") + ".");
         const oc = S.octaveResult;
         if (oc && (oc.heard || oc.why)) note("tune", ["Octave check. " + (oc.heard || []).join(" ")].concat(oc.why || []));
         const pr = S.phraseResult;
@@ -223,6 +356,10 @@
         await waitFor(() => shown("mix-section"), 15000, "the mix step");
         stepBar("mix");
         const AD = window.AutoDecide;
+        const stM = $("automix-status"), beforeM = stM ? stM.textContent : "";
+        if (!A.stepAuto.mix) await manualGate("mix");
+        const ranM = !A.stepAuto.mix && stM && stM.textContent !== beforeM && /complete/i.test(stM.textContent) && !$("automix-button").disabled;
+        if (ranM) { note("mix", "You mixed it yourself; Autopilot kept your result."); return; }
         if (A.stepAuto.mix) {
             const d = AD.mixDecision({ genreId: A.prof.genreId, delivery: A.prof.delivery, keyKnown: A.prof.keyKnown, vocalQuality: A.prof.vocalQuality });
             setSelect("mix-style", "auto"); setSelect("mix-ambience", "auto"); setSelect("mix-resonance", "auto"); setSelect("mix-calm", "auto");
@@ -242,22 +379,46 @@
 
     // ------------------------------------------------------------------ run
     let startedAt = 0, runKey = "";
-    async function run(force) {
+    async function run(force, opts) {
         if (A.running) return;
+        opts = opts || {};
         buildCard();
         Object.keys(headline).forEach((k) => delete headline[k]); A.running = true; A.cancelled = false; A.error = null; A.summary = []; A.decisions = {}; A.skippedTune = false; A.state = "running"; A.runs++; startedAt = Date.now();
         window.VLAutopilot.alignment = null;
+        const D = Deck();
+        if (D && !D.isOpen) D.open(DECK_STEPS, { onTakeover: () => { A.cancelled = true; } });
+        window.VLNoAutoScroll = true;
         paint();
         try {
             // restart from the Upload step when running again
             if (force && !shown("upload-section")) { const rail = document.querySelector('.step-rail-item[data-step="1"]'); if (rail) rail.click(); await sleep(300); }
-            await stepLoad(); await stepAlign(); await stepAnalyze(); await stepClean(); await stepTune(); await stepMix();
+            await runStep("align", async () => { await stepLoad(); await stepAlign(); });
+            await confirmAlignment();                                           // you confirm the line-up first
+            await pickParts();                                                  // then choose what you want to do yourself
+            await runStep("analyze", stepAnalyze);
+            await runStep("clean", stepClean);
+            await runStep("tune", stepTune);
+            await runStep("mix", stepMix);
             A.state = "done"; A.current = "mix"; say("Done. Your finished song is in the Mix step.");
-            const mix = $("mix-section"); if (mix) mix.scrollIntoView({ behavior: "smooth", block: "start" });
+            window.VLNoAutoScroll = false;
+            if (D && D.isOpen) {
+                const by = {}; A.summary.forEach((x) => (by[x.step] = by[x.step] || []).push(x.text));
+                const names = Object.fromEntries(STEPS), safe = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+                const details = Object.keys(by).map((k) => "<h4>" + (names[k] || k) + "</h4><ul>" + by[k].map((t) => "<li>" + safe(t) + "</li>").join("") + "</ul>").join("");
+                const pick = await D.final({ title: "Your song is ready", html: '<p class="apd-text">Autopilot finished every step. Open the mix to listen, or see what it decided and why.</p><div class="apd-details" hidden>' + details + "</div>", buttons: [{ id: "mix", label: "See my mix", kind: "primary" }, { id: "details", label: "What Voxloop did" }] });
+                D.close();
+                const mix = $("mix-section"); if (mix) mix.scrollIntoView({ behavior: "smooth", block: "start" });
+            } else { const mix = $("mix-section"); if (mix) mix.scrollIntoView({ behavior: "smooth", block: "start" }); }
         } catch (e) {
-            if (e instanceof Cancelled) { A.state = "cancelled"; say("You took over. Every step is open for you to adjust."); }
-            else { A.state = "error"; A.error = e.message || String(e); console.error("Autopilot stopped:", e); say("Stopped at " + (STEPS.find((s) => s[0] === A.current) || ["", "a step"])[1] + ": " + A.error + ". You can carry on by hand."); }
-        } finally { A.running = false; paint(); }
+            window.VLNoAutoScroll = false;
+            if (e instanceof Cancelled) { A.state = "cancelled"; say("You took over. Every step is open for you to adjust."); if (D) D.close(); }
+            else {
+                A.state = "error"; A.error = e.message || String(e); console.error("Autopilot stopped:", e);
+                const where = (STEPS.find((s) => s[0] === A.current) || ["", "a step"])[1];
+                say("Stopped at " + where + ": " + A.error + ". You can carry on by hand.");
+                if (D && D.isOpen) { await D.ask({ title: "Autopilot stopped at " + where, html: '<p class="apd-text">' + String(A.error).replace(/&/g, "&amp;").replace(/</g, "&lt;") + " You can carry on by hand from here.</p>", buttons: [{ id: "ok", label: "Carry on by hand", kind: "primary" }] }); D.close(); }
+            }
+        } finally { A.running = false; A.card = null; window.VLNoAutoScroll = false; paint(); }
     }
     function ready() {
         const v = $("vocal-input"), b = $("beat-input"), S = window.VLState;
@@ -265,6 +426,7 @@
     }
     let timer = null;
     function maybeStart() {
+        if (window.__vlFromStudio) return;                                     // sent from Studio: the person is asked first (below)
         if (!A.on || A.running || !ready()) return;
         const v = $("vocal-input").files[0], b = $("beat-input").files[0];
         const key = [v.name, v.size, b ? b.name + b.size : "lab"].join("|");
@@ -272,7 +434,27 @@
         timer = setTimeout(() => { if (A.on && !A.running && ready() && key !== runKey) { runKey = key; run(false); } }, 500);
     }
 
-    window.VLAutopilot = { state: A, run, cancel: () => { A.cancelled = true; }, get summary() { return A.summary; } };
+    // After "Send mix to Pipeline": ask how to finish. Autopilot goes on to confirm the alignment and choose the parts; Manual leaves
+    // every step to the person (and these files are not started automatically).
+    function fileKey() { const v = $("vocal-input") && $("vocal-input").files[0], b = $("beat-input") && $("beat-input").files[0]; return v ? [v.name, v.size, b ? b.name + b.size : "lab"].join("|") : ""; }
+    async function askHowToFinish() {
+        const D = Deck();
+        if (!D) { window.__vlFromStudio = false; maybeStart(); return; }
+        if (A.running) { window.__vlFromStudio = false; return; }
+        buildCard();
+        D.open(DECK_STEPS, { onTakeover: () => { A.cancelled = true; } });
+        const choice = await D.ask({
+            title: "Sent to Pipeline", html: '<p class="apd-text">How do you want to finish this song?</p>',
+            buttons: [{ id: "auto", label: "Autopilot", sub: "I line it up, you confirm, then you pick what you want to do yourself", kind: "primary" }, { id: "manual", label: "Manual", sub: "You drive every step" }]
+        });
+        window.__vlFromStudio = false;
+        runKey = fileKey();                                                    // these files are decided here; do not auto-start them again
+        if (choice === "manual") { D.close(); return; }
+        run(false);
+    }
+    window.addEventListener("vl-sent-from-studio", askHowToFinish);
+
+    window.VLAutopilot = { state: A, run, startPreview, cancel: () => { A.cancelled = true; }, get summary() { return A.summary; } };
     document.addEventListener("DOMContentLoaded", () => {
         buildCard(); Object.keys(SECTION).forEach((s) => stepBar(s));
         ["vocal-input", "beat-input"].forEach((id) => { const e = $(id); if (e) e.addEventListener("change", maybeStart); });

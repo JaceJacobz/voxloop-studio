@@ -832,7 +832,7 @@ function createTuneEngine() {
             ? (0.88 * strength + 0.12 * strength * strength)   // 100% → ~1.0 still, but mid softer
             : strength;
 
-        let skipped = 0, partial = 0, corrected = 0, longPulled = 0, spokenLifted = 0, spokenLeft = 0;
+        let skipped = 0, partial = 0, corrected = 0, longPulled = 0, spokenLifted = 0, spokenLeft = 0, melodicLifted = 0;
         const spokenSung = o.spokenSung !== false && o.spokenSung !== 0;
 
         function speechiness(nt) {
@@ -875,6 +875,56 @@ function createTuneEngine() {
             return medianOf(d) < 0.17 && d.length / 1.4 >= 4 && medianOf(sd) > 14;
         }
 
+        // ---- Melodic flow vs real speech, judged per LINE (a run of notes with no gap of 0.35 s or more).
+        // A note that slides looks like speech to the per-note test above. But a line that is clearly PITCHED (the tracker is sure
+        // of it all the way through) and has HELD NOTES (a melody sits on pitches; a rap only glides) is melodic flow, the way much Afrobeats,
+        // R&B and melodic rap is sung. For those lines, leaving the notes alone means leaving them wherever they fell against the
+        // beat's key. So: lift = how melodic the line is x how much of it clashes with the key. True rap (a flat, narrow line) scores
+        // about zero and is still left exactly as performed. Nothing here is a fixed pitch: it is measured on this line, against
+        // this key. (o.spokenAuto = false turns it off.)
+        const spokenAuto = !spokenSung && o.spokenAuto !== false;
+        const lineOf = new Array(notes.length).fill(-1), lineInfo = [];
+        if (spokenAuto && notes.length) {
+            const smoothstep = (x, a, b) => { const t = Math.max(0, Math.min(1, (x - a) / Math.max(1e-6, b - a))); return t * t * (3 - 2 * t); };
+            const gapFrames = Math.max(2, Math.round(0.35 / hopSec));
+            let cur = null;
+            notes.forEach((nt, ni) => {
+                if (!cur || nt.start - cur.endFrame > gapFrames) { cur = { start: nt.start, endFrame: nt.end, notes: [] }; lineInfo.push(cur); }
+                cur.notes.push(ni); cur.endFrame = Math.max(cur.endFrame, nt.end); lineOf[ni] = lineInfo.length - 1;
+            });
+            const absErrOf = (ni) => {                                           // how far this note is from the key's nearest note (cents)
+                const nt = notes[ni], mv = o.transposeTotal || 0, zn = zoneOf(nt.start);
+                const tg = smart ? smart.targets[ni] : nearestNote(nt.center - ref + mv, zn ? zn.rootPc : o.rootPc, zn ? zn.mask : mask, o.chromatic) + ref;
+                return Math.abs((tg - (nt.center + mv)) * 100);
+            };
+            lineInfo.forEach((L) => {
+                const vals = []; let cs = 0, cn = 0;
+                for (let k = L.start; k < L.endFrame && k < track.midi.length; k++) {
+                    const m = track.midi[k]; if (isNaN(m)) continue;
+                    vals.push(m); if (track.conf && !isNaN(track.conf[k])) { cs += track.conf[k]; cn++; }
+                }
+                vals.sort((a, b) => a - b);
+                const q = (f) => vals[Math.min(vals.length - 1, Math.floor(vals.length * f))];
+                L.pitched = cn ? cs / cn : 0.6;
+                L.range = vals.length > 8 ? q(0.9) - q(0.1) : 0;                  // semitones the line moves over (reported, not decisive)
+                // HELD NOTES: the share of the line spent on a pitch that stays put (within 35 cents for 120 ms or more). A melody has
+                // notes that hold, however fast or slidey; a rap contour only glides. This is what tells them apart.
+                const hw = Math.max(2, Math.round(0.12 / hopSec)), inHeld = new Uint8Array(L.endFrame - L.start + 1);
+                for (let i = L.start; i + hw < L.endFrame && i + hw < track.midi.length; i++) {
+                    let ok = true, mn = 1e9, mx = -1e9;
+                    for (let j = i; j <= i + hw; j++) { const m = track.midi[j]; if (isNaN(m)) { ok = false; break; } if (m < mn) mn = m; if (m > mx) mx = m; }
+                    if (ok && (mx - mn) * 100 <= 70) for (let j = i; j <= i + hw; j++) inHeld[j - L.start] = 1;
+                }
+                let held = 0, vc = 0; for (let k = L.start; k < L.endFrame && k < track.midi.length; k++) if (!isNaN(track.midi[k])) { vc++; if (inHeld[k - L.start]) held++; }
+                L.held = vc ? held / vc : 0;
+                let tot = 0, bad = 0;
+                L.notes.forEach((ni) => { const w = (notes[ni].end - notes[ni].start); tot += w; if (absErrOf(ni) > selectSoft) bad += w; });
+                L.clash = tot ? bad / tot : 0;                                       // share of the line that is clearly away from the key
+                L.melodic = smoothstep(L.pitched, 0.5, 0.85) * smoothstep(L.held, 0.03, 0.25);
+                L.lift = L.melodic * L.clash;
+            });
+        }
+
         for (let ni = 0; ni < notes.length; ni++) {
 
             const nt = notes[ni];
@@ -892,8 +942,10 @@ function createTuneEngine() {
             let speech = speechiness(nt);
             if (speechContext(ni)) speech = Math.max(speech, 0.65);
             const isSpeech = speech >= 0.45;
-            const talk = spokenSung && isSpeech;
-            const speechLeft = !spokenSung && isSpeech;
+            const lift = spokenAuto && isSpeech && lineOf[ni] >= 0 ? lineInfo[lineOf[ni]].lift : 0;
+            const melodicLift = lift > 0.12;                                       // a melodic line that clashes: tune it, in proportion
+            const talk = (spokenSung && isSpeech) || melodicLift;
+            const speechLeft = !spokenSung && isSpeech && !melodicLift;
 
             // How hard this note is pulled (0 = leave, 1 = full strength)
             let notePull = 1;
@@ -915,12 +967,13 @@ function createTuneEngine() {
                 } else notePull = 1;
             }
 
+            if (melodicLift) notePull *= Math.min(1, lift * 1.25);               // as much as the evidence says, not more
             if (speechLeft) { notePull = 0; spokenLeft++; }
             if (zk <= 0.02) notePull = 0;                       // this line was set to be left exactly as sung or rapped
             if (notePull <= 0.02) skipped++;
             else if (notePull < 0.95) partial++;
             else corrected++;
-            if (talk && notePull > 0.2) spokenLifted++;
+            if (talk && notePull > 0.2) { spokenLifted++; if (melodicLift) melodicLifted++; }
 
             let resid = errCents;
             const dead = full ? 0 : (o.deadzone != null ? o.deadzone : 8);
@@ -1037,7 +1090,10 @@ function createTuneEngine() {
             notes: info,
             biasCents: smart ? smart.biasCents : 0,
             ambiguous: smart ? smart.ambiguous : 0,
-            selective: { skipped, partial, corrected, thresh: selectThresh, soft: selectSoft, spokenLifted, spokenLeft },
+            selective: {
+                skipped, partial, corrected, thresh: selectThresh, soft: selectSoft, spokenLifted, spokenLeft, melodicLifted,
+                lines: lineInfo.map((L) => ({ startSec: +(L.start * hopSec).toFixed(2), endSec: +(L.endFrame * hopSec).toFixed(2), notes: L.notes.length, pitched: +L.pitched.toFixed(2), range: +L.range.toFixed(1), held: +L.held.toFixed(2), clash: +L.clash.toFixed(2), melodic: +L.melodic.toFixed(2), lift: +L.lift.toFixed(2) }))
+            },
             natural: natural,
             retuneMsUsed: retuneMs
         };
@@ -1740,8 +1796,21 @@ function createTuneEngine() {
         o = o || {};
         const mono = mixDown(channels), track = trackClean(mono, sr);
         const lines = octaveLines(track.midi, track.hop, sr, o.gapSec).filter((L) => L.voiced >= Math.round(0.1 * sr / track.hop));
-        if (!lines.length) return { lines: [], median: NaN, p05: NaN, p95: NaN, voicedSec: 0 };
+        if (!lines.length) return { lines: [], median: NaN, p05: NaN, p95: NaN, voicedSec: 0, hist: [], histFirst: 20, steadyShare: 0 };
+        // the whole pitch distribution of the singing (frames per semitone, MIDI 20..99) and how much of it is steady held notes
+        // (sung) rather than constantly sliding (rapped / spoken): a frame is steady when its pitch stays within half a semitone
+        // over about a tenth of a second either side
+        const hist = new Array(80).fill(0), mid = track.midi, w = Math.max(1, Math.round(0.1 * sr / track.hop));
+        let voiced = 0, steady = 0;
+        for (let k = 0; k < mid.length; k++) {
+            if (isNaN(mid[k])) continue;
+            const hi = Math.round(mid[k]) - 20; if (hi >= 0 && hi < 80) hist[hi]++;
+            voiced++;
+            let ok = true; for (let j = Math.max(0, k - w); j <= Math.min(mid.length - 1, k + w); j++) if (isNaN(mid[j]) || Math.abs(mid[j] - mid[k]) > 0.5) { ok = false; break; }
+            if (ok) steady++;
+        }
         return {
+            hist, histFirst: 20, steadyShare: voiced ? steady / voiced : 0,
             lines: lines.map((L) => ({ startSec: L.startSec, endSec: L.endSec, median: L.median, p05: L.p05, p95: L.p95, voicedSec: L.voiced * track.hop / sr })),
             median: weightedQuantile(lines, 0.5, "median"), p05: weightedQuantile(lines, 0.05, "p05"), p95: weightedQuantile(lines, 0.95, "p95"),
             voicedSec: lines.reduce((t, L) => t + L.voiced, 0) * track.hop / sr
@@ -1814,10 +1883,15 @@ function createTuneEngine() {
         let bi = 0, bv = -1, meanLow = 0, nl = 0;
         for (let m = 28; m <= 52; m++) { const v = smooth(m - BR_LO); meanLow += v; nl++; if (v > bv) { bv = v; bi = m; } }
         meanLow /= nl;
-        const wq = (lo, hi, f) => { let t = 0; for (let m = lo; m <= hi; m++) t += share[m - BR_LO]; let a = 0; for (let m = lo; m <= hi; m++) { a += share[m - BR_LO]; if (a >= t * f) return m; } return hi; };
+        // the beat's own gap between its bass and its chords: from the bass peak upward, the first dip in the sustained energy
+        // (if there is none, one octave above the bass peak, where its first harmonic ends)
+        let valley = bi + 12;
+        for (let m = bi + 2; m < Math.min(BR_HI - 2, bi + 24); m++) { const a = smooth(m - 1 - BR_LO), b = smooth(m - BR_LO), c = smooth(m + 1 - BR_LO); if (b <= a && b <= c && b < bv * 0.5) { valley = m; break; } }
+        const lo = Math.min(valley + 1, BR_HI - 6);
+        const wq = (a, b, f) => { let t = 0; for (let m = a; m <= b; m++) t += share[m - BR_LO]; let acc = 0; for (let m = a; m <= b; m++) { acc += share[m - BR_LO]; if (acc >= t * f) return m; } return b; };
         return {
-            bassMidi: bi, bassStrength: meanLow > 0 ? bv / meanLow : 1,
-            bodyMidi: wq(43, 84, 0.5), bodyP25: wq(43, 84, 0.25), bodyP75: wq(43, 84, 0.75), topMidi: wq(43, 84, 0.9),
+            bassMidi: bi, bassStrength: meanLow > 0 ? bv / meanLow : 1, bassLo: bi - 3, valleyMidi: valley,
+            bodyMidi: wq(lo, BR_HI, 0.5), bodyP25: wq(lo, BR_HI, 0.25), bodyP75: wq(lo, BR_HI, 0.75), topMidi: wq(lo, BR_HI, 0.9),
             share, firstMidi: BR_LO, frames: frames.length, confidence: Math.min(1, frames.length / 40)
         };
     }

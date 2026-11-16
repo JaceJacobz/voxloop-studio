@@ -1316,6 +1316,11 @@ audio { color-scheme: dark; }
 
 .tune-row input[type="range"] { grid-column: 1 / -1; }
 
+/* a row with a select (not a slider): the label sits above a full-width select so neither is squeezed */
+.tune-row-stack { grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; }
+.tune-row-stack select { width: 100%; min-width: 0; min-height: 44px; }
+.tune-note { display: block; border: 0; text-decoration: none; margin: 0; padding: 2px 16px 14px; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; text-align: left; }
+
 .tune-controls .advanced-block > .control-with-tip { margin: 0; padding: 12px 16px; }
 
 .tune-check {

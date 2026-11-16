@@ -84,7 +84,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (key && key.key) {
             rootSelect.value = String(NOTE_NAMES.indexOf(key.key));
             scaleSelect.value = key.scale.toLowerCase();
-            keyNote.textContent = key.source === "Beat Lab"
+            keyNote.textContent = key.source === "set by you"
+                ? "Set by you in Studio · exact"
+                : key.source === "Beat Lab"
                 ? "From the Beat Lab · exact"
                 : `Detected from the beat · ${Math.round(key.confidence * 100)}% confidence`;
 
@@ -105,7 +107,7 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             // The Music Brain key engine already measured the beat's tuning on its pitched (harmonic) sound, ignoring drums.
             const bk = S && S.beatKey;
-            const t = (bk && bk.tuningStrength != null && bk.engine && bk.source !== "Beat Lab")
+            const t = (bk && bk.tuningStrength != null && bk.engine && bk.source !== "Beat Lab" && bk.source !== "set by you")
                 ? { cents: bk.tuningRaw, strength: bk.tuningStrength }
                 : window.VLTune.estimateBeatTuning(S.beatBuffer);
             if (t.strength >= 0.35) {
@@ -152,7 +154,7 @@ document.addEventListener("DOMContentLoaded", () => {
         for (let c = 0; c < vocal.numberOfChannels; c++) channels.push(vocal.getChannelData(c));
 
         const selectiveBox = $("tune-selective");
-        const spokenBox = $("tune-spoken");
+        const spokenBox = $("tune-spoken"), spokenAutoBox = $("tune-spoken-auto");
         const naturalBox = $("tune-natural");
 
         // Auto: speed, strength, vibrato flattening and how picky "selective" is come from the beat's style and this voice (mixbrain.js)
@@ -199,7 +201,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     } catch (error) { console.warn("Could not measure the beat's register, judging by the voice alone:", error); }
                 }
                 const dec = window.AutoDecide.octaveBrain({
-                    median: prof.median, p05: prof.p05, p95: prof.p95, delivery, mode: octMode,
+                    median: prof.median, p05: prof.p05, p95: prof.p95, hist: prof.hist, histFirst: prof.histFirst, lines: prof.lines, voicedSec: prof.voicedSec, steadyShare: prof.steadyShare, delivery, mode: octMode,
                     beat: beatReg, genreId: tuneCtx ? tuneCtx.genreId : null, vibe: tuneCtx ? tuneCtx.vibe : null
                 });
                 S.octaveResult = { action: dec.action, score: dec.score, heard: dec.heard.slice(), why: dec.why.slice(), median: prof.median, applied: false, evidence: dec.evidence };
@@ -234,6 +236,7 @@ document.addEventListener("DOMContentLoaded", () => {
             selectiveCents: autoTune ? autoTune.selectiveCents : 6,
             selectiveSoftCents: autoTune ? autoTune.selectiveSoftCents : 14,
             spokenSung: spokenBox ? spokenBox.checked : false,
+            spokenAuto: spokenAutoBox ? spokenAutoBox.checked : true,        // melodic lines that clash with the key are tuned (rap-like ones stay as performed)
             natural: naturalBox ? naturalBox.checked : true,      // gentle vibrato, quicker arrival on notes, steadier holds
             adaptive: naturalBox ? naturalBox.checked : true      // rawer takes get a stronger, steadier correction
         };
@@ -270,13 +273,27 @@ document.addEventListener("DOMContentLoaded", () => {
             if (result.selective) {
                 const s = result.selective;
                 const total = (s.corrected || 0) + (s.partial || 0) + (s.skipped || 0);
-                const spokenBit = s.spokenLifted
-                    ? ` Lifted ${s.spokenLifted} talk-sing line${s.spokenLifted === 1 ? "" : "s"} onto a note.`
-                    : "";
+                // Say WHY notes were left alone, not just how many: close to the key already / rap-like / and which were lifted
+                const closeAlready = Math.max(0, (s.skipped || 0) - (s.spokenLeft || 0));
+                const bits = [];
+                if (s.melodicLifted) bits.push(`${s.melodicLifted} notes on melodic lines that clashed with the key were tuned (the lines hold notes, so they are sung, not rapped)`);
+                else if (s.spokenLifted) bits.push(`${s.spokenLifted} talk-sing notes were pulled onto notes`);
+                if (s.spokenLeft) bits.push(`${s.spokenLeft} notes on rap-like lines were left as performed`);
+                if (closeAlready) bits.push(`${closeAlready} were already close to the key`);
+                S.tuneWhy = bits.slice();
                 statusLine.textContent =
                     total
-                        ? `Tuned ${s.corrected} notes, gently fixed ${s.partial}, left ${s.skipped} alone (natural takes stay natural).${spokenBit}`
+                        ? `Tuned ${s.corrected} notes, gently fixed ${s.partial}, left ${s.skipped} alone.${bits.length ? " " + bits.join("; ") + "." : ""}`
                         : "Pitch correction done.";
+                // one tap to tune the rap-like lines as well
+                let tooBtn = document.getElementById("tune-spoken-too");
+                if (!tooBtn) {
+                    tooBtn = document.createElement("button"); tooBtn.type = "button"; tooBtn.id = "tune-spoken-too"; tooBtn.className = "secondary-button";
+                    statusLine.insertAdjacentElement("afterend", tooBtn);
+                    tooBtn.addEventListener("click", () => { if (spokenBox) spokenBox.checked = true; runButton.click(); });
+                }
+                tooBtn.hidden = !(s.spokenLeft > 0);
+                tooBtn.textContent = `Tune the ${s.spokenLeft || 0} rap-like notes too`;
             } else {
                 statusLine.textContent = "Pitch correction done.";
             }

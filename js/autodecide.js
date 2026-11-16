@@ -194,8 +194,8 @@
             else { out.strengthCap = 65; why.push("Tuned the sung parts at a gentler strength, because this mixes singing and rapping."); }
         }
         else if (c.delivery === "sung") why.push("Tuned the sung notes to the beat's key.");
-        else if (c.delivery == null || c.delivery === "unknown") { out.strengthCap = 75; why.push("Could not tell for sure whether this is sung or rapped, so the tuning was kept to a gentler strength."); }
-        if (c.voiceConfidence != null && c.voiceConfidence < 0.5 && c.delivery === "sung") { out.strengthCap = Math.min(out.strengthCap, 80); why.push("Not fully sure this is singing, so the tuning was kept a little lighter."); }
+        else if (c.delivery == null || c.delivery === "unknown") { const vc = c.voiceConfidence != null ? clamp(c.voiceConfidence, 0, 1) : 0.4; out.strengthCap = Math.round(55 + 45 * vc); why.push("Could not tell for sure whether this is sung or rapped, so the tuning strength was held to " + out.strengthCap + "%, in proportion to how sure the voice check is."); }
+        if (c.voiceConfidence != null && c.voiceConfidence < 1 && c.delivery === "sung") { const cap = Math.round(55 + 45 * clamp(c.voiceConfidence, 0, 1)); if (cap < out.strengthCap) { out.strengthCap = cap; why.push("Not fully sure this is singing, so the tuning was held to " + cap + "%, in proportion to how sure the voice check is."); } }
         return out;
     }
     /** Mix choices that were still manual. Style, space, resonance and calm are already "auto" in the Pipeline. */
@@ -219,62 +219,47 @@
     }
 
     /**
-     * The octave brain. It works like a producer would: listen to where the voice sits, listen to where the beat leaves room, weigh
-     * what the genre and the energy of the song want, try the move on paper, and only then decide. Positive score = the voice is
-     * too LOW for this song (raise it); negative = too HIGH (lower it).
+     * The octave brain: judged from THIS beat and THIS voice, not from fixed pitch numbers.
      *
-     * Evidence (each from -1 to +1, then weighed):
-     *   register  where the voice sits against where lead vocals normally live (the voice's own pitch)            weight .45
-     *   chords    where the voice sits against the middle of the beat's sustained body (chords, pads, bass)         weight .20
-     *   bass      whether the voice shares its notes with the beat's bass line (buried and muddy)                    weight .20
-     * The beat's two weights shrink when the beat could not be measured well. Then the score is nudged by the song:
-     *   genre     trap and drill suit a deep voice (a raise needs more proof); pop, afrobeats and dance want it up front
-     *   vibe      a hard-hitting, busy beat wants the voice higher; a sparse, laid-back one lets it sit low
-     * Then the listen-back: the move is tried on paper (score again as if the voice already sat there). It is only made if that
-     * fixes the problem; if the moved voice would sit no better, nothing is changed and the doubt is reported.
-     * Auto only ACTS on strong, agreeing evidence on a sung vocal; weaker evidence only SUGGESTS. A rap is never moved.
+     * It listens to the beat for where its bass sits, where the gap above the bass is, and where the chord body sits (all measured:
+     * pitchcorrect.js beatRegister). It listens to the voice for its whole pitch distribution (how much of the singing is at each
+     * semitone). Then, for the voice where it is and for one octave up and one octave down, it works out how much of the singing:
+     *   - lands ON the beat's bass (muddy, buried)
+     *   - sits UNDER the beat's chord body (dark, behind the track)
+     *   - floats far OVER the chord body (thin, detached)
+     * and picks the placement that leaves the least of that. A move has to fix most of the problem, and by more than the doubt in
+     * the measurement allows (a short or unclear take, a beat that was hard to read, a rarely-wanted lowering all raise the bar).
+     * The song itself moves the bar: a hard-hitting, busy beat asks for less proof to raise the voice, a sparse, spacious one more.
+     * If the singer already sang some lines an octave higher than others, that is the singer showing where the song sits, and it
+     * counts for raising the rest. Auto only ACTS on a sung vocal; a rap is never moved, and weaker evidence only SUGGESTS.
+     * The only fixed numbers are physical limits of a human voice (so nothing is ever pushed beyond what a lead vocal can do).
      *
-     * c = { median, p05, p95 (MIDI, over the singing), delivery, mode: auto | up | down | off,
-     *       beat: { bodyMidi, bassMidi, bassStrength, confidence } | null, genreId, vibe: { energy, space, busy } | null }
-     * returns { action: raise | lower | suggest-raise | suggest-lower | none, semis, score, confidence, heard: [...], why: [...], evidence: [...] }
+     * c = { median, p05, p95, hist (frames per MIDI semitone from histFirst), histFirst, lines [{median, voicedSec}], voicedSec,
+     *       steadyShare, delivery, mode: auto | up | down | off, beat | null, vibe: { energy, space } | null }
+     * returns { action: raise | lower | suggest-raise | suggest-lower | none, semis, score, confidence, heard, why, evidence }
      */
     const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     const noteName = (m) => NOTE[((Math.round(m) % 12) + 12) % 12] + (Math.floor(Math.round(m) / 12) - 1);
     const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
-    const interp = (pts, x) => { if (x <= pts[0][0]) return pts[0][1]; for (let i = 1; i < pts.length; i++) if (x <= pts[i][0]) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i]; return y0 + (y1 - y0) * (x - x0) / (x1 - x0); } return pts[pts.length - 1][1]; };
-    const REG = [[40, 1], [44, 0.95], [46, 0.8], [48, 0.5], [50, 0.3], [52, 0.1], [55, 0], [70, 0], [73, -0.1], [76, -0.4], [79, -0.8], [82, -1]];
-    const REL = [[-16, 1], [-12, 0.8], [-8, 0.45], [-3, 0.1], [0, 0], [12, 0], [16, -0.35], [20, -0.7], [24, -1]];
-    // Does the voice's range sit on top of the beat's bass? (a voice sharing the bass's notes is buried and muddy)
-    function bassCollision(beat, m) {
-        if (beat.bassMidi == null || !(beat.bassStrength >= 1.6)) return null;      // no clear bass line to collide with
-        const lo = Math.max(m - 4, beat.bassMidi - 3), hi = Math.min(m + 4, beat.bassMidi + 9);
-        return clamp((hi - lo) / 8, 0, 1);
+    const HUMAN_TOP = 88, HUMAN_BOTTOM = 36;                                 // E6 and C2: physical limits of a lead vocal, not tastes
+    function histOf(c) {
+        if (c.hist && c.hist.length) return { h: c.hist, first: c.histFirst == null ? 20 : c.histFirst };
+        const first = 20, h = new Array(80).fill(0), lo = Math.round(c.p05 != null ? c.p05 : c.median - 5), hi = Math.round(c.p95 != null ? c.p95 : c.median + 6), md = Math.round(c.median);
+        for (let m = lo; m <= hi; m++) { const w = m <= md ? 1 + (m - lo) / Math.max(1, md - lo) : 1 + (hi - m) / Math.max(1, hi - md); if (m - first >= 0 && m - first < 80) h[m - first] = w; }
+        return { h, first };
     }
-    function scoreAt(c, m) {                                                // evidence for a voice sitting at pitch m (positive: raising would help)
-        const parts = [], beat = c.beat && c.beat.bodyMidi != null ? c.beat : null, bc = beat ? clamp(c.beat.confidence == null ? 1 : c.beat.confidence, 0, 1) : 0;
-        parts.push({ name: "register", v: interp(REG, m), w: 0.45 });
-        if (beat) {
-            parts.push({ name: "chords", v: interp(REL, m - beat.bodyMidi), w: 0.2 * bc, rel: m - beat.bodyMidi });
-            const here = bassCollision(beat, m), upC = bassCollision(beat, m + 12) || 0;
-            // only counts when the bass is actually in play (the voice, or the raised voice, touches it); a bass far away says nothing.
-            // positive: raising gets the voice off the bass; negative: raising would put it on the bass
-            if (here != null && (here > 0 || upC > 0)) parts.push({ name: "bass", v: clamp(here - upC, -1, 1), w: 0.2 * bc, here });
+    function placement(beat, H, d) {                                         // share of the singing that is on the bass / under the chords / far over them, if moved by d semitones
+        let tot = 0, bass = 0, under = 0, over = 0;
+        const half = (beat.bodyP75 - beat.bodyP25) / 2;
+        for (let i = 0; i < H.h.length; i++) {
+            const w = H.h[i]; if (!w) continue; tot += w;
+            const m = H.first + i + d;
+            if (m >= beat.bassLo && m <= beat.valleyMidi) bass += w;
+            else if (m < beat.bodyP25) under += w;
+            else if (m > beat.bodyP75 + half) over += w;
         }
-        const W = parts.reduce((t, p) => t + p.w, 0) || 1;
-        return { S: parts.reduce((t, p) => t + p.v * p.w, 0) / W, parts };
-    }
-    function songFactor(c) {
-        const g = String(c.genreId || "").toLowerCase(), v = c.vibe || null;
-        let gf = 1, gt = null;
-        if (/trap|drill|phonk|lofi|lo-fi/.test(g)) { gf = 0.7; gt = "this genre carries a deep voice well, so a raise needed stronger proof"; }
-        else if (/rnb|r&b|soul/.test(g)) { gf = 0.9; }
-        else if (/afro|amapiano|dancehall|pop|house|dance|edm|reggaeton/.test(g)) { gf = 1.1; gt = "this genre wants the voice forward and up"; }
-        let vf = 1, vt = null;
-        if (v && v.energy != null) {
-            vf = clamp(1 + 0.25 * (v.energy - 0.5) - 0.2 * ((v.space == null ? 0.5 : v.space) - 0.5), 0.8, 1.2);
-            vt = vf > 1.06 ? "a hard-hitting, busy beat needs the voice higher to cut through" : vf < 0.94 ? "a sparse, laid-back beat lets a lower voice sit comfortably" : null;
-        }
-        return { f: gf * vf, gt, vt };
+        tot = tot || 1;
+        return { bass: bass / tot, under: under / tot, over: over / tot, cost: (1.0 * bass + 0.6 * under + 0.6 * over) / tot };
     }
     function octaveBrain(c) {
         c = c || {}; const heard = [], why = [], mode = c.mode || "auto";
@@ -283,56 +268,93 @@
         if (c.median == null || !isFinite(c.median)) { why.push("Not enough singing to judge the octave."); return out("none", 0, 0, 0); }
         const m = c.median, where = noteName(m) + " (" + Math.round(midiHz(m)) + " Hz)";
         heard.push("Your voice sits around " + where + (c.p05 != null ? ", singing from about " + noteName(c.p05) + " to " + noteName(c.p95) : "") + ".");
-        const beat = c.beat && c.beat.bodyMidi != null ? c.beat : null;
-        if (beat) heard.push("The beat's chords and pads sit around " + noteName(beat.bodyMidi) + (beat.bassMidi && beat.bassStrength > 1.6 ? " with its bass near " + noteName(beat.bassMidi) : "") + ".");
+        const beat = c.beat && c.beat.bodyP25 != null && c.beat.valleyMidi != null ? c.beat : null;
+        if (beat) heard.push("The beat's bass sits near " + noteName(beat.bassMidi) + " and its chords and pads around " + noteName(beat.bodyMidi) + ".");
         if (c.delivery === "rapped") { why.push("This is a rap, so it was left in the register it was performed in."); return out("none", 0, 0, 0); }
         if (mode === "up" || mode === "down") {
-            const semis = mode === "up" ? 12 : -12;
             why.push(mode === "up" ? "Raised one octave as you asked. Lines that were already sung high were left alone, and each raised line keeps its own ups and downs."
                 : "Lowered one octave as you asked. Lines that were already sung low were left alone, and each lowered line keeps its own ups and downs.");
-            return out(mode === "up" ? "raise" : "lower", semis, 0, 1);
+            return out(mode === "up" ? "raise" : "lower", mode === "up" ? 12 : -12, 0, 1);
         }
-        const sungish = c.delivery === "sung" || c.delivery === "mixed";
-        const now = scoreAt(c, m), sf = songFactor(c), S0 = now.S > 0 ? now.S * sf.f : now.S;
-        const ev = now.parts.map((p) => ({ name: p.name, value: +p.v.toFixed(2), weight: +p.w.toFixed(2) }));
-        const rp = now.parts.find((p) => p.name === "chords"), op = now.parts.find((p) => p.name === "bass");
-        // what a producer would say about it
-        if (S0 > 0.3) {
-            if (interp(REG, m) >= 0.5) why.push("That is low for a lead vocal.");
-            if (rp && rp.v >= 0.35) why.push("It sits about " + Math.abs(Math.round(rp.rel)) + " semitones under the beat's chords, down where the bass and chords already are, so it gets buried.");
-            if (op && op.v >= 0.3) why.push("It shares its notes with the beat's bass line, which makes it muddy; an octave up clears the bass.");
-        } else if (S0 < -0.3) {
-            if (interp(REG, m) <= -0.4) why.push("That is very high for a lead vocal; it can sound thin and strained.");
-            if (rp && rp.v <= -0.35) why.push("It floats about " + Math.round(rp.rel) + " semitones above the beat's chords, so it feels detached from the track.");
-            if (op && op.v <= -0.3) why.push("Lowering it would collide with the bass line, so it stays up.");
-        }
-        if (Math.abs(S0) >= 0.3 && sf.gt) why.push("Genre: " + sf.gt + ".");
-        if (Math.abs(S0) >= 0.3 && sf.vt) why.push("Vibe: " + sf.vt + ".");
-        const need = S0 > 0 ? { act: 0.62, say: 0.3 } : { act: 0.75, say: 0.4 };
-        const dir = S0 > 0 ? 12 : -12;
-        const veto = S0 > 0 ? (c.p95 != null && c.p95 + 12 > 86 ? "it would go above the comfortable top of a lead vocal" : null) : (c.p05 != null && c.p05 - 12 < 34 ? "it would go below the comfortable bottom of a lead vocal" : null);
-        if (Math.abs(S0) < need.say) {
-            if (beat || c.genreId) why.push("Your voice is comfortably in the range this beat leaves for it, so the octave was left alone.");
-            else why.push("The octave looks fine, so it was left alone.");
-            return out("none", 0, S0, 1 - Math.abs(S0), { evidence: ev });
-        }
-        // listen-back: try it on paper
-        const after = scoreAt(c, m + dir), S1 = after.S > 0 ? after.S * sf.f : after.S;
-        const fixes = Math.abs(S1) <= Math.abs(S0) * 0.5;
-        const conf = clamp(Math.abs(S0), 0, 1);
-        const kind = S0 > 0 ? "raise" : "lower";
-        if (veto) { why.push("Not moved: " + veto + "."); return out("suggest-" + kind, dir, S0, conf * 0.5, { evidence: ev }); }
-        if (!fixes) { why.push("I tried the move on paper and it would not sit clearly better against this beat, so nothing was changed. If you sang it an octave away from the original, set Octave by hand and compare."); return out("suggest-" + kind, dir, S0, conf * 0.5, { evidence: ev }); }
-        if (Math.abs(S0) >= need.act && sungish && !(beat == null && Math.abs(S0) < 0.75)) {
-            why.push("Tried it on paper: " + (S0 > 0 ? "an octave up" : "an octave down") + " it sits clearly better against this beat, so it was " + (S0 > 0 ? "raised" : "lowered") + " one octave. Lines already sung in the right register were left alone.");
-            return out(kind, dir, S0, conf, { evidence: ev });
-        }
-        why.push(sungish ? "The evidence is suggestive but not strong enough to move your voice on its own. If you sang it an octave away from the original, set Octave by hand to " + (S0 > 0 ? "\"Raise one octave\"" : "\"Lower one octave\"") + " and compare."
-                         : "It is not clear this is sung, so nothing was moved. If you sang an octave away from the original, set Octave by hand.");
-        return out("suggest-" + kind, dir, S0, conf * 0.6, { evidence: ev });
-    }
-    // the older entry point (voice only): same brain, no beat information
-    function octaveDecision(c) { const r = octaveBrain(c); return Object.assign({}, r, { action: r.action }); }
+        if (!beat) { why.push("There is no beat to judge the octave against, so it was left alone."); return out("none", 0, 0, 0); }
 
-    return { alignDecision, cleanDecision, tuneDecision, mixDecision, octaveDecision, octaveBrain, onsetCurve };
+        const H = histOf(c), now = placement(beat, H, 0), upP = placement(beat, H, 12), dnP = placement(beat, H, -12);
+        const vs = c.voicedSec == null ? 10 : c.voicedSec;
+        const reliability = clamp((beat.confidence == null ? 1 : beat.confidence) * (vs / (vs + 8)), 0.15, 1);   // a short take or a hard-to-read beat means more doubt
+        const v = c.vibe || null, push = v && v.energy != null ? clamp(1 - 0.4 * (v.energy - 0.5) + 0.3 * ((v.space == null ? 0.5 : v.space) - 0.5), 0.7, 1.3) : 1;
+        const baseNeed = 0.2 + 0.35 * (1 - reliability);                      // how much of the singing a move must rescue
+        // the singer's own evidence: lines sung about an octave apart show where the song sits comfortably
+        let own = 0;
+        if (c.lines && c.lines.length >= 2) {
+            const meds = c.lines.map((L) => L.median), lo = Math.min.apply(null, meds), hi = Math.max.apply(null, meds);
+            if (hi - lo >= 8 && hi - lo <= 16) {
+                const cut = (lo + hi) / 2; let tl = 0, tt = 0; c.lines.forEach((L) => { const t = L.voicedSec || 1; tt += t; if (L.median < cut) tl += t; });
+                if (tl / tt >= 0.15 && tl / tt <= 0.85) own = tl / tt;           // share of the singing that sits in the lower group
+            }
+        }
+        const impUp = now.cost - upP.cost + 0.35 * own, impDn = now.cost - dnP.cost;
+        const needUp = baseNeed * push, needDn = baseNeed / push * 1.5;      // lowering is rarer and riskier: more proof
+        const pct = (x) => Math.round(x * 100) + "%";
+        const ev = [{ name: "on the bass", value: +now.bass.toFixed(2), after: +upP.bass.toFixed(2) }, { name: "under the chords", value: +now.under.toFixed(2), after: +upP.under.toFixed(2) }, { name: "over the chords", value: +now.over.toFixed(2), after: +upP.over.toFixed(2) }, { name: "own lines", value: +own.toFixed(2) }];
+        const wantUp = impUp >= impDn;
+        const imp = wantUp ? impUp : impDn, need = wantUp ? needUp : needDn, dir = wantUp ? 12 : -12, after = wantUp ? upP : dnP;
+        const kind = wantUp ? "raise" : "lower";
+        const problem = now.cost > 0.05;
+        if (!problem || imp < need * 0.5 || imp <= 0) {
+            why.push("Your voice is comfortably in the range this beat leaves for it, so the octave was left alone.");
+            return out("none", 0, imp, 1 - clamp(now.cost, 0, 1), { evidence: ev });
+        }
+        // what a producer would say
+        const bits = [];
+        if (now.bass >= 0.15) bits.push(pct(now.bass) + " of your singing sits on the beat's bass line");
+        if (now.under >= 0.2) bits.push(pct(now.under) + " sits under the beat's chords");
+        if (now.over >= 0.2) bits.push(pct(now.over) + " floats far above the beat's chords");
+        if (bits.length) why.push(bits.join(" and ").replace(/^./, (x) => x.toUpperCase()) + (wantUp ? ", so it gets buried." : ", so it feels detached from the track."));
+        if (own > 0) why.push("You also sang some lines about an octave higher than the rest, which shows where the song sits comfortably.");
+        if (v && wantUp && push <= 0.88) why.push("The beat is hard-hitting and busy, so the voice needs to be higher to cut through.");
+        else if (v && wantUp && push >= 1.12) why.push("The beat is sparse and spacious, so a lower voice is more at home in it and it asked for stronger proof.");
+        const veto = wantUp ? (c.p95 != null && c.p95 + 12 > HUMAN_TOP ? "it would go above what a lead vocal can comfortably reach" : null) : (c.p05 != null && c.p05 - 12 < HUMAN_BOTTOM ? "it would go below what a lead vocal can comfortably reach" : null);
+        const fixesMost = after.cost <= now.cost * 0.4;
+        const conf = clamp(imp / (need * 2), 0, 1);
+        const sungish = c.delivery === "sung" || c.delivery === "mixed";
+        const unknown = !sungish && c.delivery !== "rapped", heldNotes = c.steadyShare == null || c.steadyShare > 0.03;
+        const proof = unknown ? need * 1.5 : need;                           // when it is not known whether it is sung, ask for more
+        if (veto) { why.push("Not moved: " + veto + "."); return out("suggest-" + kind, dir, imp, conf * 0.5, { evidence: ev }); }
+        if (imp >= proof && fixesMost && (sungish || (unknown && heldNotes))) {
+            why.push("Tried it on paper: " + (wantUp ? "an octave up" : "an octave down") + " that drops to " + pct(after.bass) + " on the bass, " + pct(after.under) + " under the chords and " + pct(after.over) + " floating over them, so it was " + (wantUp ? "raised" : "lowered") + " one octave. Lines already in the right register were left alone.");
+            return out(kind, dir, imp, conf, { evidence: ev });
+        }
+        why.push(!fixesMost ? "I tried the move on paper and it would not sit clearly better against this beat, so nothing was changed. If you sang it an octave away from the original, set Octave by hand and compare."
+            : "The evidence is suggestive but not strong enough to move your voice on its own. If you sang it an octave away from the original, set Octave by hand to " + (wantUp ? "\"Raise one octave\"" : "\"Lower one octave\"") + " and compare.");
+        return out("suggest-" + kind, dir, imp, conf * 0.6, { evidence: ev });
+    }
+    // the older entry point
+    function octaveDecision(c) { return octaveBrain(c); }
+
+    /**
+     * Which of the seven notes is home? A beat on its own can be ambiguous between a major key and its relative minor (A major and
+     * F# minor are the same seven notes; a chord loop like F#m-D-A-E fits both). So the singer's melody gets a vote: where its
+     * phrases land and rest. They are weighed by how sure each side is (the beat's own tonic confidence; the melody's confidence,
+     * discounted when there are few notes to go on). A key told by the Beat Lab is exact and never overridden. If the singer's
+     * seven notes differ from the beat's, nothing is changed (that is a different matter, not a labelling one).
+     * c = { beat: { rootPc, scale, tonicConfidence, source }, singer: { rootPc, scale, tonicConfidence } | null, notes }
+     */
+    const setRootOf = (k) => (String(k.scale || "").toLowerCase().indexOf("min") === 0 ? (k.rootPc + 3) % 12 : k.rootPc);
+    function keyDecision(c) {
+        c = c || {}; const b = c.beat, g = c.singer, why = [];
+        if (!b || !g || b.rootPc == null || g.rootPc == null) return { change: false, why };
+        if (b.source === "Beat Lab" || b.source === "set by you") return { change: false, why };
+        if (setRootOf(b) !== setRootOf(g)) return { change: false, why };                   // not the same seven notes: not a labelling question
+        if (b.rootPc === g.rootPc && String(b.scale).toLowerCase() === String(g.scale).toLowerCase()) return { change: false, why };
+        const n = c.notes || 0, beatS = clamp(b.tonicConfidence == null ? 0.5 : b.tonicConfidence, 0, 1), singS = clamp(g.tonicConfidence == null ? 0.5 : g.tonicConfidence, 0, 1) * (n / (n + 10));
+        const nameOf = (k) => NOTE[k.rootPc] + " " + (String(k.scale).toLowerCase().indexOf("min") === 0 ? "minor" : "major");
+        if (singS > beatS) {
+            why.push("The beat's chords could be read as " + nameOf(b) + " or " + nameOf(g) + " (the same seven notes), but your melody keeps landing and resting on " + NOTE[g.rootPc] + ", so the key was set to " + nameOf(g) + ". The notes used for tuning are the same either way.");
+            return { change: true, to: { rootPc: g.rootPc, scale: String(g.scale).toLowerCase().indexOf("min") === 0 ? "Minor" : "Major" }, alsoFits: nameOf(b), why };
+        }
+        why.push("The beat's chords point to " + nameOf(b) + " and your melody could also be " + nameOf(g) + " (the same seven notes). The beat is the clearer voice, so the key stayed " + nameOf(b) + ".");
+        return { change: false, alsoFits: nameOf(g), why };
+    }
+
+    return { alignDecision, cleanDecision, tuneDecision, mixDecision, octaveDecision, octaveBrain, keyDecision, onsetCurve };
 });

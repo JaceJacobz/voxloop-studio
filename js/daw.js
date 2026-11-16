@@ -1833,6 +1833,23 @@
                 beatFile = new File([wav], (beat.name || "beat") + ".wav", { type: "audio/wav" });
             }
 
+            // What you corrected in Studio (or the Beat Lab told it) travels with the beat file, so the Pipeline uses it instead of
+            // detecting the key and tempo again from the audio (and getting the wrong one again).
+            if (window.VLKnownBeat && window.VLKnownBeat.fromStudio) window.VLKnownBeat = null;       // a previous send's, never reused
+            try {
+                const inf = beat.info, src = (inf && inf.source) || {}, exact = (x) => x === "set by you" || x === "Beat Lab";
+                const NN = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"], modes = { major: ["Major", "ionian"], minor: ["Minor", "aeolian"], dorian: ["Minor", "dorian"], phrygian: ["Minor", "phrygian"], mixolydian: ["Major", "mixolydian"], lydian: ["Major", "lydian"] };
+                const kk = inf && inf.key && exact(src.key) ? inf.key : null, mm = kk ? (modes[String(kk.scale).toLowerCase()] || modes.major) : null;
+                const bpmOk = inf && inf.bpm > 30 && exact(src.bpm);
+                if (beatFile && (kk || bpmOk)) {
+                    window.VLKnownBeat = {
+                        fromStudio: true, fileKey: beatFile.name + "|" + beatFile.size, buffer: null, source: kk ? src.key : src.bpm,
+                        bpm: bpmOk ? inf.bpm : undefined,
+                        key: kk ? { key: NN[kk.rootPc], scale: mm[0], mode: mm[1], modeRoot: NN[kk.rootPc] } : undefined
+                    };
+                }
+            } catch (e) { console.warn("could not carry the corrected key to the Pipeline", e); }
+            window.__vlFromStudio = true;                                       // Autopilot asks "Autopilot or Manual?" instead of starting by itself
             assignFile(els.vocalInput, composite.file, els.vocalFileName);
             assignFile(els.beatFileInput, beatFile, els.beatFileName);
             if (window.VLState) window.VLState.studioStack = composite.stack || null;
@@ -1843,6 +1860,7 @@
                 : "1 lane";
             status("Sent " + composite.laneCount + " lane(s) to Pipeline — " + summary);
             $("upload-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            window.dispatchEvent(new CustomEvent("vl-sent-from-studio"));
         } catch (e) {
             console.warn("sendToPipeline failed", e);
             const msg = (e && e.message) ? e.message : String(e || "unknown error");

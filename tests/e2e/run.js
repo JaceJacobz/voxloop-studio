@@ -12,6 +12,8 @@ execSync(`node ${__dirname}/make-assets.js ${name} ${dir}`);
   for (let i = 0; i < 1500; i++) {
     const st = await p.evaluate(() => ({ s: VLAutopilot.state.state, c: VLAutopilot.state.current, e: VLAutopilot.state.error }));
     const line = st.s + ' / ' + st.c; if (line !== last) { console.log(ts(), line); last = line; }
+    // the Autopilot deck asks you to confirm the alignment and to choose parts: accept the defaults like a person tapping through
+    await p.evaluate(() => { const d = document.getElementById('ap-deck'); if (!d || d.hidden) return; const b = d.querySelector('.apd-card.is-in [data-id="ok"], .apd-card.is-in [data-id="go"], .apd-card.is-in [data-id="auto"], .apd-card.is-in [data-id="mix"]'); if (b) b.click(); }).catch(() => {});
     if (st.s === 'done' || st.s === 'error' || st.s === 'cancelled') break; await p.waitForTimeout(400);
   }
   const flags = await p.evaluate(() => { const ms = document.getElementById('automix-summary'); return { state: VLAutopilot.state.state, error: VLAutopilot.state.error, alignOffsetMs: VLAutopilot.alignment ? Math.round(VLAutopilot.alignment.offsetSec * 1000) : null, hasMix: !!VLState.mixBuffer, masterSummaryExists: !!ms, masterSummaryOpen: !!(ms && ms.open), masterSummaryTitle: ms ? ms.querySelector('summary').textContent : null, apSummaryOpen: !!(document.getElementById('ap-summary') || {}).open, apSummaryTitle: (document.getElementById('ap-summary-title') || {}).textContent }; });

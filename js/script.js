@@ -87,6 +87,14 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     // Beat Lab → Pipeline handoff
+    // A beat whose tempo/key are already known: told by the Beat Lab (matched by the decoded buffer), or carried from Studio with
+    // what the person corrected there (matched by the beat file, because the Pipeline decodes its own copy of it).
+    function knownBeatFor(buf) {
+        const k = window.VLKnownBeat; if (!k) return null;
+        if (k.buffer && k.buffer === buf) return k;
+        if (k.fileKey) { const f = beatInput && beatInput.files && beatInput.files[0]; if (f && (f.name + "|" + f.size) === k.fileKey) return k; }
+        return null;
+    }
     window.addEventListener("vl-set-beat", (ev) => {
         const { buffer, name, meta } = ev.detail || {};
         if (!buffer) return;
@@ -952,8 +960,8 @@ continueAnalysisButton.addEventListener("click", () => {
 
         try {
 
-            const known = window.VLKnownBeat;
-            const result = (known && known.buffer === currentBeat && known.bpm > 30)
+            const known = knownBeatFor(currentBeat);
+            const result = (known && known.bpm > 30)
                 ? { bpm: known.bpm, confidence: 1, alternatives: [] }          // told by the Beat Lab: no guessing
                 : await window.VLAnalysis.analyzeBpm(currentBeat);
 
@@ -1223,9 +1231,9 @@ async function runBeatKeyAnalysis() {
 
     try {
 
-        const knownBeat = window.VLKnownBeat;
-        const result = (knownBeat && knownBeat.buffer === currentBeat && knownBeat.key)
-            ? Object.assign({ confidence: 1, source: "Beat Lab" }, knownBeat.key)       // told by the Beat Lab: exact
+        const knownBeat = knownBeatFor(currentBeat);
+        const result = (knownBeat && knownBeat.key)
+            ? Object.assign({ confidence: 1, source: knownBeat.source || "Beat Lab" }, knownBeat.key)       // told by the Beat Lab, or set by you in Studio: exact
             : await window.VLAnalysis.detectKey(
                 currentBeat
             );
@@ -1272,7 +1280,9 @@ async function runBeatKeyAnalysis() {
             if (result.mode && result.modeRoot && result.mode !== "ionian" && result.mode !== "aeolian") extras.push(`${result.modeRoot} ${result.mode} feel`);
             if (result.progression && result.progression.text) extras.push(`chords ${result.progression.text}`);
             if (result.tuningCents) extras.push(`recording is ${Math.abs(result.tuningCents)}¢ ${result.tuningCents > 0 ? "sharp" : "flat"}`);
-            beatKeyStatus.textContent = (result.source === "Beat Lab"
+            beatKeyStatus.textContent = (result.source === "set by you"
+                ? "Set by you in Studio • exact"
+                : result.source === "Beat Lab"
                 ? "From the Beat Lab • exact"
                 : `Detected • ${confidencePercent}% confidence`) + (extras.length ? " • " + extras.join(" • ") : "");
 

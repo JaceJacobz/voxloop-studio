@@ -391,11 +391,33 @@ Every pack was run through the Mix Doctor (peak about -6 dBFS, low end 21-59%). 
 - Tests: `node tests/align.test.js`, `node tests/tone.test.js`.
 
 ## Octave brain (Pipeline, Tune step)
-The Octave select (Auto / Raise one octave / Lower one octave / Off) runs a small "producer" decision (`autodecide.js octaveBrain`):
-- **Listens to the voice**: where it sits overall and per line (`pitchcorrect.js octaveProfile`).
-- **Listens to the beat**: where the sustained bass and chord body sit (`beatRegister`: median spectrum over ~45 s from the middle of the beat, folded into semitones). Genre and vibe (energy, space) come from the mix brain.
-- **Weighs evidence** (voice register, voice vs the beat's chords, voice on the bass line), nudged by genre (trap tolerates deep; pop/afrobeats want it forward) and vibe, scored from "too high" (-1) to "too low" (+1).
-- **Listens back**: tries the move on paper (scores again as if the voice already sat there) and only acts if that fixes the problem.
-- Acts automatically only on strong, agreeing evidence on a sung vocal (raise >= 0.62, lower >= 0.75 and stricter); otherwise it just suggests. A rap is never moved. It explains itself in the Tune note and in Autopilot's summary.
-- The move (`octaveRaise`, +/-12) is per line: lines already in the right register stay, each moved line keeps its own ups, downs and vibrato; unvoiced sounds pass through. Pitch correction runs after it.
-- Tests: `node tests/octave.test.js`. Known limits: tested on synthetic voices and beats only; the pitch tracker can make an octave error on a short isolated note; the beat thresholds are judgment calls, not tuned on a library of real songs; tone/timbre after the move needs ears. A formant-following variant was tried and removed (it measured worse).
+The Octave select (Auto / Raise one octave / Lower one octave / Off) is judged from THIS beat and THIS voice, not from fixed pitch numbers (`autodecide.js octaveBrain`):
+- **Beat** (`pitchcorrect.js beatRegister`): the sustained bass and chord body (median spectrum over ~45 s from the middle), the beat's own gap above its bass, and where its chords sit (quartiles). Vibe (energy, space) comes from the mix brain.
+- **Voice** (`octaveProfile`): the whole pitch distribution of the singing, per-line medians, and how much is steady held notes.
+- For the voice where it is, one octave up and one octave down, it works out how much of the singing is ON the bass, UNDER the chords or far OVER them, and picks the placement that leaves the least. A move must fix most of the problem and beat the doubt in the measurement (short take, hard-to-read beat, lowering = rarer = more proof). A hard/busy beat asks for less proof to raise; a sparse one more. Lines the singer already sang an octave apart count as the singer's own evidence.
+- Acts only on a sung vocal (unknown delivery needs more proof and some held notes); a rap is never moved; weaker evidence only suggests. Fixed numbers left: the physical limits of a lead vocal (C2..E6) and the relative weights of the three problems.
+- Per line: lines already in the right register stay; moved lines keep their ups, downs and vibrato; unvoiced sounds pass through; pitch correction runs after.
+
+## Key second opinion (Autopilot, Analyze step)
+A beat can be ambiguous between a major key and its relative minor (A major / F# minor: the same seven notes). `AutoDecide.keyDecision` lets the singer's melody (where phrases land and rest) vote, weighed against the beat's own tonic confidence. Never overrides a Beat Lab key, never acts if the melody's seven notes differ. Tuning is unaffected either way (same notes).
+
+## Other data-driven decisions
+- Tuning strength cap for unclear delivery scales with how sure the voice check is.
+- Tone guard brightness floor = the beat's own top-end level (not a fixed dB), boost cap scales with take quality.
+- Tests: `node tests/octave.test.js` (voice, beat, key and lowering), `node tests/tone.test.js`, `node tests/align.test.js`. Synthetic audio only; tone/timbre still needs ears.
+
+## Autopilot deck (Pipeline)
+- `js/apdeck.js` + `css/apdeck.css`: one full-screen card at a time; a finished card swipes off to the left, the next slides in from the right. The page underneath never scrolls while Autopilot drives (`window.VLNoAutoScroll` makes the step-reveal `scrollIntoView` calls a no-op for the five step sections).
+- After **Send mix to Pipeline** (Studio sets `window.__vlFromStudio` and fires `vl-sent-from-studio`) a card asks **Autopilot or Manual**. Manual closes the deck and starts nothing. Autopilot loads the audio, proposes an alignment, asks you to **confirm it** (nudge -100/-10/+10/+100 ms, hear it), then asks **which parts you want to do yourself** (Clean-up, Tune, Mix & master: Auto / Me).
+- A part set to "Me": the deck steps aside, the page goes to that step once, a small "Continue Autopilot" bar waits. If you ran the step yourself, your result is kept, not redone.
+- Direct uploads with the Autopilot switch on skip the first question (the switch is the choice) but still confirm the alignment and the parts.
+- Tested in a real browser at phone size (`/tmp`-style scripts, see tests/e2e/run.js for the existing flow, which now taps through the deck).
+
+## Corrections made in Studio carry to the Pipeline
+Studio keeps a corrected key/tempo ("Not right? Correct it") in its own beat info; the Pipeline used to re-detect both from the audio file it received. Now `sendToPipeline` (daw.js) puts what is exact (set by you, or told by the Beat Lab) into `window.VLKnownBeat` with a `fileKey` (name|size of the beat file), and `script.js knownBeatFor()` recognises the beat by that file. The Pipeline then shows "Set by you in Studio • exact", the Tune step uses it, and Autopilot does not second-guess it with the melody vote. Detected (not corrected) values are not carried: the Pipeline detects as before.
+
+## Melodic flow vs rap (Tune step)
+Found on a real Afrobeats cover: 194 of 219 notes were classed "speech-like" (each short note slides) and left exactly as sung, so only 64% of the vocal ended up in the beat's key. The per-note speech test (fixed wobble thresholds) cannot tell fast melodic flow from rap.
+- `pitchcorrect.js planCorrection` now judges each LINE (notes with no 0.35 s gap): how **pitched** it is (tracker certainty), how much of it is **held notes** (stays within 35 cents for 120 ms; a melody has them, a rap contour only glides: 0.48 on the real vocal, 0.42-0.75 on sung synthetics, 0.00 on three synthetic raps), and how much of it **clashes** with the key. Lift = melodic x clash; speech-like notes on a lifted line are tuned in proportion to it. Rap-like lines stay as performed.
+- Tune step: new switch "Tune melodic lines that clash with the beat" (on by default; `spokenAuto`), the status line now says why notes were left alone (close to the key already / rap-like / lifted), and a one-tap "Tune the N rap-like notes too". Autopilot's summary carries the same "Why".
+- Real vocal through the app: in the beat's key 59% -> 87%; melody's own key D# major -> A major (the beat's key); big pitch jumps 30 -> 25. Tests: `node tests/spoken.test.js`.
