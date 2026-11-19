@@ -81,3 +81,18 @@
 .eb-btn { min-width: 38px; justify-content: center; }
 #tr-phone, #tr-settings { min-width: 38px; min-height: 38px; }
 #studio-lane-type { min-height: 40px; }
+
+/* 9 ---- (v2.25.2) Studio editing toolbar: on a phone every icon gets its name underneath, so nothing is a guess */
+@media (max-width: 720px) {
+  .studio-editbar { gap: 0; padding: 4px 6px; }
+  .eb-btn { flex-direction: column; justify-content: center; gap: 3px; height: auto; min-height: 48px; min-width: 50px; padding: 5px 6px 4px; }
+  .eb-btn span { display: block; font-size: 10.5px; line-height: 1.1; font-weight: 600; letter-spacing: .01em; white-space: nowrap; color: var(--muted, #9a94b2); }
+  .eb-btn:hover:not(:disabled) span, .eb-btn:active:not(:disabled) span { color: var(--text, #fff); }
+  .eb-btn svg { width: 19px; height: 19px; }
+  .eb-sep { height: 30px; margin: 0 3px; }
+}
+
+/* 10 ---- (v2.25.2) the small round "i" help buttons: bigger, with a soft ring so they read as buttons (hit area stays larger still) */
+.info-tip-btn { width: 30px; height: 30px; margin: -4px 0; background: var(--accent-soft, rgba(124, 92, 252, .14)); color: var(--accent-hi, #9d86ff); }
+.info-tip-btn svg { width: 20px; height: 20px; }
+.info-tip-btn::after { inset: -7px; }

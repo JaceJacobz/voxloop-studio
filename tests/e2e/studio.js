@@ -1,23 +1,34 @@
-// Studio autopilot: load a beat, import a vocal, expect it to be produced by itself. node studio.js
-const { chromium } = require('/opt/npm-tools/node_modules/playwright'); const { execSync } = require('child_process');
+// Studio autopilot: load a beat, import a vocal, start the autopilot the way "Send mix to Pipeline" does, expect the take to be produced.
+// Needs the app served on :8080.  node studio.js   (works at phone width: it reaches Studio through the menu button)
+let chromium; try { ({ chromium } = require('/opt/npm-tools/node_modules/playwright')); } catch (e) { ({ chromium } = require('playwright')); }
+const { execSync } = require('child_process');
 const dir = '/tmp/e2e_sung_colour'; execSync(`node ${__dirname}/make-assets.js sung_colour ${dir}`);
 (async () => {
   const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--no-sandbox'] });
   const p = await b.newPage({ viewport: { width: 400, height: 900 } }); const errs = [];
   p.on('pageerror', e => errs.push('PAGEERROR ' + e.message)); p.on('console', m => { if (m.type() === 'error' && !/ERR_NAME_NOT_RESOLVED|Failed to load resource/.test(m.text())) errs.push('console.error ' + m.text().slice(0, 240)); });
   await p.goto('http://localhost:8080/index.html'); await p.waitForTimeout(1200);
-  await p.click('.mode-btn[data-mode="studio"]'); await p.waitForTimeout(500);
+  // On a phone the top-bar mode buttons are hidden; people reach a section through the menu button, so the test does the same.
+  const menu = await p.$('#nav-toggle');
+  if (menu && await menu.isVisible()) { await menu.click(); await p.waitForTimeout(300); await p.click('.nav-item[data-mode="studio"]'); }
+  else await p.click('.mode-btn[data-mode="studio"]');
+  await p.waitForTimeout(500);
   await p.setInputFiles('#studio-beat-input', dir + '/beat.wav'); await p.waitForTimeout(2500);
   const before = await p.evaluate(() => ({ lanes: VLDAW.lanes.length, beat: !!(VLDAW.beat && VLDAW.beat.buffer), ap: VLStudioAutopilot.on }));
   console.log('before', JSON.stringify(before));
   await p.evaluate(() => { const o = VLBrain.planProject; VLBrain.planProject = async function (...a) { const r = await o.apply(this, a); window.__plan = r.lanes.map(l => ({ findings: l.findings, extra: l.extra.map(z => z.label), chain: l.chain.map(c => c.type) })); return r; }; });
   await p.setInputFiles('#studio-import-input', dir + '/vocal.wav');
+  // The autopilot no longer starts by itself when a take appears; "Send mix to Pipeline" runs it once (daw.js awaits runNow()).
+  for (let i = 0; i < 20; i++) { if (await p.evaluate(() => VLDAW.lanes.some((l) => l.clips.some((c) => c.buffer)))) break; await p.waitForTimeout(500); }
+  await p.waitForTimeout(1500);
+  await p.evaluate(() => { window.__apRan = null; VLStudioAutopilot.runNow().then((r) => { window.__apRan = r; }); });
   let last = '';
   for (let i = 0; i < 12; i++) {
-    const st = await p.evaluate(() => { const c = []; VLDAW.lanes.forEach(l => l.clips.forEach(k => c.push({ lane: l.name || l.id, dur: +(k.duration || 0).toFixed(1), hist: (k.history || k.undo || []).length, label: (k.label || '') }))); const busy = document.getElementById('fx-plan-busy'); return { clips: c, busy: busy && !busy.hidden ? busy.textContent : '', status: (document.getElementById('studio-status') || {}).textContent }; });
+    const st = await p.evaluate(() => { const c = []; VLDAW.lanes.forEach(l => l.clips.forEach(k => c.push({ lane: l.name || l.id, dur: +(k.duration || 0).toFixed(1), hist: (k.history || k.undo || []).length, label: (k.label || '') }))); const busy = document.getElementById('fx-plan-busy'); return { clips: c, busy: busy && !busy.hidden ? busy.textContent : '', status: (document.getElementById('fx-status') || {}).textContent }; });
     const line = JSON.stringify({ busy: st.busy, status: st.status && st.status.slice(0, 90), hist: st.clips.map(c => c.hist) }); if (line !== last) { console.log(i * 2 + 's', line); last = line; }
-    if (/Auto-produce done/.test(st.status || '')) break; await p.waitForTimeout(2000);
+    if (/Auto-produce (done|stopped)/.test(st.status || '')) break; await p.waitForTimeout(2000);
   }
+  const ran = await p.evaluate(() => window.__apRan); console.log('autopilot ran:', ran);
   console.log('clip labels:', JSON.stringify(await p.evaluate(() => VLDAW.lanes.flatMap(l => l.clips.map(c => Object.entries(c).filter(([k, v]) => typeof v === 'string' && /Auto/.test(v)).map(([k, v]) => v.slice(0, 160)))))));
   console.log('PLAN', JSON.stringify(await p.evaluate(() => window.__plan), null, 1).slice(0, 2600));
   const done = await p.evaluate(() => { const d = document.querySelector('#fx-plan .fx-done'); return d ? d.textContent.trim().slice(0, 80) : null; });
@@ -35,5 +46,8 @@ const dir = '/tmp/e2e_sung_colour'; execSync(`node ${__dirname}/make-assets.js s
   if (btn) { await p.evaluate(() => { window.__st = []; const o = VLDAW.api.status; }); await btn.click(); await p.waitForTimeout(9000); console.log('status line:', await p.evaluate(() => [...document.querySelectorAll('[class*=status],[id*=status]')].map(e => e.id + '=' + e.textContent.trim().slice(0, 90)).filter(x => x.length > 12).join(' | '))); console.log('after per-plugin Auto:', JSON.stringify(await p.evaluate(() => [...document.querySelectorAll('#fx-chain .fx-card')].map(c => ({ name: c.querySelector('strong').textContent.trim(), off: c.classList.contains('is-bypassed'), why: (c.querySelector('.fx-why') || {}).textContent }))))); }
   console.log(JSON.stringify(await p.evaluate(() => ({ gate: !!VLFx.P.gate, harmony: !!VLFx.P.harmony, autoBtn: !!document.querySelector('.fx-aplug'), apToggle: !!document.getElementById('fx-ap') }))));
   console.log(errs.length ? errs.join('\n') : 'no page errors');
+  const pass = ran === true && !!done && /Done/.test(done) && !errs.length;
+  console.log(pass ? 'PASS: the take was produced by the autopilot, no page errors' : 'FAIL: autopilot ran=' + ran + ', result panel=' + done + ', errors=' + errs.length);
+  process.exitCode = pass ? 0 : 1;
   await p.screenshot({ path: '/tmp/e2e_studio.png' }); await b.close();
 })();

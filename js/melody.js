@@ -163,7 +163,7 @@
     //   fill     a small figure in the SHORT gaps, only where the beat itself is quiet in the mids
     //   sparkle  a high chime on the landing note of a phrase that ends a verse or chorus
     //   support  (optional) a soft double / harmony of long sung notes in the loudest lines
-    // Who plays each job depends on the beat (S.palette): the beat's own lead, pluck, bell and keys, or the built-in trumpet.
+    // Who plays each job depends on the beat (S.palette): the beat's own lead, pluck, bell and keys, or the recorded trumpet.
     // opts: { amount: "subtle"|"normal"|"lots", answer: bool, support: "off"|"double"|"harmony", seed }
     const REG = { trumpet: { off: 7, lo: 55, hi: 84 }, lead: { off: 7, lo: 58, hi: 86 }, pluck: { off: 9, lo: 60, hi: 88 }, bell: { off: 19, lo: 72, hi: 96 }, keys: { off: 2, lo: 50, hi: 79 } };
 
@@ -337,8 +337,7 @@
             const idx = start + i; if (idx >= out.length) break;
             const t = i / sr;
             let a = t < att ? t / att : 1;
-            if (t > nt.dur) a *= Math.max(0, 1 - (t - nt.dur) / 0.1);
-            if (a <= 0) break;
+            if (t > nt.dur) { a *= Math.max(0, 1 - (t - nt.dur) / 0.1); if (a <= 0) break; }      // stop when the note has faded out (not at the first sample, where the attack starts at 0)
             if (pos >= loopB) pos = loopA + (pos - loopB);                                    // hold a long note on the steady middle
             const k = Math.floor(pos), fr = pos - k;
             if (k + 1 >= data.length) break;
@@ -394,7 +393,7 @@
         Tone.setContext(offline);
         try {
             const E = createEngine({ live: false, reverbDecay: template.fx.reverb.decay });
-            try { if (typeof ensureBeatSound === "function") await ensureBeatSound(plan.sound); } catch (err) { /* the synth plays instead */ }
+            try { if (typeof ensureBeatSound === "function") await ensureBeatSound(plan.sound); } catch (err) { /* the beat's instruments are then not played (the recorded trumpet still is) */ }
             E.applySound(plan.sound);
             E.applyFx(template.fx, S.bpm);
             const tmpl = (typeof TEMPLATES !== "undefined" && TEMPLATES[plan.genre]) || { mix: {}, pan: {} };
@@ -419,13 +418,24 @@
         } finally { Tone.setContext(original); }
     }
 
+    // Load the recorded trumpet (and only that): every note of samples/instruments/trumpet. Resolves true if there is something to play.
+    async function ensureTrumpet() {
+        try {
+            if (typeof instrumentInfo !== "function" || typeof loadInstrumentNote !== "function") return false;
+            const info = instrumentInfo("trumpet"); if (!info) return false;
+            if (typeof INSTRUMENT_USED !== "undefined") INSTRUMENT_USED.trumpet = Date.now();          // the memory guard frees the least recently used first
+            await Promise.all(info.notes.map((n) => loadInstrumentNote("trumpet", n)));
+        } catch (err) { /* handled below: no recordings, no trumpet */ }
+        return typeof instrumentSet === "function" && !!instrumentSet("trumpet");
+    }
+
     async function renderAndMix(S, written, opts, report) {
         const sr = S.sr, N = Math.ceil(S.duration * sr), lead = new Float32Array(N), sup = new Float32Array(N);
         const trumpetNotes = written.notes.filter((n) => n.inst === "trumpet"), engineNotes = written.notes.filter((n) => n.inst !== "trumpet");
-        try { if (typeof ensureInstruments === "function") await ensureInstruments({ lead: "s-trumpet" }); } catch (err) { /* no trumpet notes then */ }
+        if (trumpetNotes.length) await ensureTrumpet();
         for (const n of trumpetNotes) { renderTrumpet(n.role === "support" ? sup : lead, sr, n, { muted: n.role === "support", voices: n.role === "support" ? 2 : 3 }); await Y(); }
         if (report.stage) report.stage(0.6, engineNotes.length ? "Playing the beat's instruments…" : "Mixing the melody under your voice…");
-        // the beat's own instruments (if the engine is not there, the same notes are played by the built-in muted trumpet)
+        // the beat's own instruments (if the engine is not there, the same notes are played by the recorded trumpet, muted)
         let eng = null;
         if (engineNotes.length) {
             try { eng = await renderEngineStem(engineNotes, S.plan, S); } catch (e) { console.warn("engine stem", e); eng = null; }
@@ -512,7 +522,7 @@
         universal: { answer: ["trumpet"], support: "trumpet", why: "a trumpet answers you, small plucked fills appear where the beat has room" }
     };
     function buildPlan(beat, info, bpm, seed, mode) {
-        const trumpetOnly = { genre: "afrobeats", styleId: null, sound: null, engine: false, source: "the built-in trumpet", palette: { answer: ["trumpet"], support: "trumpet", fill: false, sparkle: false } };
+        const trumpetOnly = { genre: "afrobeats", styleId: null, sound: null, engine: false, source: "the recorded trumpet", palette: { answer: ["trumpet"], support: "trumpet", fill: false, sparkle: false } };
         if (mode === "trumpet" || typeof createEngine !== "function" || typeof Tone === "undefined" || typeof resolveTemplate !== "function") return trumpetOnly;
         let genre, styleId = null, sound, source, rolesKey;
         if (beat.engine && beat.engine.sound && beat.engine.genre) {
@@ -600,6 +610,7 @@
         const mixRep = {};
         mixRep.stage = stage;
         const mixed = await renderAndMix(S, written, opts, mixRep);
+        if (!(mixRep.melodyDb > -80)) return { ok: false, text: "The instrument recordings could not be loaded, so there is nothing to play yet. Check your connection and try again." };   // never report a melody that makes no sound
         const ctx = A.ensureCtx(), buf = ctx.createBuffer(2, N, sr);
         buf.copyToChannel(mixed.L, 0); buf.copyToChannel(mixed.R, 1);
 
@@ -712,7 +723,7 @@
             (m ? '<button type="button" class="bp-mini" data-ml-act="regen">Regenerate</button><button type="button" class="bp-mini" data-ml-act="toggle">' + (m.on ? "Hide" : "Show") + '</button><button type="button" class="bp-mini" data-ml-act="remove">Remove</button>' : "") +
             (previous !== null && (previous || m) ? '<button type="button" class="bp-mini" data-ml-act="undo">Undo</button>' : "") + "</div>" +
             (note ? '<p class="ml-note">' + note + "</p>" : "") +
-            (rp ? '<ul class="ml-report"><li>' + rp.key + "</li><li>" + describe(rp) + "</li><li>" + (rp.sounds ? "Sounds: " + rp.sounds + (rp.why ? ": " + rp.why + "." : ".") : "Sounds: the built-in trumpet.") + (rp.fallback ? " (The beat's instruments were not available here, so a muted trumpet played those lines.)" : "") + "</li><li>Mix: about " + Math.round(rp.voiceDb - rp.melodyDb) + " dB under your voice, in a pocket at 2.5 kHz, lowered while you sing" + (rp.mix && rp.mix.length > 1 ? "; " + rp.mix.slice(1).join("; ") : "") + ".</li></ul>" : (w.why ? '<p class="ml-note">' + w.why + "</p>" : ""));
+            (rp ? '<ul class="ml-report"><li>' + rp.key + "</li><li>" + describe(rp) + "</li><li>" + (rp.sounds ? "Sounds: " + rp.sounds + (rp.why ? ": " + rp.why + "." : ".") : "Sounds: the recorded trumpet.") + (rp.fallback ? " (The beat's instruments were not available here, so a muted trumpet played those lines.)" : "") + "</li><li>Mix: about " + Math.round(rp.voiceDb - rp.melodyDb) + " dB under your voice, in a pocket at 2.5 kHz, lowered while you sing" + (rp.mix && rp.mix.length > 1 ? "; " + rp.mix.slice(1).join("; ") : "") + ".</li></ul>" : (w.why ? '<p class="ml-note">' + w.why + "</p>" : ""));
         sheet.querySelectorAll("[data-ml]").forEach((b) => b.addEventListener("click", () => { const k = b.dataset.ml; ui[k] = k === "answer" ? b.dataset.v === "true" : b.dataset.v; paint(); }));
         sheet.querySelectorAll("[data-ml-act]").forEach((b) => b.addEventListener("click", () => ({ add, regen: regenerate, toggle, remove, undo }[b.dataset.mlAct]())));
         const au = sheet.querySelector("#ml-auto"); if (au) au.addEventListener("change", () => { settings().set("autoMelody", au.checked); suppressed = false; });
