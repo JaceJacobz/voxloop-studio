@@ -7,7 +7,7 @@
  *   2. WRITE    "Answer": a short trumpet reply in the gaps between sung lines, built from the shape of the line just sung,
  *               using only notes of the key and landing on a note of the chord that is playing.
  *               "Support" (optional): a soft trumpet that doubles (octave above) or harmonises long sung notes.
- *   3. PLAY     a trumpet voice built here (no samples): scoop into the note, brass bloom, late vibrato, a little breath.
+ *   3. PLAY     a recorded trumpet (samples/instruments/trumpet), re-pitched to each note.
  *   4. MIX      carved a pocket at 2.5 kHz for the voice, lowered under singing, levelled against the beat AND the vocal,
  *               checked against the vocal at the end (VLMelody.report says what was done).
  *
@@ -315,55 +315,35 @@
     }
 
     // ---------------------------------------------------------------- 3. PLAY: the trumpet
-    // wavetables: harmonic series with a slope that gets brighter as the note is pushed (brass); built once and reused
-    const tables = {};
-    function table(slopeIdx, maxH) {
-        const key = slopeIdx + ":" + maxH;
-        if (tables[key]) return tables[key];
-        const N = 2048, t = new Float32Array(N), slope = 2.3 - slopeIdx * 0.32;           // idx 0 = mellow, 5 = blaring
-        for (let h = 1; h <= maxH; h++) {
-            const a = Math.pow(h, -slope) * (h === 2 ? 1.25 : h === 3 ? 1.1 : 1);             // trumpets are strong in 2nd and 3rd harmonics
-            for (let i = 0; i < N; i++) t[i] += a * Math.sin(2 * Math.PI * h * i / N);
-        }
-        let pk = 0; for (let i = 0; i < N; i++) pk = Math.max(pk, Math.abs(t[i]));
-        for (let i = 0; i < N; i++) t[i] /= pk;
-        return (tables[key] = t);
-    }
-
+    // A real recorded trumpet (samples/instruments/trumpet), a note every few semitones, re-pitched to the written note.
+    // Nothing is synthesized: if the recordings could not be loaded, the trumpet notes are simply not played.
     function renderTrumpet(out, sr, nt, opts) {
-        const f0 = midiHz(nt.midi), maxH = Math.max(2, Math.min(22, Math.floor(0.42 * sr / f0)));
+        const set = typeof instrumentSet === "function" ? instrumentSet("trumpet") : null;
+        if (!set) return;
+        const lo = set.notes[0], hi = set.notes[set.notes.length - 1];
+        let midi = nt.midi;
+        while (midi < lo - 4) midi += 12;
+        while (midi > hi + 5) midi -= 12;
+        let root = set.notes[0];
+        set.notes.forEach((n) => { if (Math.abs(n - midi) < Math.abs(root - midi)) root = n; });
+        const buf = set.buffers[root], data = buf.getChannelData(0);
+        const step = Math.pow(2, (midi - root) / 12) * buf.sampleRate / sr;                 // source samples per output sample
         const total = Math.ceil((nt.dur + 0.12) * sr), start = Math.floor(nt.t * sr);
         const muted = !!opts.muted, vel = nt.vel, att = muted ? 0.05 : 0.03 + (1 - vel) * 0.03;
-        const detune = [0, 0.0017, -0.0021];                       // two or three players in unison: a little thickness
-        const voices = opts.voices || 2;
-        const R = rng(Math.floor(nt.t * 1000) + nt.midi);
-        let ph = [R(), R(), R()], vib = 0, noiseState = 0;
-        const phase0 = R() * 2 * Math.PI;
+        const gain = (0.35 + 0.65 * vel) * 4 * (muted ? 0.8 : 1);                           // the recordings are quiet: lifted to the old level
+        const loopA = data.length * 0.4, loopB = data.length * 0.92;
+        let pos = 0;
         for (let i = 0; i < total; i++) {
             const idx = start + i; if (idx >= out.length) break;
             const t = i / sr;
-            // amplitude: soft attack, small dip to the sustain, release after the written length
-            let a = t < att ? t / att : 1 + 0.16 * Math.exp(-(t - att) / 0.1);                 // a little bloom, then it settles
+            let a = t < att ? t / att : 1;
             if (t > nt.dur) a *= Math.max(0, 1 - (t - nt.dur) / 0.1);
-            if (a <= 0) continue;
-            // brightness blooms after the attack and follows the loudness
-            const bright = clamp((muted ? 0.8 : 1) * (vel * 4.2) * (1 - Math.exp(-t / 0.06)) + 0.3, 0, 4.99);
-            const si = Math.floor(bright), sf = bright - si, tA = table(si, maxH), tB = table(Math.min(5, si + 1), maxH);
-            // pitch: scoop up from 35 cents flat in 45 ms, vibrato fades in after 0.2 s
-            const scoop = t < 0.045 ? -0.35 * (1 - t / 0.045) * (1 - t / 0.045) : 0;
-            vib = Math.sin(2 * Math.PI * 5.3 * t + phase0) * 0.14 * clamp((t - 0.2) / 0.25, 0, 1);
-            const f = f0 * Math.pow(2, (scoop + vib) / 12);
-            let s = 0;
-            for (let v = 0; v < voices; v++) {
-                ph[v] += f * (1 + detune[v]) / sr; ph[v] -= Math.floor(ph[v]);
-                const p = ph[v] * 2048, k = Math.floor(p) & 2047, fr = p - Math.floor(p);
-                const x0 = tA[k] + (tA[(k + 1) & 2047] - tA[k]) * fr, x1 = tB[k] + (tB[(k + 1) & 2047] - tB[k]) * fr;
-                s += x0 + (x1 - x0) * sf;
-            }
-            s /= voices;
-            // breath / tongue: a short band of noise at the start
-            if (t < 0.03) { noiseState = 0.7 * noiseState + 0.3 * (R() * 2 - 1); s += noiseState * 0.35 * (1 - t / 0.03); }
-            out[idx] += s * a * (0.35 + 0.65 * vel) * (muted ? 0.8 : 1);
+            if (a <= 0) break;
+            if (pos >= loopB) pos = loopA + (pos - loopB);                                    // hold a long note on the steady middle
+            const k = Math.floor(pos), fr = pos - k;
+            if (k + 1 >= data.length) break;
+            out[idx] += (data[k] + (data[k + 1] - data[k]) * fr) * a * gain;
+            pos += step;
         }
     }
 
@@ -414,6 +394,7 @@
         Tone.setContext(offline);
         try {
             const E = createEngine({ live: false, reverbDecay: template.fx.reverb.decay });
+            try { if (typeof ensureBeatSound === "function") await ensureBeatSound(plan.sound); } catch (err) { /* the synth plays instead */ }
             E.applySound(plan.sound);
             E.applyFx(template.fx, S.bpm);
             const tmpl = (typeof TEMPLATES !== "undefined" && TEMPLATES[plan.genre]) || { mix: {}, pan: {} };
@@ -426,7 +407,7 @@
             E.setMastering(false, true);
             try { await E.reverb.ready; } catch (err) { /* older Tone */ }
             await new Promise((r) => setTimeout(r, 120));
-            const inst = { lead: E.instruments.lead, pluck: E.instruments.pluck, bell: E.instruments.bell, keys: E.instruments.chords };
+            const inst = { lead: E.instruments.lead, pluck: E.instruments.pluck, bell: E.instruments.pluck, keys: E.instruments.chords };
             const nm = (m) => Tone.Frequency(m, "midi").toNote();
             notes.forEach((n) => {
                 const ins = inst[n.inst]; if (!ins) return;
@@ -441,6 +422,7 @@
     async function renderAndMix(S, written, opts, report) {
         const sr = S.sr, N = Math.ceil(S.duration * sr), lead = new Float32Array(N), sup = new Float32Array(N);
         const trumpetNotes = written.notes.filter((n) => n.inst === "trumpet"), engineNotes = written.notes.filter((n) => n.inst !== "trumpet");
+        try { if (typeof ensureInstruments === "function") await ensureInstruments({ lead: "s-trumpet" }); } catch (err) { /* no trumpet notes then */ }
         for (const n of trumpetNotes) { renderTrumpet(n.role === "support" ? sup : lead, sr, n, { muted: n.role === "support", voices: n.role === "support" ? 2 : 3 }); await Y(); }
         if (report.stage) report.stage(0.6, engineNotes.length ? "Playing the beat's instruments…" : "Mixing the melody under your voice…");
         // the beat's own instruments (if the engine is not there, the same notes are played by the built-in muted trumpet)
@@ -526,6 +508,7 @@
         amapiano:  { answer: ["keys", "lead"], support: "keys", why: "keys and the lead answer you, small plucked fills appear where the beat has room" },
         afrohouse: { answer: ["lead", "pluck"], support: "keys", why: "the lead and plucks answer you" },
         rnb:       { answer: ["keys", "lead"], support: "keys", why: "soft keys and the lead answer you, small plucked fills appear where the beat has room" },
+        trap:      { answer: ["lead", "pluck"], support: "keys", why: "the lead and plucks answer you, small fills appear where the beat has room" },
         universal: { answer: ["trumpet"], support: "trumpet", why: "a trumpet answers you, small plucked fills appear where the beat has room" }
     };
     function buildPlan(beat, info, bpm, seed, mode) {
@@ -537,24 +520,23 @@
             source = "the beat's own sounds"; rolesKey = ROLES[genre] ? genre : "universal";
         } else {
             const gid = info && info.genreId;
-            genre = gid === "amapiano" ? "amapiano" : gid === "rnb" ? "rnb" : gid === "afrobeats" ? "afrobeats" : (bpm < 90 ? "rnb" : bpm >= 120 ? "afrohouse" : bpm >= 108 ? "amapiano" : "afrobeats");
-            rolesKey = gid === "afrobeats" || gid === "amapiano" || gid === "rnb" ? gid : (!gid || gid === "universal" ? genre : "universal");   // a style we have no pack of (trap, rap) gets the neutral set
+            genre = gid === "trap" ? "trap" : gid === "amapiano" ? "amapiano" : gid === "rnb" ? "rnb" : gid === "afrobeats" ? "afrobeats" : (bpm < 90 ? "rnb" : bpm >= 120 ? "afrohouse" : bpm >= 108 ? "amapiano" : "afrobeats");
+            rolesKey = gid === "afrobeats" || gid === "amapiano" || gid === "rnb" || gid === "trap" ? gid : (!gid || gid === "universal" ? genre : "universal");   // a style we have no pack of (trap, rap) gets the neutral set
             try {
                 const tpl = resolveTemplate(genre, null); styleId = tpl.styleId;
-                const packs = typeof packsFor === "function" ? packsFor(genre, styleId) : [];
-                const pack = packs.length ? packs[(seed - 1 + packs.length * 4) % packs.length] : null;
-                sound = pack ? packParts(pack) : null;
-                source = pack ? "matched to the beat: the “" + pack.name + "” sounds (" + (gid && gid !== "universal" ? "it sounds like " + gid : "chosen from its tempo") + ")" : "";
+                const sc = (beat.key && beat.key.scale) || (info && info.key && info.key.scale) || "minor";
+                const made = typeof producerPick === "function" ? producerPick({ genre, style: styleId, styleName: tpl.styleName, scale: /maj/i.test(sc) ? "major" : "minor", bpm }) : null;
+                sound = made ? made.sound : null;
+                source = made ? "chosen by the producer for this beat: " + made.note : "";
             } catch (e) { sound = null; }
         }
         if (!sound) return trumpetOnly;
-        sound.bellKind = "bell";                                                   // the chime has to be a pitched bell
         const roles = ROLES[rolesKey] || ROLES.universal;
         const answer = roles.answer.slice();
         if (mode === "lots-brass" && answer.indexOf("trumpet") < 0) answer.push("trumpet");
         return { genre, styleId, sound, engine: true, source, rolesKey, palette: { answer, support: roles.support, fill: true, sparkle: true, why: roles.why } };
     }
-    const GROOVE_SWING = { rnb: 0.3, afrobeats: 0.12, amapiano: 0.1, afrohouse: 0.05, universal: 0.1 };
+    const GROOVE_SWING = { rnb: 0.3, trap: 0.05, afrobeats: 0.12, amapiano: 0.1, afrohouse: 0.05, universal: 0.1 };
 
     // How busy is the beat in the mids (400 Hz - 4 kHz), 100 ms at a time? A line is only added where the beat is not already busy.
     function beatActivity(beatMono, sr) {

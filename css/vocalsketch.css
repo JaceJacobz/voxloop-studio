@@ -1,0 +1,78 @@
+/* Vocal Sketch (v2.14.0) - a small timeline editor in the Beat Lab "Sketch" tab */
+.vocalsketch { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.vocalsketch .vs-sub { display: block; font-size: .8rem; font-weight: 400; color: var(--muted, #9a94b2); margin-top: 2px; }
+.vocalsketch .vs-steps { margin: 0; padding-left: 1.2rem; font-size: .82rem; color: var(--text-2, #c6c2d8); line-height: 1.5; }
+.vocalsketch .vs-card { border: 1px solid var(--line, #2b2640); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--surface-2, #1f1b2b); min-width: 0; }
+.vocalsketch .vs-card[hidden] { display: none; }
+.vocalsketch .vs-h { font-weight: 700; font-size: .95rem; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vocalsketch .vs-note { margin: 0; font-size: .82rem; color: var(--text-2, #c6c2d8); line-height: 1.4; }
+.vocalsketch .vs-row { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: flex-end; }
+.vocalsketch .vs-field { display: flex; flex-direction: column; gap: 4px; font-size: .75rem; color: var(--muted, #9a94b2); min-width: 0; }
+.vocalsketch .vs-grow { flex: 1 1 140px; }
+.vocalsketch .vs-field select, .vocalsketch .vs-field input[type=number] { min-height: 42px; }
+.vocalsketch .vs-check { display: flex; gap: 8px; align-items: center; font-size: .85rem; }
+.vocalsketch .vs-check input { width: 20px; height: 20px; flex: none; }
+.vocalsketch .vs-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line-strong, #3d3659); background: var(--surface-3, #292439); color: var(--text, #f1eff8); font: 600 .88rem/1 var(--font, system-ui, sans-serif); cursor: pointer; position: relative; overflow: hidden; }
+.vocalsketch .vs-btn:disabled { opacity: .45; cursor: default; }
+.vocalsketch .vs-primary { background: var(--accent-strong, #6a48f0); border-color: transparent; color: #fff; }
+.vocalsketch .vs-primary.is-on { background: var(--surface-3, #292439); box-shadow: inset 0 0 0 2px var(--accent, #7c5cfc); }
+.vocalsketch .vs-big { width: 100%; min-height: 52px; font-size: 1rem; }
+.vocalsketch .vs-rec { background: var(--rec, #ff5468); border-color: transparent; color: #fff; }
+.vocalsketch .vs-rec.is-recording { animation: vsPulse 1.1s ease-in-out infinite; }
+@keyframes vsPulse { 50% { opacity: .65; } }
+.vocalsketch .vs-file-btn input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 100px; }
+.vocalsketch .vs-stepper { display: inline-flex; align-items: center; border: 1px solid var(--line-strong, #3d3659); border-radius: 12px; overflow: hidden; background: var(--surface-3, #292439); }
+.vocalsketch .vs-stepper button { width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--text, #f1eff8); font-size: 1.3rem; cursor: pointer; }
+.vocalsketch .vs-stepper input { width: 58px; min-height: 44px; border: 0; border-inline: 1px solid var(--line, #2b2640); text-align: center; font-weight: 700; background: transparent; color: var(--text, #f1eff8); -moz-appearance: textfield; }
+.vocalsketch .vs-stepper input::-webkit-outer-spin-button, .vocalsketch .vs-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vocalsketch .vs-stepper button:disabled, .vocalsketch .vs-stepper input:disabled { opacity: .45; }
+.vocalsketch .vs-unit { padding: 0 10px; font-size: .75rem; color: var(--muted, #9a94b2); }
+.vocalsketch .vs-dots { display: flex; gap: 8px; }
+.vocalsketch .vs-dots i { width: 16px; height: 16px; border-radius: 50%; background: var(--surface-3, #292439); border: 1px solid var(--line-strong, #3d3659); }
+.vocalsketch .vs-dots i.is-on { background: var(--accent, #7c5cfc); box-shadow: 0 0 10px var(--accent, #7c5cfc); }
+.vocalsketch .vs-seg { display: inline-flex; border: 1px solid var(--line-strong, #3d3659); border-radius: 12px; overflow: hidden; }
+.vocalsketch .vs-seg button { min-height: 42px; padding: 0 16px; border: 0; background: transparent; color: var(--text-2, #c6c2d8); font: 600 .85rem/1 var(--font, system-ui, sans-serif); cursor: pointer; }
+.vocalsketch .vs-seg button.is-on { background: var(--accent-strong, #6a48f0); color: #fff; }
+.vocalsketch .vs-more summary { cursor: pointer; font-size: .82rem; color: var(--text-2, #c6c2d8); padding: 4px 0; }
+.vocalsketch .vs-more[open] summary { margin-bottom: 8px; }
+.vocalsketch .vs-meter { height: 8px; border-radius: 4px; background: var(--surface-3, #292439); overflow: hidden; }
+.vocalsketch .vs-meter[hidden] { display: none; }
+.vocalsketch .vs-meter i { display: block; height: 100%; width: 0; background: var(--ok, #4fd8a0); transition: width .08s linear; }
+.vocalsketch .vs-status { min-height: 1.3em; font-size: .86rem; line-height: 1.4; }
+.vocalsketch .vs-status.is-bad { color: var(--rec, #ff5468); }
+.vocalsketch .vs-zoom { display: inline-flex; gap: 4px; }
+.vocalsketch .vs-zoom button { min-width: 38px; min-height: 34px; border-radius: 9px; border: 1px solid var(--line-strong, #3d3659); background: var(--surface-3, #292439); color: var(--text, #f1eff8); cursor: pointer; }
+.vocalsketch .vs-tlwrap { overflow-x: auto; overflow-y: hidden; border-radius: 10px; background: var(--bg-deep, #0c0b11); border: 1px solid var(--line, #2b2640); -webkit-overflow-scrolling: touch; }
+.vocalsketch .vs-tl { position: relative; padding-bottom: 6px; }
+.vocalsketch .vs-empty { margin: 0; padding: 14px; font-size: .85rem; color: var(--muted, #9a94b2); }
+.vocalsketch .vs-ruler { position: relative; height: 24px; border-bottom: 1px solid var(--line, #2b2640); touch-action: pan-y; cursor: grab; }
+.vocalsketch .vs-ruler span { position: absolute; top: 4px; font-size: .7rem; color: var(--muted, #9a94b2); padding-left: 4px; pointer-events: none; }
+.vocalsketch .vs-take { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-bottom: 1px solid var(--line, #2b2640); }
+.vocalsketch .vs-take-head, .vocalsketch .vs-take-foot { position: sticky; left: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 8px; box-sizing: border-box; }
+.vocalsketch .vs-take-head select { min-height: 36px; font-size: .8rem; max-width: 40%; }
+.vocalsketch .vs-info { font-size: .74rem; color: var(--muted, #9a94b2); }
+.vocalsketch .vs-lane { display: block; touch-action: pan-y; cursor: ew-resize; user-select: none; -webkit-user-select: none; }
+.vocalsketch .vs-lane.is-drag { cursor: grabbing; }
+.vocalsketch .vs-chip { min-height: 38px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-strong, #3d3659); background: var(--surface-3, #292439); color: var(--text, #f1eff8); font: 600 .78rem/1 var(--font, system-ui, sans-serif); cursor: pointer; }
+.vocalsketch .vs-chip:disabled { opacity: .4; }
+.vocalsketch .vs-shift { font-size: .74rem; color: var(--accent-hi, #a894ff); min-width: 4.5em; }
+.vocalsketch .vs-ph { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ok, #4fd8a0); pointer-events: none; box-shadow: 0 0 8px var(--ok, #4fd8a0); }
+.vocalsketch .vs-keychoices { display: flex; flex-wrap: wrap; gap: 8px; }
+.vocalsketch .vs-keychoice { display: inline-flex; }
+.vocalsketch .vs-keychoice input { position: absolute; opacity: 0; pointer-events: none; }
+.vocalsketch .vs-keychoice span { min-height: 40px; display: inline-flex; align-items: center; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-strong, #3d3659); background: var(--surface-3, #292439); font-size: .85rem; cursor: pointer; }
+.vocalsketch .vs-keychoice input:checked + span { background: var(--accent-strong, #6a48f0); border-color: transparent; color: #fff; }
+.vocalsketch .vs-import-row { position: sticky; left: 0; width: 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding-top: 4px; }
+.vocalsketch .vs-import-row select { min-height: 38px; font-size: .8rem; }
+.vocalsketch .vs-bartools { display: inline-flex; gap: 6px; }
+
+.vs-hear{background:var(--vs-soft,rgba(120,120,160,.12));border-radius:10px;padding:8px 12px;margin-bottom:10px}
+.vs-hear .vs-note{margin:4px 0 0}
+
+.vs-tappad{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px;width:100%}
+.vs-tapbtn{flex:1 1 160px;min-height:84px;border-radius:16px;border:0;font-size:22px;font-weight:700;letter-spacing:.1em;background:var(--vs-accent,#6d5dfc);color:#fff;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.vs-tapbtn:active{transform:scale(.97);filter:brightness(1.15)}
+.vs-tapcount{min-width:64px;font-variant-numeric:tabular-nums}
+.vs-tappad[hidden]{display:none}
+.vocalsketch .vs-stepper input#vs-nudgeval { width: 88px; font-size: .85rem; }
+.vocalsketch #vs-mixcard .vs-row { align-items: flex-end; }

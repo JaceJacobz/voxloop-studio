@@ -1,0 +1,27 @@
+/* Beat Lab tabs + transport bar (v2.14.0) */
+.beatlab-layout .blux-hidden { display: none !important; }
+.beatlab-hero { display: none !important; }                       /* the title is in the top bar; its buttons moved to the bar below */
+.blux-tabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 40; display: flex; gap: 4px; padding: 6px; margin: 0 0 4px; background: var(--bg-deep, #0c0b11); border: 1px solid var(--line, #2b2640); border-radius: 14px; }
+.blux-tab { flex: 1 1 0; min-width: 0; min-height: 42px; padding: 0 6px; border: 0; border-radius: 10px; background: transparent; color: var(--text-2, #c6c2d8); font: 600 13px/1.1 var(--font, system-ui, sans-serif); cursor: pointer; }
+.blux-tab.is-on { background: var(--accent-strong, #6a48f0); color: #fff; }
+.blux-dock { position: sticky; bottom: 0; z-index: 50; margin-top: 8px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--surface, #181521); border: 1px solid var(--line-strong, #3d3659); border-radius: 16px; box-shadow: 0 -8px 24px rgba(0, 0, 0, .45); display: flex; flex-direction: column; gap: 6px; }
+.blux-now { min-height: 1.2em; font-size: 12px; line-height: 1.3; color: var(--text-2, #c6c2d8); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.blux-btns { display: flex; gap: 6px; align-items: stretch; }
+.blux-slot { display: flex; }
+.blux-grow { flex: 1 1 0; min-width: 0; }
+.blux-btns .blux-slot > button { width: 100%; min-height: 46px; padding: 0 8px; font-size: 13px; white-space: nowrap; }
+.blux-play { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 104px; min-height: 46px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--accent-strong, #6a48f0); color: #fff; font: 700 14px/1 var(--font, system-ui, sans-serif); cursor: pointer; }
+.blux-play.is-on { background: var(--surface-3, #292439); box-shadow: inset 0 0 0 2px var(--accent, #7c5cfc); }
+.blux-icon { display: inline-flex; align-items: center; justify-content: center; min-width: 46px; min-height: 46px; padding: 0; border-radius: 12px; border: 1px solid var(--line-strong, #3d3659); background: var(--surface-2, #1f1b2b); color: var(--text, #f1eff8); cursor: pointer; }
+.blux-icon:disabled { opacity: .4; cursor: default; }
+.blux-btns .blux-slot > .blux-icon { width: 46px; }
+@media (min-width: 900px) { .blux-dock { max-width: 760px; margin-inline: auto; width: 100%; } }
+.blux-adv { border: 1px solid var(--line, #2b2640); border-radius: 14px; background: var(--surface, #181521); }
+.blux-adv > summary { list-style: none; cursor: pointer; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.blux-adv > summary::-webkit-details-marker { display: none; }
+.blux-adv-title { font-weight: 700; font-size: 1rem; }
+.blux-adv-title::after { content: "  ▾"; opacity: .6; }
+.blux-adv[open] .blux-adv-title::after { content: "  ▴"; }
+.blux-adv-hint { font-size: .8rem; line-height: 1.4; color: var(--text-2, #c6c2d8); }
+.blux-adv > .panel-card { border: 0; border-top: 1px solid var(--line, #2b2640); border-radius: 0 0 14px 14px; }
+.blux-intro { margin: 0; padding: 4px 6px; font-size: .85rem; line-height: 1.45; color: var(--text-2, #c6c2d8); }

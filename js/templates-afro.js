@@ -3,7 +3,7 @@
 //
 // Loaded right after templates.js. It adds styles to Afrobeats and two new genres
 // (Amapiano, Afro House). Every style has its OWN:
-//   - drum kit and percussion instruments (afro warm, amapiano soft, 808 dembow, live highlife kit, 909, gqom...)
+//   - drum and percussion recordings (chosen per genre, see samplebank.js)
 //   - rhythm DNA (3-3-2 tresillo, dembow, four-on-the-floor, 3-2 clave, offbeat open hats...)
 //   - written bass / log-drum riffs that follow the chords (see RIFF)
 //   - "B" bars (kickB, percB, ...): the answer to the first bar of every two-bar phrase
@@ -27,14 +27,14 @@
   // 1. Afrobeats: richer sounds and written bass lines for the two original styles
   // ===================================================================
   A.styles.smooth.sound = {
-    kit: ["afro", "soft", "highlife", "vintage"], chords: ["rhodes", "guitar", "darkKeys", "rhodes"], pad: ["warm", "airy", "strings"],
+    chords: ["rhodes", "guitar", "darkKeys", "rhodes"], pad: ["warm", "airy", "strings"],
     bass: ["pluckSub", "softSub", "sub808"], lead: ["glass", "vibes", "kalimba", "flute"], pluck: ["afroGuitar", "nylon", "kalimba", "bellPluck"],
-    perc: ["conga", "bongo"], bellKind: ["agogo", "clave", "bell"], shaker: ["shaker", "shekere"], log: ["classic"]
+    log: ["classic"]
   };
   A.styles.afropop.sound = {
-    kit: ["afro", "punch", "dembow"], chords: ["rhodes", "wurli", "stab"], pad: ["warm", "airy"], bass: ["sub808", "pluckSub"],
+    chords: ["rhodes", "wurli", "stab"], pad: ["warm", "airy"], bass: ["sub808", "pluckSub"],
     lead: ["glass", "vibes", "kalimba", "whistle"], pluck: ["kalimba", "bellPluck", "kora", "marimba", "afroGuitar"],
-    perc: ["conga", "bongo", "djembe"], bellKind: ["agogo", "cowbell", "bell"], shaker: ["caxixi", "tambourine", "shaker"], log: ["classic"]
+    log: ["classic"]
   };
   // Bass lines that sit with the 3-3-2 count and follow the chords
   A.styles.smooth.riffs = { bass: [
@@ -46,7 +46,7 @@
     RIFF("x... ..x. .x.. ..x.", "r r 5 r"),
     RIFF("x..x ..x. x..x ..x.", "r r 5 r r 5")
   ] };
-  A.styleOrder = ["smooth", "afropop", "afrofusion", "afroswing", "afrorave", "streetpop", "highlife"];
+  A.styleOrder = ["smooth", "afropop", "afrofusion", "afrorb", "afroswing", "afrorave", "streetpop", "highlife"];
 
   // ---------------------------------------------------------------------
   // Afro-fusion / Alté: laid back, guitar-led, jazzy chords, loose drums (the Tems / Omah Lay / Rema-ballad lane)
@@ -99,13 +99,67 @@
       pluckVerseB: V("..x. ..5. x..5 ..x.", "x..x ..5. .... 5..4"),
       pluckChorus: V("x..x ..x. x..x ..x.", "x..x ..x. x..5 ..x5")
     },
-    sound: {
-      kit: ["afro", "soft", "highlife"], chords: ["guitar", "rhodes", "wurli"], pad: ["airy", "warm"], bass: ["pluckSub", "softSub"],
-      lead: ["vibes", "glass", "flute"], pluck: ["afroGuitar", "nylon", "kora"],
-      perc: ["conga", "bongo"], bellKind: ["clave", "agogo"], shaker: ["shekere", "shaker"], log: ["classic"]
-    },
     fx: { reverb: { decay: 2.6, send: 0.30 }, delay: { send: 0.28, feedback: 0.34 } }
   };
+
+  // ---------------------------------------------------------------------
+  // Afro R&B (sparse, sung): the Rema "Bout U" lane. ~94 BPM, major or dorian, almost nothing but a repeating clean guitar riff,
+  // a soft backbeat, a short bass and a lot of room for a raw, close voice. Sparser than Afro-fusion (no clave, no busy percussion).
+  // ---------------------------------------------------------------------
+  const FUS = A.styles.afrofusion;
+  A.styles.afrorb = Object.assign({}, FUS, {
+    name: "Afro R&B (sparse, sung)",
+    bpm: [92, 97], swing: 0.18, looseness: 1.2,
+    scales: ["major", "major", "major", "dorian"],
+    progressions: {
+      major:  [[0, 4, 5, 3], [0, 5, 3, 4], [0, 3, 4, 3], [1, 4, 0, 0]],
+      dorian: [[0, 3, 0, 3], [0, 6, 3, 0]],
+      minor:  [[0, 5, 2, 6], [0, 3, 0, 4]]
+    },
+    chorusProgressions: { major: [[3, 4, 0, 5], [3, 4, 0, 0]], dorian: [[3, 6, 0, 0]], minor: [[3, 6, 0, 0]] },
+    chordsPerBar: [1], chord: { seventh: 0.8, ninth: 0.4 },
+    bassTones: ["root", "root", "fifth", "root", "octave", "root"],
+    hookStyle: "sparse", arp: "broken",
+    gate: { bass: { max: 3 }, chords: { max: 8 }, pluck: { max: 3 } },
+    riffs: { bass: [
+      RIFF("x..x .... ..x. ....", "r r 5"),
+      RIFF("x..x .... .... ..x.", "r r 5")
+    ] },
+    groove: Object.assign({}, FUS.groove, {
+      kick:  V("x..x .... ..x. ....", "x..x .... .... ..4.", "x... ..x. ..x. ...."),
+      kickB: V("x..x .... ..x. ....", "x..x ..4. .... ..x."),
+      snare: V(".... 6... .... 6...", ".... 5... .... x..."),
+      clap:  V(".... 5... .... 5..."),
+      rim:   V("..5. .... ..5. ....", "...5 .... ...5 ...."),
+      rimB:  V(".... ..5. .... ..5."),
+      hatSparse: V("..x. ..x. ..x. ..x.", "..x. ..5. ..x. ...5"),
+      hatFull:   V("x.5. x.5. x.5. x.5.", "..x. 5.x. ..x. 5.x."),
+      openhat: P(ZERO),
+      shaker:  V("5.x. 5.x. 5.x. 5.x."),
+      perc:    V(".... ..4. .... ...3"),
+      percB:   V(".... .... ..4. ...."),
+      bell:    P(ZERO),
+      bassExtra: V(".... .... .... ..3."),
+      logdrum: P(ZERO),
+      chordsVerse:  V("x... .... .... ....", "x... .... ..4. ...."),
+      chordsChorus: V("x... .... x... ....", "x... ..5. x... ...."),
+      pad:     P("x... .... .... ...."),
+      // the riff: the same clean guitar figure every bar, off the beat, with a small answer in the second half
+      pluckVerse:  V("x..x ..x. ..x. ....", "x..x ..x. ..x. .x.."),
+      pluckVerseB: V("x..x ..x. ..x. .x..", "x..x ..x. ..5. ...x"),
+      pluckChorus: V("x..x ..x. ..x. .x..", "x..x ..x. x..x ..x.")
+    }),
+    rules: {
+      intro:  { presence: { pluck: 1, chords: 0.4, pad: 0.5, kick: 0.3, shaker: 0.3, perc: 0, hat: 0, bass: 0.3, snare: 0, clap: 0, rim: 0.3 } },
+      verse:  { presence: { pluck: 0.9, chords: 0.7, pad: 0.4, kick: 1, snare: 0.4, clap: 0.2, rim: 0.7, hat: 0.5, shaker: 0.6, perc: 0.3, bass: 1, bell: 0 } },
+      chorus: { presence: { pluck: 1, chords: 1, pad: 0.7, kick: 1, snare: 0.7, clap: 0.5, rim: 0.7, hat: 0.8, shaker: 0.9, perc: 0.6, bass: 1, bell: 0.3, lead: 0 } },
+      // the riff is the melody all through, and the voice sings the tune: no separate lead (the producer's calm rule would also drop the riff for it)
+      pre:    { presence: { pluck: 1, lead: 0 } },
+      bridge: { presence: { pluck: 1, lead: 0 } },
+      outro:  { presence: { pluck: 1, lead: 0 } }
+    },
+    fx: { reverb: { decay: 2.8, send: 0.3 }, delay: { send: 0.24, feedback: 0.3 } }
+  });
 
   // ---------------------------------------------------------------------
   // Afroswing: UK Afrobeats. Boomy 808 kick, snappy snare, trap-style hats with rolls, gliding bass.
@@ -157,11 +211,6 @@
       pluckVerse:  V("..5. ..x. ..5. ..x.", "x.5. .... x.5. ...."),
       pluckChorus: V("x.x. x.x. x.x. x.x5", "x.5x .x5. x.5x .x5.")
     },
-    sound: {
-      kit: ["dembow"], chords: ["rhodes", "amaPiano", "darkKeys"], pad: ["dark", "airy"], bass: ["glide808", "sub808"],
-      lead: ["glass", "vibes"], pluck: ["afroGuitar", "kora", "bellPluck"],
-      perc: ["conga", "bongo"], bellKind: ["clave", "agogo"], shaker: ["caxixi", "shaker"], log: ["classic"]
-    },
     fx: { reverb: { decay: 2.2, send: 0.26 }, delay: { send: 0.26, feedback: 0.32 } }
   };
 
@@ -172,7 +221,7 @@
   A.styles.afrorave = {
     stopBeforeChorus: ["kick", "snare", "clap", "bass", "logdrum", "chords", "pluck"],
     name: "Afro-rave",
-    bpm: [104, 112], swing: 0.04, looseness: 0.6,
+    bpm: [108, 120], swing: 0.04, looseness: 0.6,
     scales: ["minor", "dorian", "major", "minor"],
     progressions: {
       minor:  [[0,5,2,6], [0,3,5,6], [0,6,5,6]],
@@ -187,12 +236,13 @@
     preProgressions: { minor: [[3,5,6,6], [5,6,5,6]], dorian: [[3,6,3,6]], major: [[3,4,3,4], [5,3,4,4]] },
     chordsPerBar: [1], chord: { seventh: 0.4, ninth: 0.1 },
     bassTones: ["root", "root", "root", "fifth", "octave", "root"],
-    hookStyle: "anthem", arp: "up",
+    hookStyle: "chant", arp: "up",      // a repeating crowd chant (Kelebu), carried by a brass lead
     sidechain: { harmony: 0.35, bass: 0.2, release: 0.15 },
-    gate: { bass: { max: 3 } },
+    gate: { bass: { max: 3 }, lead: { max: 2 } },
     riffs: { bass: [
       RIFF("x..x ..x. x..x ..x.", "r r 5 r r 5"),
-      RIFF("x... x... x... x..x", "r r r r 5")
+      RIFF("x... x... x... x..x", "r r r r 5"),
+      RIFF("x..x x... x..x x.x.", "r r 5 r r 5 r")        // brash, busy bass under the chant
     ] },
     groove: {
       kick:  V("x... x... x... x...", "x... x... x... x..4", "x... x..4 x... x..."),
@@ -205,7 +255,7 @@
       shaker:  V("x7x7 x7x7 x7x7 x7x7"),
       perc:    V("..x. ...x ..x. .x..", "x..x ..x. ..x. x..."),
       bell:    V("...7 ..7. ...7 ..7."),                                          // agogo doubling the dembow
-      bassExtra: V(".... ...5 .... ..5."),
+      bassExtra: V(".... ...5 .... ..5.", "..5. ...5 ..5. ...5"),
       logdrum: P(ZERO),
       chordsVerse:  V("x... .... ..8. ....", "...8 ..8. ...8 ..8."),
       chordsChorus: V("x..x ..x. x..x ..x.", "...x ..x. ...x ..x."),
@@ -213,10 +263,12 @@
       pluckVerse:  V("x.x. x.x. x.x. x.x.", "..x. ..x. ..x. ..x."),
       pluckChorus: V("x.xx x.xx x.xx x.xx", "x.x. x.x. x.x. x.xx")
     },
-    sound: {
-      kit: ["dembow", "afro"], chords: ["stab", "rhodes", "amaPiano"], pad: ["airy", "strings"], bass: ["sub808", "pluckSub", "glide808"],
-      lead: ["glass", "whistle", "flute"], pluck: ["kora", "marimba", "afroGuitar"],
-      perc: ["conga", "bongo"], bellKind: ["agogo", "cowbell"], shaker: ["tambourine", "caxixi"], log: ["classic"]
+    // Fast but not flat out: the verse pulls back (no open hat, lighter hats and percussion, the chorus brings everything), the pre-chorus builds
+    rules: {
+      intro:  { presence: { hat: 0.3, openhat: 0, perc: 0.4, shaker: 0.6, snare: 0, clap: 0, bell: 0.3 } },
+      verse:  { presence: { hat: 0.5, openhat: 0, perc: 0.5, shaker: 0.7, snare: 0.7, clap: 0.6, bell: 0.3, pluck: 0.6, lead: 0 }, sec: { cut: 0.7 } },
+      pre:    { presence: { hat: 1, openhat: 0.5, perc: 0.9, shaker: 1, snare: 1, bell: 0.6, lead: 0.6 }, sec: { cut: 0.9 } },
+      chorus: { presence: { hat: 1, openhat: 1, perc: 1, shaker: 1, snare: 1, clap: 1, bell: 0.8, pluck: 0.8, lead: 1 }, sec: { cut: 1 } }
     },
     fx: { reverb: { decay: 2.2, send: 0.25 }, delay: { send: 0.30, feedback: 0.32 } }
   };
@@ -274,11 +326,6 @@
       pluckVerse:  V("..x. ..x. ..x. ..x.", "x..x ..x. x..x ..x."),
       pluckChorus: V("x.x. x.x. x.x. x.x.", "x..x ..x. x..x ..x.")
     },
-    sound: {
-      kit: ["afro", "dembow"], chords: ["organ", "darkKeys", "rhodes"], pad: ["choir", "dark"], bass: ["amaSub", "pluckSub"],
-      lead: ["horn", "whistle", "glass"], pluck: ["kora", "afroGuitar", "marimba"],
-      perc: ["talking", "djembe", "conga"], bellKind: ["agogo", "cowbell"], shaker: ["shekere", "shaker"], log: ["ama", "wood"]
-    },
     fx: { reverb: { decay: 2.8, send: 0.30 }, delay: { send: 0.25, feedback: 0.30 } }
   };
 
@@ -328,11 +375,6 @@
       pad:     P("6... .... .... ...."),
       pluckVerse:  V("x.x. ..x. x.x. ..x.", "x..x ..x. x..x ..x."),            // guitar riff
       pluckChorus: V("x.xx x.x. x.xx x.x.", "x.x. x.xx x.x. x.xx")
-    },
-    sound: {
-      kit: ["highlife", "afro"], chords: ["guitar", "organ", "rhodes"], pad: ["warm", "strings"], bass: ["pluckSub", "softSub"],
-      lead: ["horn", "flute", "vibes"], pluck: ["afroGuitar", "nylon"],
-      perc: ["conga", "bongo"], bellKind: ["cowbell", "agogo"], shaker: ["shekere", "tambourine"], log: ["classic"]
     },
     fx: { reverb: { decay: 1.9, send: 0.20 }, delay: { send: 0.20, feedback: 0.28 } }
   };
@@ -459,11 +501,6 @@
       chorus: { presence: { logdrum: 1, lead: 0.9, pluck: 0.7, perc: 0.9 } },
       bridge: { presence: { logdrum: 0.3, kick: 0.5 } }
     },
-    sound: {
-      kit: ["ama"], chords: ["amaPiano", "rhodes"], pad: ["airy", "strings"], bass: ["amaSub"],
-      lead: ["flute", "vibes", "whistle"], pluck: ["pianoRun", "marimba", "kora"],
-      perc: ["conga", "bongo"], bellKind: ["clave", "agogo"], shaker: ["shaker", "caxixi"], log: ["ama", "wood"]
-    },
     fx: { reverb: { decay: 2.8, send: 0.30 }, delay: { send: 0.22, feedback: 0.30 } }
   });
 
@@ -516,11 +553,6 @@
       intro:  { presence: { kick: 0.2, snare: 0, clap: 0, logdrum: 0, bass: 0.5, shaker: 1, pad: 1, chords: 1, pluck: 0.8 }, enter: { kick: 0.5, shaker: 0 } },
       verse:  { presence: { logdrum: 0.5, pluck: 0.8, pad: 0.8 } },
       chorus: { presence: { logdrum: 0.8, lead: 0.7, pluck: 0.9 } }
-    },
-    sound: {
-      kit: ["ama"], chords: ["amaPiano", "rhodes", "wurli"], pad: ["strings", "airy"], bass: ["amaSub", "softSub"],
-      lead: ["flute", "vibes"], pluck: ["pianoRun", "kora"],
-      perc: ["bongo", "conga"], bellKind: ["clave"], shaker: ["caxixi", "shaker"], log: ["ama"]
     },
     fx: { reverb: { decay: 3.2, send: 0.36 }, delay: { send: 0.25, feedback: 0.30 } }
   });
@@ -579,11 +611,6 @@
       verse:  { presence: { logdrum: 1, pad: 0.3, pluck: 0.5 } },
       chorus: { presence: { logdrum: 1, lead: 0.8 } }
     },
-    sound: {
-      kit: ["house", "ama"], chords: ["stab", "amaPiano", "darkKeys"], pad: ["dark", "strings"], bass: ["amaSub", "growl"],
-      lead: ["whistle", "glass"], pluck: ["marimba", "kora"],
-      perc: ["conga", "tom"], bellKind: ["cowbell", "clave"], shaker: ["tambourine", "caxixi"], log: ["wood", "ama"]
-    },
     fx: { reverb: { decay: 2.2, send: 0.24 }, delay: { send: 0.20, feedback: 0.28 } }
   });
 
@@ -641,7 +668,7 @@
   house.styles.deephouse = {
     stopBeforeChorus: ["kick", "snare", "clap", "bass", "logdrum", "chords", "pluck"],
     name: "Deep Afro House",
-    bpm: [120, 124], swing: 0.03, looseness: 0.5,
+    bpm: [118, 124], swing: 0.03, looseness: 0.5,
     scales: ["minor", "dorian", "minor"],
     progressions: {
       minor:  [[0,0,3,3], [0,5,3,6], [0,6,5,6]],
@@ -685,11 +712,6 @@
     },
     rules: {
       intro:  { presence: { kick: 1, hat: 0.6, openhat: 0.4, clap: 0.2, shaker: 0.8, bass: 0.4, chords: 0.5, pad: 1 }, enter: { kick: 0, hat: 0.25, openhat: 0.5, bass: 0.5 } }
-    },
-    sound: {
-      kit: ["house"], chords: ["stab", "organ", "rhodes"], pad: ["strings", "airy"], bass: ["rolling", "pluckSub"],
-      lead: ["flute", "glass", "whistle"], pluck: ["kora", "marimba"],
-      perc: ["conga", "djembe", "bongo"], bellKind: ["agogo", "cowbell", "clave"], shaker: ["shaker", "tambourine"], log: ["classic"]
     },
     fx: { reverb: { decay: 2.4, send: 0.30 }, delay: { send: 0.30, feedback: 0.34 } }
   };
@@ -738,11 +760,6 @@
     rules: {
       verse:  { presence: { chords: 0.5, pad: 0.4, pluck: 0.3 } },
       chorus: { presence: { lead: 0.7, pluck: 0.8 } }
-    },
-    sound: {
-      kit: ["gqom"], chords: ["stab", "darkKeys"], pad: ["dark"], bass: ["growl"],
-      lead: ["glass", "whistle"], pluck: ["marimba", "kora"],
-      perc: ["tom", "conga"], bellKind: ["cowbell", "clave"], shaker: ["tambourine", "shaker"], log: ["wood"]
     },
     fx: { reverb: { decay: 2.0, send: 0.20 }, delay: { send: 0.22, feedback: 0.30 } }
   };

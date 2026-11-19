@@ -236,11 +236,13 @@ function resolveTemplate(genre, styleId) {
   // Section rules: the shared ones, with the style's own tweaks laid on top
   t.rules = {};
   Object.keys(_sectionRules).forEach(kind => {
-    const base = _sectionRules[kind], extra = (s.rules && s.rules[kind]) || {};
-    t.rules[kind] = Object.assign({}, base, extra, {
-      presence: Object.assign({}, base.presence, extra.presence || {}),
-      enter: Object.assign({}, base.enter || {}, extra.enter || {}),
-      exit: Object.assign({}, base.exit || {}, extra.exit || {})
+    // Three layers: the shared rules, then the genre's own (TEMPLATES[g].rules, see genrefeel.js), then the style's
+    const base = _sectionRules[kind], gx = (g.rules && g.rules[kind]) || {}, extra = (s.rules && s.rules[kind]) || {};
+    t.rules[kind] = Object.assign({}, base, gx, extra, {
+      presence: Object.assign({}, base.presence, gx.presence || {}, extra.presence || {}),
+      enter: Object.assign({}, base.enter || {}, gx.enter || {}, extra.enter || {}),
+      exit: Object.assign({}, base.exit || {}, gx.exit || {}, extra.exit || {}),
+      sec: Object.assign({}, base.sec || {}, gx.sec || {}, extra.sec || {})
     });
   });
 
@@ -354,9 +356,58 @@ function buildPatterns(t, groove, from, locked, riffs) {
 }
 
 // ---------- Sections ----------
-function makeSections(structureId) {
-  const structure = _structures[structureId];
-  if (!structure || structure.loop) return { sections: [], sectionAt: [], totalBars: 0 };
+// A song form is a list of [kind, bars]. It comes from a preset (STRUCTURES), from randomForm(), or from the user's edits.
+const FORM_KINDS = ["intro", "verse", "pre", "chorus", "bridge", "outro"];
+function cleanForm(form) {
+  const out = [];
+  (form || []).forEach(e => {
+    if (!e || !FORM_KINDS.includes(e[0])) return;
+    const bars = Math.max(2, Math.min(32, Math.round(Number(e[1]) || 4)));
+    out.push(e[2] !== undefined && e[2] !== null ? [e[0], bars, e[2]] : [e[0], bars]);
+  });
+  return out.slice(0, 24);
+}
+
+// A different song every time: it can start with the chorus, skip the intro, the pre-chorus or the bridge, and the
+// parts are not all the same length (a verse of 8 or 16 bars, a 2-bar pre-chorus, a 4-bar chorus, ...).
+function randomForm() {
+  const odds = p => Math.random() < p;
+  const len = {
+    intro: [2, 4, 4, 8], verse: [8, 8, 8, 16, 12], pre: [2, 4, 4], chorus: [8, 8, 4, 16, 8],
+    bridge: [4, 8, 8], outro: [2, 4, 4, 8]
+  };
+  const L = kind => pick(len[kind]);
+  const roll100 = Math.random() * 100;
+  const form = [];
+  const add = (kind, bars) => form.push([kind, bars === undefined ? L(kind) : bars]);
+  const v1 = L("verse");
+  const verse2 = () => add("verse", odds(0.6) ? v1 : L("verse"));
+  const pre = () => { if (odds(0.7)) add("pre"); };
+  if (roll100 < 34) {                       // the classic: intro, verse, build, chorus, verse, build, chorus, bridge, chorus, outro
+    if (odds(0.85)) add("intro");
+    add("verse", v1); pre(); add("chorus"); verse2(); pre(); add("chorus");
+    if (odds(0.6)) add("bridge");
+    add("chorus"); if (odds(0.8)) add("outro");
+  } else if (roll100 < 62) {                // hook first: the chorus opens the song
+    add("chorus", pick([4, 8]));
+    add("verse", v1); pre(); add("chorus"); verse2();
+    if (odds(0.5)) add("chorus", pick([4, 8]));
+    if (odds(0.5)) add("bridge");
+    add("chorus"); if (odds(0.7)) add("outro");
+  } else if (roll100 < 80) {                // short and direct
+    if (odds(0.6)) add("intro");
+    add("verse", v1); add("chorus"); verse2(); add("chorus"); if (odds(0.7)) add("outro");
+  } else {                                  // slow burn: long intro, two verses before the first chorus
+    add("intro", pick([4, 8])); add("verse", v1); verse2(); pre(); add("chorus"); add("bridge"); add("chorus"); add("outro");
+  }
+  let total = form.reduce((a, f) => a + f[1], 0);
+  while (total > 110 && form.length > 3) { const i = form.findIndex(f => f[0] === "verse" && f[1] > 8); if (i < 0) break; total -= form[i][1] - 8; form[i][1] = 8; }
+  return form;
+}
+
+function makeSections(structureId, form) {
+  const structure = form ? { sections: cleanForm(form) } : _structures[structureId];
+  if (!structure || structure.loop || !structure.sections.length) return { sections: [], sectionAt: [], totalBars: 0 };
 
   const sections = [];
   const sectionAt = [];
@@ -382,6 +433,7 @@ function makeSections(structureId) {
 
 // Which tracks play in which section. Rolled once per kind of section, and a later verse
 // or chorus can only ADD tracks (like a producer layering a second verse).
+const LAYER_PRIORITY = ["kick", "snare", "bass", "chords", "hat", "shaker", "clap", "pluck", "pad", "perc", "rim", "logdrum", "lead", "bell", "openhat"];   // most important first
 const FINAL_BOOST = ["clap", "openhat", "shaker", "perc", "bell", "pluck", "lead"];
 function rollPresence(t, sections) {
   const names = Object.keys(t.tracks);
@@ -397,6 +449,13 @@ function rollPresence(t, sections) {
       if (before) on = before[name] || on || roll(Math.min(1, p + 0.15)) === 1 && p > 0;
       presence[name] = on;
     });
+    // A template can cap how many tracks play at once (t.maxLayers): the least important ones step out first, so a song does not pile up
+    // into a wall of sound as the sections repeat. The final chorus may have one more.
+    const cap = t.maxLayers ? ((t.maxLayers[sec.kind] || t.maxLayers.default || 0) + (sec.final ? 1 : 0)) : 0;
+    if (cap) {
+      let n = names.filter(k => presence[k]).length;
+      for (let i = LAYER_PRIORITY.length - 1; n > cap && i >= 0; i--) if (presence[LAYER_PRIORITY[i]]) { presence[LAYER_PRIORITY[i]] = false; n--; }
+    }
     seen[sec.kind] = presence;
     return presence;
   });
@@ -481,26 +540,98 @@ function slotDegree(degrees, cpb, bar, step) {
   return degrees[(bar * cpb + (cpb === 2 && step >= 8 ? 1 : 0)) % degrees.length];
 }
 
+// A step of the melody that stays inside the hook's range: a move that would leave it turns round instead of
+// piling up against the edge (the old hooks sat on the top note for whole bars).
+function hookStep(n, move) {
+  let to = n + move;
+  if (to > HOOK_HIGH) to = n - (Math.abs(move) || 1);
+  if (to < HOOK_LOW) to = n + (Math.abs(move) || 1);
+  return clampNum(to, HOOK_LOW, HOOK_HIGH);
+}
+// Slide a whole line up or down so that it fits the range (its shape stays the same)
+function fitHookLine(line) {
+  const lo = Math.min.apply(null, line), hi = Math.max.apply(null, line);
+  let d = 0;
+  if (hi > HOOK_HIGH) d = HOOK_HIGH - hi;
+  if (lo + d < HOOK_LOW) d = HOOK_LOW - lo;
+  return line.map(x => x + d);
+}
+
+// The hook is one motif, said, repeated and answered, the way a singable hook works:
+//   bar 0  the motif (A)                      bar 1  A again, moved onto the next chord (same shape, so it is recognised)
+//   bar 2  a contrast (B) that lifts higher   bar 3  A once more, settling on the root or the fifth
 function buildHook(t, degrees, cpb, bars, style) {
   const cells = HOOK_CELLS[style || t.hookStyle] || HOOK_CELLS.long;
   const cellA = pick(cells);
   const others = cells.filter(c => c !== cellA);
   const cellB = others.length ? pick(others) : cellA;
-  const barCells = [cellA, cellA, cellB, cellA].slice(0, bars);
-  const movesA = cellA.map(() => pick(MOVES_UP));
-  const movesB = cellB.map(() => pick(MOVES));
+  const snapSecondChord = (b, step, n) => (cpb === 2 && step >= 8 && step % 4 === 0) ? nearestChordTone(n, slotDegree(degrees, cpb, b, step)) : n;
+
+  // The motif: single steps on the scale, strong beats on chord tones, never three equal notes in a row
+  const motif = [];
+  let n = nearestChordTone(randomInt(5, 8), slotDegree(degrees, cpb, 0, 0));
+  cellA.forEach(([step], i) => {
+    if (i > 0) {
+      const target = hookStep(n, pick(MOVES_UP));
+      n = step % 4 === 0 ? nearestChordTone(target, slotDegree(degrees, cpb, 0, step)) : target;
+      if (i >= 2 && n === motif[i - 1] && n === motif[i - 2]) n = hookStep(n, n > 7 ? -1 : 1);
+    }
+    motif.push(n);
+  });
+  // Where a bar starts: a chord tone of that bar's chord, near the motif's first note and near where the last bar ended
+  const startTone = (target, b, prev) => {
+    const degree = slotDegree(degrees, cpb, b, 0);
+    let best = target, bestScore = Infinity;
+    for (let oct = -2; oct <= 2; oct++) [0, 2, 4, 6].forEach(part => {
+      const c = degree + part + 7 * oct;
+      if (c < HOOK_LOW || c > HOOK_HIGH) return;
+      const score = Math.abs(c - target) + (prev === undefined ? 0 : 0.7 * Math.abs(c - prev)) + Math.random() * 0.3;
+      if (score < bestScore) { bestScore = score; best = c; }
+    });
+    return best;
+  };
+  const lineA = (b, prev) => {
+    const first = startTone(motif[0], b, prev);
+    return fitHookLine(motif.map(x => x - motif[0] + first));
+  };
+  // The contrast: its own rhythm when the style has another cell, else the motif turned upside down; it starts higher
+  const lineB = (b, prev) => {
+    const lift = Math.max.apply(null, motif) + randomInt(0, 2);
+    const start = startTone(prev === undefined ? lift : clampNum(lift, prev - 3, prev + 3), b, prev);
+    if (cellB === cellA) return fitHookLine(motif.map(x => start - (x - motif[0])));
+    const line = [start];
+    for (let i = 1; i < cellB.length; i++) {
+      const target = hookStep(line[i - 1], pick(MOVES));
+      let m = cellB[i][0] % 4 === 0 ? nearestChordTone(target, slotDegree(degrees, cpb, b, cellB[i][0])) : target;
+      if (i >= 2 && m === line[i - 1] && m === line[i - 2]) m = hookStep(m, m > 7 ? -1 : 1);
+      line.push(m);
+    }
+    return fitHookLine(line);
+  };
 
   const notes = [];
-  let n = nearestChordTone(randomInt(5, 8), slotDegree(degrees, cpb, 0, 0));
   for (let b = 0; b < bars; b++) {
-    const cell = barCells[b];
-    const moves = cell === cellB && b === 2 ? movesB : movesA;
+    const contrast = b % 4 === 2;
+    const cell = contrast ? cellB : cellA;
+    const prev = notes.length ? notes[notes.length - 1].n : undefined;
+    const line = contrast ? lineB(b, prev) : lineA(b, prev);
     cell.forEach(([step, len], i) => {
-      const target = clampNum(n + moves[i % moves.length], HOOK_LOW, HOOK_HIGH);
-      const strong = step % 4 === 0 || i === 0;
-      n = strong ? nearestChordTone(target, slotDegree(degrees, cpb, b, step)) : target;
-      notes.push({ bar: b, step, len: Math.min(len, STEPS_PER_BAR - step), n });
+      notes.push({ bar: b, step, len: Math.min(len, STEPS_PER_BAR - step), n: snapSecondChord(b, step, line[i]) });
     });
+  }
+  // The call ends open (on the 3rd or 5th of its chord, like a question), so the last note below feels like the answer
+  if (bars >= 4) {
+    const callEnd = [...notes].reverse().find(x => x.bar === 1);
+    if (callEnd) {
+      const d = slotDegree(degrees, cpb, 1, callEnd.step);
+      let best = callEnd.n, bestDist = Infinity;
+      for (let oct = -2; oct <= 2; oct++) [2, 4].forEach(p => {
+        const n = d + p + 7 * oct, dist = Math.abs(n - callEnd.n) + Math.random() * 0.6;
+        if (n >= HOOK_LOW && n <= HOOK_HIGH && dist < bestDist) { bestDist = dist; best = n; }
+      });
+      callEnd.n = best;
+      callEnd.len = Math.max(callEnd.len, Math.min(4, STEPS_PER_BAR - callEnd.step));
+    }
   }
   // The last note settles on the root or fifth of the last chord and rings
   const last = notes[notes.length - 1];
@@ -550,38 +681,6 @@ function leadMidi(key, n) {
   return tonic + scale[((n % 7) + 7) % 7] + 12 * Math.floor(n / 7);
 }
 
-// ---------- Sounds ----------
-function pickSound(t) {
-  const s = t.sound;
-  return {
-    kit: pick(s.kit), chords: pick(s.chords), pad: pick(s.pad),
-    bass: pick(s.bass), lead: pick(s.lead), pluck: pick(s.pluck),
-    // Percussion, bell, shaker and log drum: a style that does not name one keeps the original single sound
-    perc: pick(s.perc || ["legacy"]), bellKind: pick(s.bellKind || ["bell"]),
-    shaker: pick(s.shaker || ["shaker"]), log: pick(s.log || ["classic"])
-  };
-}
-
-// ---------- Sound packs (see packs.js) ----------
-// A beat picks ONE pack of matched sounds. In Auto mode, about 3 beats in 10 also borrow ONE colour part (lead, pluck,
-// percussion, bell or shaker) from another pack that suits the style. Never the kit, bass, keys, pad or log drum:
-// those decide the groove and weight, and mixing them is where "never meant to meet" sounds come from.
-const PACK_MIX_CHANCE = 0.3;
-function pickPack(t, packId) {
-  const packs = typeof packsFor === "function" ? packsFor(t.genre, t.styleId) : [];
-  if (!packs.length) return { sound: pickSound(t), pack: null };         // a style with no packs keeps the old way
-  const named = packId && packId !== "auto" ? packs.find(p => p.id === packId) : null;
-  const chosen = named || pick(packs);
-  const sound = packParts(chosen);
-  const swapped = [];
-  if (!named && packs.length > 1 && Math.random() < PACK_MIX_CHANCE) {
-    const other = pick(packs.filter(p => p.id !== chosen.id));
-    const part = pick(PACK_COLOUR_PARTS);
-    if (other[part] !== chosen[part]) { sound[part] = other[part]; swapped.push({ part, from: other.name }); }
-  }
-  return { sound, pack: { id: chosen.id, name: chosen.name, blurb: chosen.blurb, swapped } };
-}
-
 // ---------- Humanizing ----------
 // How hard one hit is played (0.1 to 1).
 function humanVelocity(probability, cfg, step, rnd) {
@@ -613,7 +712,7 @@ function humanizeTracks(templateOrGenre, tracks, probOverrides, rnd) {
       hit ? humanVelocity(probabilities[step], cfg, step, rand) : 0
     );
     offsets[trackName] = probabilities.map(() =>
-      (-cfg.timingMs + rand() * 2 * cfg.timingMs) * loose / 1000
+      ((-cfg.timingMs + rand() * 2 * cfg.timingMs) * loose + (cfg.lateMs || 0)) / 1000      // lateMs: plays that much BEHIND the beat (laid-back feel)
     );
   });
 
@@ -640,7 +739,30 @@ function arpPick(chord, k, mode) {
   while (m > 88) m -= 12;
   return m;
 }
-function arpNotes(hits, c1, c2, mode, bar) {
+// A riff for the pluck (mode "riff", used by Afrobeats): like an Afro guitar player, the same little figure comes back every bar and follows the chord.
+// Each step of the bar has its own place in the figure (so a hit that is left out does not move the others), the notes only move by a step or two of
+// the chord, and every fourth bar the second half lifts by one chord note as a small answer.
+const PLUCK_RIFFS = [[2,1,0,1, 2,1,0,2], [0,1,2,1, 0,2,1,0], [1,2,3,2, 1,0,1,2], [2,3,2,1, 2,1,0,1], [0,2,1,2, 3,2,1,2], [3,2,1,0, 1,2,1,0]];
+function riffPool(chord) {
+  const pcs = [];
+  chord.midi.slice().sort((a, b) => a - b).forEach(m => { if (!pcs.includes(m % 12)) pcs.push(m % 12); });
+  const tones = pcs.slice(0, 4).map(pc => 69 + ((pc - 69 % 12) + 12) % 12).sort((a, b) => a - b);          // one octave from A4 up: the riff stays close together
+  return tones.concat(tones.map(m => m + 12));
+}
+function riffNotes(hits, c1, c2, bar, kind, seed) {
+  const out = zeros16(), motif = PLUCK_RIFFS[(((seed || 1) >>> 0) % PLUCK_RIFFS.length + (kind === "chorus" ? 3 : 0)) % PLUCK_RIFFS.length];
+  const pools = [riffPool(c1), riffPool(c2)];
+  hits.forEach((hit, step) => {
+    if (!hit) return;
+    const pool = pools[step >= 8 ? 1 : 0];
+    let deg = motif[(step >> 1) % motif.length];
+    if (bar % 4 === 3 && step >= 8) deg += 1;
+    out[step] = pool[Math.min(deg, pool.length - 1)];
+  });
+  return out;
+}
+function arpNotes(hits, c1, c2, mode, bar, kind, seed) {
+  if (mode === "riff") return riffNotes(hits, c1, c2, bar, kind, seed);
   const out = zeros16();
   let k = bar % 3;
   hits.forEach((hit, step) => { if (hit) out[step] = arpPick(step >= 8 ? c2 : c1, k++, mode); });
@@ -664,9 +786,10 @@ function finishView(beat, t, p) {
   const durations = {};
   names.forEach(n => { durations[n] = gateLengths(tracks[n], t.gate[n]); });
   if (twoChords && p.present.pad) { durations.pad[0] = 8; durations.pad[8] = 8; }
-  if (p.lead) durations.lead = p.lead.dur;
+  if (p.lead) durations.lead = p.lead.dur.map((d, s) => (tracks.lead && tracks.lead[s] ? d : 0));       // a lead note that spice cut has no length
+  if (p.dur) Object.keys(p.dur).forEach(n => { if (durations[n]) durations[n] = durations[n].map(d => (d ? Math.min(d, p.dur[n]) : 0)); });   // spice: short stabs
 
-  const pluckNotes = arpNotes(tracks.pluck, p.c1, p.c2, t.arp, p.barNumber);
+  const pluckNotes = arpNotes(tracks.pluck, p.c1, p.c2, t.arp, p.barNumber, p.kind, beat.seed);
 
   const probs = Object.assign({}, p.probs);
   probs.lead = tracks.lead.map(h => (h ? 1 : 0));
@@ -674,7 +797,11 @@ function finishView(beat, t, p) {
   // from the one before, but bar 17 is the same every time it plays (live, looped, or in the download).
   const feelRng = seededRandom(((beat.seed || 1) ^ Math.imul((p.barNumber || 0) + 7, 0x9E3779B1)) >>> 0);
   const human = humanizeTracks(t, tracks, probs, feelRng);
+  if (typeof spiceFeel === "function") spiceFeel(beat, human.offsets);            // spice: some beats play the backbeat a little behind
 
+  shapeGroove(beat, human.velocities, p.present);
+  // the answering line sits behind the singer
+  if (p.lead && beat.answer && beat.answer.level) human.velocities.lead = human.velocities.lead.map(v => (v ? clampNum(v * beat.answer.level, 0.1, 1) : 0));
   // Section energy: verses are played a little softer than choruses
   if (p.dyn && p.dyn !== 1) {
     names.forEach(n => { human.velocities[n] = human.velocities[n].map(v => (v ? clampNum(v * p.dyn, 0.1, 1) : 0)); });
@@ -700,6 +827,113 @@ function finishView(beat, t, p) {
 }
 
 // One bar of a full song
+// ---------- A beat that gives room to a voice (Vocal Sketch) ----------
+// beat.voice = { bars: { <bar number>: { act: [16 values] } } }. act[s] is 1 where a sung or rapped note starts on step s of that bar,
+// 2 where a note is still held, 0 where the singer is silent. Only beats made by Vocal Sketch carry it; every other beat is untouched.
+// What a producer does with that:
+//   busy singing  -> the small percussion gets out of the way (fewer off-beat hits), the kick, snare and bass keep the groove
+//   a pause of a beat or more -> a little answer in the pause (a tick or an open hat leading into the next phrase)
+//   a whole bar of rest -> the beat comes forward a little (hats and percussion open up)
+// ---------- The groove spine for beats made around a voice ----------
+// What makes a head nod and a foot tap: a backbeat that never drops, a steady hat (or shaker) pulse whose off-beat 8ths push, and a kick that
+// lands on one. Called before applyVoice (which still thins the 16ths under a busy line). Only beats with beat.voice.groove.
+function applyGroove(beat, bar, tracks, probs, present, skip) {
+  const g = beat.voice && beat.voice.groove;
+  if (!g || skip) return;
+  const sn = probs.snare || [];
+  if (present.snare) sn.forEach((pr, s) => { if (pr >= 0.5) { tracks.snare[s] = 1; if (present.clap && probs.clap && probs.clap[s] >= 0.5) tracks.clap[s] = 1; } });   // the backbeat never drops out
+  if (present.kick) tracks.kick[0] = 1;
+  if (present.bass && present.kick) tracks.bass[0] = 1;                    // the bass and the kick land together on one
+  const top = present.hat ? "hat" : (present.shaker ? "shaker" : null);
+  if (top) {
+    const vm = beat.voice.bars && beat.voice.bars[bar], busy = vm && vm.act ? vm.act.filter(v => v === 1).length : 0, rng = seededRandom(((beat.seed || 1) ^ Math.imul(bar + 31, 69069)) >>> 0);
+    for (let s = 0; s < 16; s += 2) {                                                                                         // a steady 8th-note pulse (a little looser under a very busy line)
+      if (s % 4 === 2 && busy >= 7 && rng() < 0.35) continue;
+      tracks[top][s] = 1; probs[top][s] = Math.max(probs[top][s] || 0, 0.8);
+    }
+    if (g.calm) for (let s = 1; s < 16; s += 2) tracks[top][s] = (s % 4 === 3 && tracks[top][s]) ? 1 : 0;                      // calm: the 16ths between the pulses are mostly gone
+  }
+}
+// How hard each hit is played: the kick and the backbeat lead, the off-beat 8ths of the hat push, the 16ths between are ghosts.
+function shapeGroove(beat, velocities, present) {
+  const g = beat.voice && beat.voice.groove; if (!g) return;
+  const top = present.hat ? "hat" : (present.shaker ? "shaker" : null), k = g.calm ? 0.85 : 1;
+  const mul = (name, fn) => { if (velocities[name]) velocities[name] = velocities[name].map((v, s) => (v ? clampNum(v * fn(s), 0.1, 1) : 0)); };
+  mul("kick", s => (s === 0 ? 1.18 : 1));
+  mul("snare", () => 1.15); mul("clap", () => 1.1);
+  if (top) mul(top, s => k * (s % 4 === 2 ? 1.25 : s % 4 === 0 ? 0.85 : 0.55));
+}
+
+function applyVoice(beat, bar, tracks, present, skip) {
+  const vm = beat.voice && beat.voice.bars && beat.voice.bars[bar];
+  if (!vm || skip || !vm.act) return;
+  const act = vm.act, rng = seededRandom(((beat.seed || 1) ^ Math.imul(bar + 11, 40503)) >>> 0);
+  const starts = act.filter(v => v === 1).length, any = act.some(v => v > 0);
+  const small = ["shaker", "perc", "rim", "bell", "pluck", "logdrum", "openhat"];
+  // 1) busy: thin the off-beat hits of the small percussion; the hats lose a few 16ths
+  if (starts >= 4) {
+    const p = starts >= 7 ? 0.65 : starts >= 5 ? 0.4 : 0.2;
+    small.forEach(name => { if (present[name]) tracks[name] = tracks[name].map((h, s) => (h && s % 4 !== 0 && rng() < p ? 0 : h)); });
+    if (present.hat) tracks.hat = tracks.hat.map((h, s) => (h && s % 2 === 1 && rng() < p * 0.6 ? 0 : h));
+    if (present.bass && starts >= 6) tracks.bass = tracks.bass.map((h, s) => (h && s !== 0 && s !== 8 && rng() < 0.5 ? 0 : h));   // the bass keeps its main notes and stops chattering under a busy line
+  }
+  // 2) the whole bar is a rest: the beat opens up
+  if (!any) {
+    if (present.hat) for (let s = 0; s < 16; s += 2) tracks.hat[s] = 1;
+    if (present.perc) [7, 10, 14].forEach(s => { tracks.perc[s] = 1; });
+    else if (present.shaker) [3, 7, 11, 15].forEach(s => { tracks.shaker[s] = 1; });
+    if (present.openhat) tracks.openhat[14] = 1;
+    return;
+  }
+  // 3) pauses of a beat or more: answer in them
+  const tool = ["perc", "rim", "shaker", "hat"].find(n => present[n]);
+  let s = 0, fills = 0;
+  while (s < 16 && fills < 2) {
+    if (act[s] !== 0) { s++; continue; }
+    let e = s; while (e < 16 && act[e] === 0) e++;
+    const len = e - s;
+    if (len >= 4 && tool) {
+      [e - 3, e - 1].forEach(st => { if (st >= s + 1 && st < 16) tracks[tool][st] = 1; });
+      if (len >= 6 && e === 16 && present.openhat) tracks.openhat[14] = 1;      // leads into the next phrase
+      fills++;
+    }
+    s = e;
+  }
+}
+
+// ---------- Variety for beats made around a voice ----------
+// The small percussion of a style often plays the same two or three ticks in every bar, which sounds like a metronome under a singer.
+// Like a producer: the groove is a two-bar loop (bar 1 and bar 3 alike, bar 2 and bar 4 alike), a few of the off-beat hits drop out or slide a
+// step late, the percussion sits out the end of every fourth bar, and a new hit appears now and then. Kick and snare are never touched.
+// Seeded, so playing, looping and downloading give the same notes. Only beats with beat.voice get this.
+function applyVariety(beat, bar, tracks, present, skip) {
+  if (!beat.voice || beat.voice.variety === false || skip) return;
+  const at = beat.sectionAt[bar], b = at.barIn, odd = b % 2, seed = (beat.seed || 1) >>> 0;
+  const loop = seededRandom((seed ^ Math.imul(at.index * 2 + odd + 31, 2246822519)) >>> 0);       // the same for every bar-1 and every bar-2 of this part
+  const bars = seededRandom((seed ^ Math.imul(bar + 101, 3266489917)) >>> 0);                       // different in every bar
+  ["perc", "rim", "shaker", "bell", "logdrum"].forEach(name => {
+    if (!present[name]) return;
+    const hits = tracks[name];
+    if (name === "rim" || name === "perc" || name === "bell") {         // a dry tick on every beat is a metronome: keep at most one hit on a beat, the others come a step early (a push)
+      let kept = false;
+      [0, 4, 8, 12].forEach(st => { if (!hits[st]) return; if (!kept) { kept = true; return; } hits[st] = 0; if (!hits[st - 1]) hits[st - 1] = 1; });
+    }
+    const idx = hits.map((h, st) => (h ? st : -1)).filter(st => st >= 0);
+    if (!idx.length) return;
+    idx.forEach(st => {                                                // the loop's own variation: drop or slide off-beat hits
+      if (st % 4 === 0) return;
+      const r = loop();
+      if (r < 0.28) hits[st] = 0;
+      else if (r < 0.46 && st < 15 && !hits[st + 1]) { hits[st] = 0; hits[st + 1] = 1; }
+    });
+    if (b % 4 === 3 && bars() < 0.7) for (let st = 8; st < 16; st++) hits[st] = 0;                    // a breath at the end of the phrase
+    if (b % 4 === 3 || (b % 4 === 1 && bars() < 0.3)) {                // a new hit now and then (never straight after another)
+      const st = [3, 5, 7, 9, 11, 13][Math.floor(bars() * 6)];
+      if (!hits[st - 1] && !hits[st + 1] && bars() < 0.6) hits[st] = 1;
+    }
+  });
+}
+
 function songBarView(beat, bar) {
   const t = resolveTemplate(beat.genre, beat.style);
   const at = beat.sectionAt[bar];
@@ -717,7 +951,8 @@ function songBarView(beat, bar) {
   const tracks = {}, present = {};
   const probs = Object.assign({}, pattern.probs);
   names.forEach(name => {
-    const enterAt = Math.floor(n * (rules.enter[name] || 0));
+    const spine = beat.voice && beat.voice.groove && sec.kind !== "intro" && ["kick", "snare", "clap", "bass", "chords", "hat", "shaker"].includes(name);   // a beat under a voice: the groove is there from the first bar of every part
+    const enterAt = spine ? 0 : Math.floor(n * (rules.enter[name] || 0));
     const exitAt = rules.exit[name] ? Math.floor(n * rules.exit[name]) : n;
     present[name] = Boolean(beat.presence[at.index][name]) && b >= enterAt && b < exitAt;
     tracks[name] = present[name] ? pattern.hits[name].slice() : zeros16();
@@ -804,9 +1039,10 @@ function songBarView(beat, bar) {
 
   // Hat rolls (trap hats): some steps get a quick double or triplet
   const doubles = {};
-  if (t.hatRoll && present.hat && !build && (sec.kind === "chorus" || isFill)) {
+  if (t.hatRoll && present.hat && !build && (sec.kind === "chorus" || isFill || t.hatRoll.everywhere)) {
     const hatDoubles = {};
-    t.hatRoll.steps.forEach(s => { if (tracks.hat[s] && rng() < t.hatRoll.prob) hatDoubles[s] = t.hatRoll.kind; });
+    const rollProb = t.hatRoll.prob * (sec.kind === "chorus" || isFill ? 1 : 0.6);        // verses roll a little less than the chorus
+    t.hatRoll.steps.forEach(s => { if (tracks.hat[s] && rng() < rollProb) hatDoubles[s] = t.hatRoll.kind; });
     doubles.hat = hatDoubles;
   }
 
@@ -818,6 +1054,7 @@ function songBarView(beat, bar) {
     else if (sec.kind === "bridge") hook = beat.hooks.bridge;
     else if (sec.kind === "pre") hook = beat.hooks.pre;
     else if (sec.kind === "outro" && b < 2) hook = beat.hooks.chorus;
+    if (beat.answer) hook = null;                    // a beat made around a voice: the lead only answers the singer (see below), it never plays over the singing
     if (hook) {
       lead = { midi: zeros16(), dur: zeros16() };
       const barNotes = hook.notes.filter(note => note.bar === b % hook.bars);
@@ -834,15 +1071,48 @@ function songBarView(beat, bar) {
     }
   }
 
+  // Call and response: in a pause of the singer the lead answers with a short phrase that echoes the contour of what was just sung (beat.answer, made by Vocal Sketch)
+  const ans = beat.answer && beat.answer.bars[bar];
+  if (present.lead && ans && ans.length && !build && !isFill) {
+    lead = lead || { midi: zeros16(), dur: zeros16() };
+    ans.forEach(nt => { tracks.lead[nt.step] = 1; lead.midi[nt.step] = nt.midi; lead.dur[nt.step] = nt.len; });
+  }
+  // Spice: this beat's signature moves (spice.js). After the section rules, before the voice makes room.
+  const spiceDur = {};
+  if (beat.spice) {
+    const sc = {
+      kind: sec.kind, b, n, bar, pass, isFirst, isLast, hasNext, nextKind: hasNext ? beat.sections[at.index + 1].kind : null, final: Boolean(sec.final),
+      build, isFill, present, tracks, probs, doubles, fx, rng, bassTones, dur: spiceDur
+    };
+    spiceApply(beat, sc);
+    bassTones = sc.bassTones || bassTones;
+  }
+  applyVoice(beat, bar, tracks, present, build || isFill);
+  applyVariety(beat, bar, tracks, present, build || isFill);
+  applyGroove(beat, bar, tracks, probs, present, build || isFill);      // last, so the pulse and the backbeat survive the thinning above
   return finishView(beat, t, {
     tracks, probs, present, c1, c2, lead, leadExtra, doubles, fx, isFill, build,
-    voicing, strumDown, bassTones,
+    voicing, strumDown, bassTones, dur: spiceDur,
     phraseBar: b, bars: n, barNumber: bar, dyn: rules.dyn,
     kind: sec.kind, label: sec.label, sec: rules.sec, sectionIndex: at.index
   });
 }
 
 // One bar of the plain loop (the old behaviour): a short phrase with fills
+// The spice of a plain loop (no sections): the same moves, played at the energy of a chorus-ish phrase, and no lifts into anything
+function loopSpice(beat, bar, bars, phraseBar, isFill, tracks, probs, present) {
+  const out = { doubles: {}, fx: {}, bassTones: null, dur: {} };
+  if (!beat.spice) return out;
+  const sc = {
+    kind: "loop", b: phraseBar, n: bars, bar, pass: 0, isFirst: phraseBar === 0, isLast: false, hasNext: false, nextKind: null, final: false,
+    build: false, isFill, present, tracks, probs, doubles: out.doubles, fx: out.fx, rng: seededRandom(((beat.seed || 1) ^ Math.imul(bar + 91, 2654435761)) >>> 0),
+    bassTones: null, dur: out.dur
+  };
+  spiceApply(beat, sc);
+  out.bassTones = sc.bassTones || null;
+  return out;
+}
+
 function loopBarView(beat, bar, enabled) {
   const t = resolveTemplate(beat.genre, beat.style);
   const names = Object.keys(t.tracks);
@@ -854,9 +1124,10 @@ function loopBarView(beat, bar, enabled) {
     const present = {};
     const tracks = {};
     names.forEach(name => { present[name] = true; tracks[name] = beat.tracks[name].slice(); });
+    const lp = Object.assign({}, beat.loopProbs), ex = loopSpice(beat, bar, barsInPhrase, bar % barsInPhrase, false, tracks, lp, present);
     return finishView(beat, t, {
-      tracks, probs: beat.loopProbs, present, c1, c2: c1, phraseBar: bar % barsInPhrase,
-      bars: barsInPhrase, barNumber: bar
+      tracks, probs: lp, present, c1, c2: c1, phraseBar: bar % barsInPhrase,
+      bars: barsInPhrase, barNumber: bar, doubles: ex.doubles, fx: ex.fx, bassTones: ex.bassTones, dur: ex.dur
     });
   }
 
@@ -878,8 +1149,10 @@ function loopBarView(beat, bar, enabled) {
   }
 
   const probs = Object.assign({}, beat.loopProbs, isFill ? arr.fillProbs : {});
+  const ex = loopSpice(beat, bar, arr.bars, phraseBar, isFill, tracks, probs, present);
   return finishView(beat, t, {
-    tracks, probs, present, c1, c2: c1, isFill, phraseBar, bars: arr.bars, barNumber: bar
+    tracks, probs, present, c1, c2: c1, isFill, phraseBar, bars: arr.bars, barNumber: bar,
+    doubles: ex.doubles, fx: ex.fx, bassTones: ex.bassTones, dur: ex.dur
   });
 }
 
@@ -939,17 +1212,35 @@ function rebuildArrangement(beat, bars) {
 }
 
 // Same beat, different song form (full song / short song / loop). Drums, chords and hook stay.
-function rebuildStructure(beat, structureId) {
+//   structureId: a preset ("full", "short", "loop"), "auto" (a new random form) or "custom" (with a form: [kind, bars, from?]).
+//   A form entry's third item says which old section it came from, so that section keeps the tracks it had.
+function rebuildStructure(beat, structureId, form, source) {
   const t = resolveTemplate(beat.genre, beat.style);
-  const made = makeSections(structureId);
+  let useForm = null, id = structureId, formSource = "preset";
+  if (structureId === "auto") { useForm = randomForm(); id = "custom"; formSource = "auto"; }
+  else if (structureId === "custom") { useForm = cleanForm(form); if (!useForm.length) useForm = randomForm(); formSource = source || "edited"; }
+  else if (!_structures[structureId]) id = "full";
+  const made = makeSections(id, useForm);
+  const presence = rollPresence(t, made.sections);
+  const fills = pickFills(t, made.sections);
+  if (useForm) useForm.forEach((e, i) => {
+    const old = e[2];
+    if (old !== undefined && beat.presence && beat.presence[old] && beat.sections[old] && beat.sections[old].kind === e[0]) {
+      presence[i] = Object.assign({}, beat.presence[old]);
+      fills[i] = beat.fillPick[old];
+    }
+  });
+  if (typeof producerArrangeSong === "function" && beat.pack && beat.pack.vibe) producerArrangeSong(made.sections, presence, beat.sound, beat.pack.vibe, beat.genre);
   return {
     ...beat,
-    structure: structureId,
+    structure: id,
+    formSource,
+    form: made.sections.map(x => [x.kind, x.bars]),
     sections: made.sections,
     sectionAt: made.sectionAt,
     totalBars: made.sections.length ? made.totalBars : beat.arrangement.bars,
-    presence: rollPresence(t, made.sections),
-    fillPick: pickFills(t, made.sections)
+    presence,
+    fillPick: fills
   };
 }
 
@@ -981,9 +1272,20 @@ function generatePattern(genreKey, options = {}) {
   const t = resolveTemplate(genreKey, styleId);
   const groove = chooseGroove(t);
   const riffs = keeps("low") && from.riffs ? from.riffs : chooseRiffs(t);
-  const picked = pickPack(t, options.pack);             // a matched pack of kit, keys, percussion... (or the style's own mix)
-  const autoSound = picked.sound;
-  const structure = _structures[options.structure] ? options.structure : "full";
+  // Drums and percussion: one of the five recordings of every type. A locked group (drums, hats, percussion) keeps the
+  // last beat's recordings; everything else gets a new pick that differs from the last beat's.
+  const lastDrums = from && from.sound && from.sound.drums && from.sound.drums.genre === genreKey ? from.sound.drums : null;
+  const keptDrums = {};
+  if (lastDrums) SAMPLE_TYPES.forEach(type => { if (keeps(_groups[type])) keptDrums[type] = lastDrums[type]; });
+  const drums = pickDrumSamples(genreKey, lastDrums, Object.assign({}, options.drums, keptDrums));
+  // The song form: a preset, a new random one ("auto"), or the user's own list of parts ("custom")
+  let structure = _structures[options.structure] ? options.structure : "full", form = null, formSource = "preset";
+  if (options.structure === "auto") { form = randomForm(); structure = "custom"; formSource = "auto"; }
+  else if (options.structure === "custom") {
+    form = cleanForm(options.form || (from && from.form));
+    if (!form.length) form = randomForm();
+    structure = "custom"; formSource = options.form ? "edited" : (from && from.formSource) || "edited";
+  }
 
   // Key, chords and hook
   let key, harmony, hooks, chordsPerBar;
@@ -999,15 +1301,48 @@ function generatePattern(genreKey, options = {}) {
     hooks = buildHooks(t, harmony.degrees, chordsPerBar);
   }
 
+  // The tempo, then the sounds: the producer needs the key and the tempo to choose instruments that fit (see producer.js).
+  // The producer decides, with the vibe the person asked for (or its own).
+  const bpm = Number.isFinite(options.bpm) ? options.bpm : randomInt(t.bpm[0], t.bpm[1]);
+  let picked;
+  if (options.keepSound && from && from.sound && from.pack) {
+    // A variation keeps the instruments (and the producer's note) of the beat it comes from
+    const tonal = {};
+    ["bass", "chords", "pad", "pluck", "lead", "log"].forEach(k => { tonal[k] = from.sound[k]; });
+    picked = { sound: tonal, pack: Object.assign({}, from.pack, { blurb: String(from.pack.blurb || "").split(" Arrangement:")[0] }) };
+  } else {
+    const lastSound = from && from.sound && from.genre === genreKey ? from.sound : null;
+    const producerMade = producerPick({
+      genre: genreKey, style: styleId, styleName: t.styleName, scale: key.scale, bpm,
+      keyName: ROOT_LABELS[key.root] + " " + (SCALE_LABELS[key.scale] || key.scale).toLowerCase(),
+      vibe: options.vibe, last: lastSound,
+      keep: Object.fromEntries((options.keepRoles || []).filter(r => from && from.sound && from.sound[r]).map(r => [r, from.sound[r]]))
+    });
+    picked = { sound: producerMade.sound, pack: { id: "producer", name: "Producer's pick: " + VIBES[producerMade.vibe], blurb: producerMade.note, vibe: producerMade.vibe, swapped: [] } };
+  }
+  const autoSound = picked.sound;
+
   // The rhythm of every kind of section
   const patterns = buildPatterns(t, groove, from, locked, riffs);
   const loopProbs = patterns.chorus.probs;
   const tracks = {};
   Object.keys(patterns.chorus.hits).forEach(name => { tracks[name] = patterns.chorus.hits[name].slice(); });
 
-  const made = makeSections(structure);
+  const made = makeSections(structure, form);
   const phraseBars = options.phraseBars === 8 ? 8 : 4;
   const arrangement = buildArrangement(t, phraseBars, tracks, from, locked);
+  // The producer reviews which parts play where (see producer.js)
+  const songPresence = rollPresence(t, made.sections);
+  // The spice: this beat's own signature (see spice.js). A re-style that keeps the groove keeps the spice too.
+  const spice = typeof spiceRoll === "function"
+    ? spiceRoll(genreKey, styleId, t, { from, presence: songPresence, sections: made.sections, riffs, tracks, keepSpice: options.keepSpice })
+    : null;
+
+  const finalSound = Object.assign({}, autoSound, options.sound || {});
+  const arrangeNotes = typeof producerArrangeSong === "function"
+    ? producerArrangeSong(made.sections, songPresence, finalSound, picked.pack.vibe, genreKey).concat(producerArrangeLoop(arrangement, finalSound, picked.pack.vibe)) : [];
+  if (arrangeNotes.length) picked.pack.blurb += " Arrangement: " + arrangeNotes.join("; ") + ".";
+  if (spice && typeof spiceClaim === "function") spiceClaim(spice, songPresence, made.sections, t);
 
   const durations = {};
   Object.keys(tracks).forEach(name => { durations[name] = gateLengths(tracks[name], t.gate[name]); });
@@ -1017,7 +1352,7 @@ function generatePattern(genreKey, options = {}) {
     style: styleId,
     styleName: t.styleName,
     seed: randomInt(1, 2147483646),
-    bpm: Number.isFinite(options.bpm) ? options.bpm : randomInt(t.bpm[0], t.bpm[1]),
+    bpm,
     key,
     chordsPerBar,
     harmony,
@@ -1031,17 +1366,21 @@ function generatePattern(genreKey, options = {}) {
       : Array.from({ length: STEPS_PER_BAR }, () => pick(t.bassTones)),
     logTones: keeps("low") ? from.logTones.slice()
       : Array.from({ length: STEPS_PER_BAR }, () => pick(t.logdrum.tones)),
-    sound: Object.assign({}, autoSound, options.sound || {}),
+    sound: Object.assign({}, autoSound, options.sound || {}, { drums }),
     autoSound,
     pack: picked.pack,                                   // { id, name, blurb, swapped } or null
     riffs,
     structure,
+    formSource,
+    form: made.sections.map(x => [x.kind, x.bars]),
     sections: made.sections,
     sectionAt: made.sectionAt,
     totalBars: made.sections.length ? made.totalBars : phraseBars,
-    presence: rollPresence(t, made.sections),
+    presence: songPresence,
     fillPick: pickFills(t, made.sections),
     arrangement,
+    spice,
+    ...(spice && spice.swing != null ? { swing: spice.swing } : {}),
     ...humanizeTracks(t, tracks, loopProbs)
   };
 }

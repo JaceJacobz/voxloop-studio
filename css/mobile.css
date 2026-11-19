@@ -289,3 +289,26 @@ button .ico { pointer-events: none; }
 .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--rec); vertical-align: 0; margin-right: 2px; animation: recBlink 1s steps(2, jump-none) infinite; }
 .live-clip { color: #fff; margin-left: 4px; }
 @keyframes recBlink { 0% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ---- v2.11.0 phone fixes ---- */
+/* A toggle's hidden checkbox stays inside its label. The Melody one was 390px wide and reached past the screen,
+   which made the whole Beat Lab page wider than the phone (the browser then zoomed out or scrolled sideways). */
+.toggle { position: relative; }
+.toggle input[type="checkbox"] { left: 0; top: 0; width: 1px !important; height: 1px !important; max-width: 1px; }
+@media (max-width: 720px) {
+  /* thumb-sized targets */
+  #bl-locks button { min-height: 38px; }
+  .beatlab-why > summary, .formmore > summary { min-height: 38px; display: flex; align-items: center; }
+  .top-bar .nav-toggle { min-width: 40px; min-height: 40px; }
+  /* labels that were 10px or less */
+  #bl-timeline .seg span { font-size: 0.72rem; }
+  #bl-grid .row .label { font-size: 0.72rem; }
+  #bl-grid .cell { font-size: 0.7rem; }
+  #bl-keepRoles button { min-height: 38px; }
+  .panel-card > summary, .edit-summary > summary { min-height: 38px; display: flex; align-items: center; }
+  #bl-mixer button.mini { min-width: 36px; min-height: 36px; }
+  #bl-grid .label-sub { font-size: 0.68rem; }
+  /* the song's sections: every one is wide enough for a thumb, and the bar scrolls when there are many */
+  #bl-timeline { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  #bl-timeline .seg { min-width: 40px; flex-shrink: 0; }
+}

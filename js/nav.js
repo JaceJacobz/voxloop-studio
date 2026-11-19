@@ -19,6 +19,10 @@
         el.innerHTML = "";
         const span = document.createElement("span"); span.textContent = text; el.appendChild(span);
         if (action) { const b = document.createElement("button"); b.type = "button"; b.textContent = action.label; b.addEventListener("click", () => { el.classList.remove("is-on"); action.run(); }); el.appendChild(b); }
+        // keep the message above a bar fixed to the bottom of the screen (the Beat Lab player, the Studio transport)
+        let lift = 0;
+        document.querySelectorAll(".blux-dock, .studio-transport").forEach((bar) => { const r = bar.getBoundingClientRect(); if (r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) lift = Math.max(lift, window.innerHeight - r.top); });
+        el.style.bottom = lift ? (lift + 12) + "px" : "";
         el.classList.add("is-on");
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => el.classList.remove("is-on"), action ? 6000 : 3200);

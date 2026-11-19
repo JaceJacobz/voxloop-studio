@@ -59,4 +59,33 @@ for (let i = 0; i < 36; i++) { deg = Math.max(0, Math.min(13, deg + Math.round((
 const inkey = S.render(plan, { tract: 1, sibHz: 5400, seed: 5 });
 const a = run(inkey.x, inkey.sr, { spokenAuto: false }).selective, b = run(inkey.x, inkey.sr).selective;
 ok(a.corrected === b.corrected && a.partial === b.partial && a.skipped === b.skipped, "a melody already in the key gets exactly the same treatment", "corrected " + b.corrected + ", partial " + b.partial + ", left " + b.skipped);
+
+// 5. "Land every note on the key": held notes land closer to the key, fragments glide instead of snapping, and it does not make the
+//    take less natural (no more big pitch jumps than the raw take, vibrato mostly kept).
+const distKey = (m) => { let b = 1e9; for (const pc of inKey) { let d = ((m - pc) % 12 + 12) % 12; d = Math.min(d, 12 - d); b = Math.min(b, d * 100); } return b; };
+const med = (a) => { a = a.filter((x) => !isNaN(x)).sort((p, q) => p - q); return a.length ? a[a.length >> 1] : NaN; };
+function flow(seed, tonic, secs) {                                                 // fast melodic flow: short notes, each sliding, in a clashing key
+  let sd = seed; const rnd = () => { sd = (sd * 1664525 + 1013904223) >>> 0; return sd / 4294967296; };
+  const degs = [0, 2, 4, 5, 7, 9, 11], pl = []; let t = 0.3, dg = 4;
+  while (t < secs) { dg = Math.max(0, Math.min(13, dg + Math.round((rnd() - 0.5) * 5))); const m = tonic + 12 * Math.floor(dg / 7) + degs[dg % 7], dur = 0.11 + rnd() * 0.25, gl = (rnd() < 0.5 ? -1 : 1) * 0.35;
+    pl.push({ t0: t, dur, vowel: Math.floor(rnd() * 5), hz: (tt) => 440 * Math.pow(2, (m + gl * (Math.min(1, tt / dur) * 2 - 1) - 69) / 12) }); t += dur + 0.03 + (rnd() < 0.12 ? 0.4 : 0); }
+  return pl;
+}
+const fv = S.render(flow(8, 55, 24), { tract: 1, sibHz: 5400, seed: 3 });
+const t0 = eng.trackClean(fv.x, fv.sr), hopS = t0.hop / fv.sr, fnotes = eng.segmentNotes(t0.midi).filter((n) => (n.end - n.start) * hopS >= 0.07);
+function coreStats(o) {
+  const r = eng.process([fv.x], fv.sr, Object.assign({}, base, { spokenAuto: true }, o)), t1 = eng.trackClean(r.audio.tuned[0], fv.sr);
+  const cores = fnotes.map((n) => med(Array.from(t1.midi.slice(Math.round(n.start + (n.end - n.start) * 0.3), Math.round(n.start + (n.end - n.start) * 0.8))))).filter((x) => !isNaN(x)).map(distKey);
+  let jumps = 0, prev = NaN; for (const m of t1.midi) { if (isNaN(m)) { prev = NaN; continue; } if (!isNaN(prev) && Math.abs(m - prev) * 100 > 100) jumps++; prev = m; }
+  return { w10: cores.filter((c) => c <= 10).length / cores.length, w25: cores.filter((c) => c <= 25).length / cores.length, jumps, glided: r.selective.glided || 0 };
+}
+let rawJumps = 0, pv = NaN; for (const m of t0.midi) { if (isNaN(m)) { pv = NaN; continue; } if (!isNaN(pv) && Math.abs(m - pv) * 100 > 100) rawJumps++; pv = m; }
+const cur = coreStats({ glideShort: false }), land = coreStats({ lockMelodic: true, settleShortNotes: true });
+ok(land.w10 >= cur.w10 + 0.03, "landing every note puts more held notes within 10 cents of the key", Math.round(100 * cur.w10) + "% -> " + Math.round(100 * land.w10) + "%");
+ok(land.w25 >= cur.w25, "...and within 25 cents", Math.round(100 * cur.w25) + "% -> " + Math.round(100 * land.w25) + "%");
+// snapping notes onto discrete pitches creates some real note-to-note steps, so allow a modest rise (on the real vocal it FELL: 29 -> 20)
+ok(land.jumps <= rawJumps * 1.25 + 2, "...without a pile of extra big pitch jumps (no stair-stepping)", "raw " + rawJumps + ", landed " + land.jumps);
+ok(land.glided > 0 && cur.glided === 0, "fast-slide fragments glide instead of being snapped (and not when glide is off)", "glided " + land.glided);
+const offSw = coreStats({ lockMelodic: false, settleShortNotes: false, glideShort: false });
+ok(Math.abs(offSw.w10 - cur.w10) < 0.01 && offSw.glided === 0, "with the switch off it behaves as before");
 console.log(pass + " passed, " + fail + " failed"); process.exit(fail ? 1 : 0);

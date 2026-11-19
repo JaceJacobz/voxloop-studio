@@ -23,6 +23,7 @@ const MIXDOC = {
   headroomDb: -6,          // loudest peak of the finished beat (room for a vocal)
   peakTolDb: 1,            // within this much of the target is fine
   maxLowShare: 0.60,       // most energy allowed below 150 Hz (the original genres measure 48-54%)
+  lowShareByGenre: { trap: 0.68 },   // an 808 is meant to carry more of the weight
   lowStepDb: 1.5,          // each pass lowers the bass-heavy tracks by this much...
   maxLowTrimDb: 4.5,       // ...but never by more than this in total
   maxVocalHog: 0.40,       // a bass / keys / pad holding more than this share of 1-4 kHz is crowding the singer
@@ -152,6 +153,7 @@ async function mixDoctor({ beat, settings, render, say }) {
   const heardNow = n => !settings.isAudible || settings.isAudible(n);
   const names = TRACK_ORDER.filter(n => played[n] && heardNow(n));
   const balance = TEMPLATES[beat.genre].balance;
+  const maxLow = MIXDOC.lowShareByGenre[beat.genre] || MIXDOC.maxLowShare;
   const findings = [];
   const zero = {}; TRACK_ORDER.forEach(n => { zero[n] = 0; });
   const flat = Object.assign({}, settings, { trim: Object.assign({}, zero), autos: Object.assign({}, zero), masterDb: 0, vocalSpaceOn: false, masteringOn: false });
@@ -224,7 +226,7 @@ async function mixDoctor({ beat, settings, render, say }) {
     if (Number.isFinite(peakErr) && Math.abs(peakErr) > MIXDOC.peakTolDb / 2) { masterDb = Math.max(-24, Math.min(12, masterDb + peakErr)); changed = true; }
 
     // low end
-    if (lowShare > MIXDOC.maxLowShare && lowTrim < MIXDOC.maxLowTrimDb) {
+    if (lowShare > maxLow && lowTrim < MIXDOC.maxLowTrimDb) {
       const step = Math.min(MIXDOC.lowStepDb, MIXDOC.maxLowTrimDb - lowTrim);
       lowFallback.forEach(n => { autos[n] -= step; });
       lowTrim += step; lowFixed = true; changed = true;
@@ -252,7 +254,7 @@ async function mixDoctor({ beat, settings, render, say }) {
       ? { status: "ok", text: "Headroom: the loudest peak is " + md1(facts.peakDb) + " dBFS, so a vocal has room and nothing clips." }
       : { status: "warn", text: "Headroom: the loudest peak is " + md1(facts.peakDb) + " dBFS (aimed at " + MIXDOC.headroomDb + ")." });
     if (lowFixed) {
-      findings.push(lowNow <= MIXDOC.maxLowShare
+      findings.push(lowNow <= maxLow
         ? { status: "fixed", text: "Low end: " + mdPct(lowBefore) + " of the energy was under 150 Hz (heavy for a vocal). Lowered the " + lowFallback.map(n => MD_NAMES[n]).join(" and ") + " by " + md1(lowTrim) + " dB, now " + mdPct(lowNow) + "." }
         : { status: "warn", text: "Low end is still heavy (" + mdPct(lowNow) + " under 150 Hz) after lowering it by " + md1(lowTrim) + " dB. Pick a lighter bass or log drum in the Sound panel." });
     } else {

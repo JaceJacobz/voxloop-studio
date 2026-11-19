@@ -28,6 +28,16 @@ python3 -m http.server 8080
 
 Open `http://localhost:8080`.
 
+## Host it on GitHub Pages (to test on a phone)
+
+1. Create a new repository on github.com (public is simplest; Pages on private repos needs a paid plan).
+2. Upload the *contents* of this folder (so `index.html` is at the top of the repository, not inside another folder). Easiest: on the repository page choose **Add file > Upload files** and drag everything in. Very large drops can time out, so if it does, upload in two or three batches (for example `samples/` and `fileaudio/` on their own), or use git on a computer: `git init`, `git add .`, `git commit -m "Voxloop"`, `git remote add origin <url>`, `git push -u origin main`.
+3. In the repository: **Settings > Pages > Build and deployment > Source: Deploy from a branch**, Branch `main`, folder `/ (root)`, Save.
+4. After a minute the app is at `https://<your-name>.github.io/<repository-name>/`. Open it on the phone. Microphone recording works there because it is https.
+5. Updating: upload the changed files again (same names replace the old ones). The app keeps a copy for offline use and refreshes itself the next time it is opened with internet; if a phone still shows the old version, close the tab and open it again once.
+
+`.nojekyll` (an empty file) is included so GitHub serves every file as it is. All paths in the app are relative, so it works under `/<repository-name>/` as well as at the top of a site. Total size is about 40 MB (the biggest single file is 350 KB), well inside GitHub's limits.
+
 ## Structure
 
 ```
@@ -421,3 +431,393 @@ Found on a real Afrobeats cover: 194 of 219 notes were classed "speech-like" (ea
 - `pitchcorrect.js planCorrection` now judges each LINE (notes with no 0.35 s gap): how **pitched** it is (tracker certainty), how much of it is **held notes** (stays within 35 cents for 120 ms; a melody has them, a rap contour only glides: 0.48 on the real vocal, 0.42-0.75 on sung synthetics, 0.00 on three synthetic raps), and how much of it **clashes** with the key. Lift = melodic x clash; speech-like notes on a lifted line are tuned in proportion to it. Rap-like lines stay as performed.
 - Tune step: new switch "Tune melodic lines that clash with the beat" (on by default; `spokenAuto`), the status line now says why notes were left alone (close to the key already / rap-like / lifted), and a one-tap "Tune the N rap-like notes too". Autopilot's summary carries the same "Why".
 - Real vocal through the app: in the beat's key 59% -> 87%; melody's own key D# major -> A major (the beat's key); big pitch jumps 30 -> 25. Tests: `node tests/spoken.test.js`.
+
+## Land every note on the key (Tune step switch, on by default)
+Goal: every HELD note of a melodic line sits on a note of the key, and it still sounds sung. Measured on a real cover (126 held notes, the app's own settings: strength 85%, retune 50 ms, flatten 40%):
+| | within 5 c | within 10 c | within 25 c | frames in key | big pitch jumps | vibrato kept |
+|---|---|---|---|---|---|---|
+| raw vocal | 6% | 13% | 29% | 59% | 30 | 100% |
+| app before | 21% | 44% | 81% | 87% | 25 | 71% |
+| app now | 70% | 83% | 95% | 90% | 20 | 61% |
+What it does (`pitchcorrect.js planCorrection`, options `lockMelodic`, `settleShortNotes`, `glideShort`):
+- **Lock**: a confidently melodic, clashing line (lift >= 0.5) is pulled the whole way onto the key, whatever the strength slider and the line's zone strength say; those still govern every other note.
+- **Short notes settle**: one retune time cannot land a 90 ms note. A note's retune time is capped at 14% of its own length (floor 8 ms); long notes, scoops, slides and vibrato keep the slow glide. 14% is where accuracy stops improving and vibrato starts to be squashed (10% -> 48% vibrato kept, 4% -> 42%).
+- **Fragments glide**: bits too short to settle on (under ~57 ms with the settle clock; otherwise under twice the retune time) get no target of their own; the correction glides through them between the real notes before and after.
+- Every frame in key is impossible by design: the slides between notes pass through other pitches. The aim is every held note.
+- Known limits: the misses left (about 17% beyond 10 cents, 5% beyond 25) are mostly 70-120 ms notes and notes that slide inside themselves. Tone/timbre after tuning needs ears. Tests: `node tests/spoken.test.js`.
+- Diagnostics: the app keeps the full options of the last tune in `VLState.tuneOptionsUsed`.
+
+## Beat Lab drums are recordings now (v2.4)
+
+**What changed.** Beat Lab no longer synthesizes its drums. Every kick, snare, clap, rim, hi-hat, open hat, shaker, percussion and bell is a real recording (drum-machine hits and acoustic hand percussion) in `samples/<genre>/<type>/<1-5>.wav`. Each genre has **5 recordings per type**, and every new beat picks one of the five for each type at random, never the one the last beat used. The synth drum kits, the extra kit table, the percussion/bell/shaker synth kinds and the drum parts of the sound packs were removed. The Record-your-vocal panel was removed from Beat Lab (recording stays in Studio).
+
+**Still synthesized:** keys, pad, bass, lead, pluck, log drum and the impact/crash transition effects. These follow the chords, which one recording cannot do. The sound packs (`js/packs.js`) now cover these tonal parts only.
+
+**Files.** `js/samplebank.js` (picking, loading, caching), `js/samplemap.js` (generated: original name of each file), `samples/CREDITS.md` (sources and licences), `tools/build_samples.py` (rebuilds `samples/` from the source libraries; the curated list of 180 files is at the top). A beat stores its picks as `beat.sound.drums`, so Studio and every download play the same files. Sound panel, "Drum samples": one select per type, "Auto" (new pick every beat) or a fixed number. Locking the drums, hats or percussion group keeps their recordings. `DRUM_MAKEUP_DB` in `engine.js` sets each type's level against the mixer.
+
+**Licence note.** Hand percussion and claps are CC0 (VCSL). The drum-machine hits come from a community collection that states no licence: see `samples/CREDITS.md` before publishing the app.
+
+**Checked** in Chromium: all four genres load, every new beat changes every type, picks stay when fixed, playback and the offline download render play the drums (no clipping, drums and bass within a few dB). Not checked by ear.
+
+## v2.5: real instruments, a producer brain and Trap
+- Beat Lab now plays **recorded instruments** (piano, e-piano, organ, guitars, strings, trumpet, sax, flute, kalimba, marimba, 808 bass, upright/electric bass and more) next to the synths. A beat stores them as sound ids like `s-piano`.
+- **js/producer.js** is the "producer": it picks the vibe (or uses the one you choose in Sound > Vibe), then scores every instrument for every part by genre, style, key (minor/major), tempo and vibe, and only uses a recording where one fits. It follows mixing rules (no two instruments of one family, no instrument twice, parts moved into the instrument's range) and writes a note saying what it chose and why. It is a rule-based system written as music knowledge, not a language model.
+- New **Trap** genre (Hard Trap, Melodic Trap, Drill): half-time snare, rolling hats, a pitched/gliding 808, and its own drum kit (samples/trap).
+- Recorded instruments are downloaded the first time a beat uses them (about 150-400 KB each) and cached by the service worker.
+
+### v2.5.1: nothing is synthesized any more
+- Every sound in Beat Lab is a recording: drums, percussion, all tonal parts, the log drum (recorded marimba / balafon / mbira, played short), the crash and the impact. The synth classes and presets are removed; beats saved by an older version map their synth sounds to the nearest recording.
+- The instrument packs are gone: the producer (js/producer.js) chooses every part, guided by the Vibe selector. The melody tool's trumpet is the recorded trumpet, and the Studio "fill" tool adds recorded drums and instruments (kit samples for the beat's genre, recorded piano / cello / bass / marimba) instead of generated ones.
+- Mixing: js/mixcal.js re-sets the starting faders for the recordings (measured against each genre's balance targets); the live auto-mix still fine-tunes during playback.
+
+### v2.5.2: checked and fixed
+- French horn: removed its two highest notes (a 14-semitone hole in the recordings); higher notes now fold down an octave.
+- 808s: the raw TR-808 kick glides in pitch for 0.4 s, which made short bass notes sound up to 2.5 semitones sharp. They are now built on the steady part of the same recording and measure within a few cents of the written note from 0.1 s on.
+- Violin, trumpet and sax get a gentler top end (they were harsh in the 2-6 kHz range when stacked); bass levels were re-matched.
+
+### v2.5.3: the producer arranges, too
+- After choosing instruments, the producer reviews which parts play in each section (js/producer.js, producerArrangeSong): one voice owns the melody in calm vibes, hard/dark verses stay bare with the pad arriving as a lift, calm bridges thin out, and the last chorus always brings the lead in. What it changed is listed in the beat's note.
+
+### v2.5.4: Variation and "Make it ..." buttons (Beat Lab)
+- **Variation** keeps the key, chords, drums and instruments; two of hats / percussion / bass line (random) and the arrangement are new.
+- **Make it Darker / Brighter / More bounce / Calmer / More romantic / Harder / Dreamier** keeps the key, chords, drums, hats and bass line; the producer picks new instruments and a new arrangement for that mood (never repeating the last instrument for a part).
+
+## v2.5.5
+- Mix Doctor checked against the new recorded instruments: it works on all five genres. It is a mix checker, separate from the producer brain, so it was kept as is.
+- Trap now has its own low-end limit (68%) because an 808 is meant to carry more weight, so Mix Doctor no longer trims the bass for that.
+- Open hats get a little more level in the starting mix.
+
+## v2.5.6
+- Cleanup: removed 21 unused old synth `sound:` lists from the genre templates (nothing read them since every sound is a recording now). All genres re-tested.
+
+## v2.5.7
+- Melodies: the chorus and bridge hooks now ask and answer. Bars 1-2 end open (on the 3rd or 5th of the chord, like a question), bar 3 turns the same moves upside down, and the last note settles home. Checked on 200 generated beats across all genres.
+- Faster generation: while a beat plays, Beat Lab quietly fetches the instruments the producer is most likely to pick next for that genre, one recording at a time. It is skipped on data-saver and low-memory phones.
+
+## v2.5.9
+- Song form editing is now per part, on the timeline itself. Tap a block (Intro, Verse, Chorus, ...) and use the bar under the timeline to change its type, make it shorter or longer (2 bars at a time), move it earlier or later, duplicate it, or remove it.
+- A removed part goes greyed into a "Removed" corner under the timeline. Tap it to bring it back where it was, with the same tracks it had. The tray empties when a new beat is made.
+- "More form tools" keeps: add a part, start with the chorus, shuffle the parts, new random form.
+- Songs are different every time ("Auto (varied)" is the default Form): can open with the chorus, skip intro/pre/bridge, parts of different lengths.
+
+## v2.5.10
+- "No sound" help. Every sound is a recording now, so if the sound files cannot be loaded the beat is silent. Beat Lab now says why in the status line: page opened from a folder (file://) instead of a web address, sound files that failed to download, or the browser holding audio back.
+- iPhone/iPad: Play now tells the phone it is playing media, so the ring/silent switch no longer mutes the beat.
+
+## v2.5.11
+- Works when you double-click index.html (file://). Browsers refuse to load audio files from a folder, which made Beat Lab silent. The audio now also ships as small script files in `fileaudio/` (made by `python3 tools/build_fileaudio.py`), and the app reads from those when opened from a folder. Over a web address nothing changes. Keep the `fileaudio` and `samples` folders next to index.html.
+- If you add or replace a sample, run `python3 tools/build_samples.py` / `build_instruments.py` as before and then `python3 tools/build_fileaudio.py`.
+
+## v2.6.0
+- Two downloads instead of one big one, so the audio is never shipped twice (about 13-14 MB each, down from 26 MB):
+  - **folder edition** (`-folder.zip`): for double-clicking index.html. Audio as `fileaudio/*.js` only.
+  - **web edition** (`-web.zip`): for hosting online. Audio as `samples/` only.
+  Build both with `python3 tools/package.py <version> <out_dir>`.
+- Real log drum importer for amapiano: `python3 tools/add_logdrum.py <folder> "licence note"`. Drop one recording per note in a folder (name them with the note, e.g. `C2.wav`, or the MIDI number, or let it measure the pitch). It trims and levels them, registers `log-drum`, matches its starting level to the marimba, makes the producer prefer it for amapiano's log drum, and rebuilds `fileaudio/` and the service worker. Tested with synthetic tones, not real recordings.
+
+## v2.6.1
+- "Why these sounds?" under Instruments: for every instrument of the beat, what the producer saw in it, and how well it suits the genre and the mood ("a perfect fit", "a good fit", "an unusual choice", "a bold choice"), plus how the song is arranged.
+- Mix-drift test: `tests/mixdrift.js` renders beats of every genre and fails if a main track moves more than 4 dB (pluck/pad 6.5 dB) from `tests/mix-baseline.json`, drifts too far from its target, or the mix loses headroom (peak above -1 dBFS). After a deliberate sound change, run it with `--update` to accept the new levels. Needs Playwright and a server (see the top of the file).
+- Hi-hats of afrobeats and afrohouse start a little louder (they measured quiet).
+
+## v2.6.2
+- **Keep instrument**: a row of buttons under the Lock row, one per instrument of the beat (e.g. "Bass: 808 punch", "Lead: Trumpet"). Press one and New beat keeps that instrument while the producer builds the rest around it. Checked: the bass stayed the same over 8 new beats while the lead kept changing.
+- **Back** button next to Play: steps back through the beats you had before (the last 30), including form edits. Useful when the beat you liked is gone.
+
+## v2.6.3
+- Memory guard for weak devices. Decoded instruments are large (all 29 at once is about 140 MB), so the app now keeps a memory budget for them (45 MB on a 1 GB device, 60 MB on 2 GB, 110 MB when the browser does not say, 200 MB on 8 GB or more). When it is passed, the instruments you used longest ago are freed (the current beat and the one before it are never freed, and a freed instrument just downloads again if needed). On devices reporting 2 GB or less, the big instruments load every second note (the app re-pitches the rest). Background warm-up now only runs when there is room.
+- Measured with the CPU slowed 4x and 6x: no main-thread freeze over 200 ms while playing and pressing New beat; the longest pause was about 0.1 s.
+
+## v2.7.0
+- **Loading indicator**: while a beat's drums and instruments are being fetched, a pill under the buttons shows "Loading sounds 12/40" with a small progress bar, and hides when the beat is ready. The first beat's sounds start loading as soon as Beat Lab opens.
+- **New look for the grid** (the rows at the bottom, one per sound): colour by family (drums, hats, percussion, low end, harmony), beat numbers (1 2 3 4) above, a small gap between beats, the playing step highlighted in every row, the instrument's name under each melodic row, hits glow and show how hard they are played.
+- **Edit pattern**: press "Edit pattern" above the grid, then tap or drag the boxes of the drum and percussion rows (kick, snare, clap, rim, hat, open hat, shaker, percussion, bell) to add or remove hits. In a song, pick which part you are changing (Chorus, Verse, ...) or tap that part on the timeline; the change applies to every part of that kind. A new hit sounds when you tap it, and the beat plays it from the next bar. "Reset pattern" puts it back as it was. The rows that play notes (bass, log drum, chords, pad, pluck, lead) follow the chords and melody, so they are shown but not drawn by hand; use New beat, Variation or Keep instrument for those.
+
+## v2.7.1
+- Edit pattern now covers more rows: besides the drums and percussion you can draw hits for the **bass, log drum, chords, pad and pluck**. Only the lead stays read-only (its notes are written note by note, so a new hit would have no note). Checked by rendering each row before and after an edit: the sound changes every time.
+- New **Pitch tool** (next to Hits): in edit mode, bass and log drum hits show their note (R = root, 3, 5, 7, 8 = octave); tap a hit with the Pitch tool to step it to the next note. A new bass or log drum hit starts on the root. Where a style has a written bass or log drum riff, the change edits that riff (so it applies wherever the riff plays).
+
+## v2.7.2 (loading can no longer get stuck)
+- Fixed: the "Loading sounds" bar could sit still and the page could freeze on a slow computer opened straight from the folder.
+- Sound files now load a few at a time (not dozens at once), newest beat first, each with a time limit. A file that never answers counts as failed, so the bar always finishes.
+- The same file is never read twice at once; the automatic "try again" for a beat's sound is capped at 3 tries with a short pause (it could loop before).
+- A beat never waits more than 60 s for its sounds: it plays with whatever has loaded.
+
+## v2.8.0 (melody editor, and a producer that learns your taste)
+- **Melody editor.** A new Melody panel under the step grid is a piano roll for the lead. Pick the part (chorus, bridge or pre-chorus), tap an empty box to add a note (drag right to make it longer; "New note" sets the starting length), tap a note to remove it. You hear each note as you add it. The melody you edit is the one the song plays, so a change to the chorus applies to every chorus (and the outro). "Reset melody" brings the original back. Only available for songs (a plain loop has no lead).
+- **The producer learns your taste.** Keeping an instrument counts as a vote for it. In "Why these sounds?" you can also tap "More like this" or "Less like this" for a whole beat (tap again to take it back). Next time the producer picks, instruments you liked score up to 50% higher and ones you did not up to 50% lower, so there is still variety. "Forget my taste" clears it. It is stored only in your browser (`js/taste.js`).
+
+## v2.8.1 (melody editor upgrades)
+- Drag a note up or down to change its pitch (it plays as you move); tap it without moving to remove it.
+- The rows are labelled with real note names (A3, C#4...) so the octave is clear.
+- A playhead follows the song through the melody while it plays, and the roll scrolls to keep the playing bar in view.
+- Fixed: drawing a note in a later bar no longer snaps the roll back to the start.
+
+## v2.25.0 (Spice: every beat gets its own signature)
+
+Beats felt alike: the same wall of hats and shaker, the same percussion, the same lead-in to every chorus. Now every beat rolls a **spice**, in three parts, and pressing New beat in the same style gives a different one.
+
+- **Main spice (the character), one of twelve**, chosen from a list written for each of the 28 styles: *Clave pulse* (a 3-2 / rumba / bossa clave that flips every bar), *Talking drums* (two percussion voices ask and answer), *Triplet rolls* (hat rolls with the in-between hats thinned so they pop), *Bounce kicks* (off-beat kick patterns, the bass locks to them), *Half-time chorus*, *Off-beat stabs* (short keys instead of held chords), *Stop-and-go* (a beat of near silence at phrase ends), *Lazy pocket* (snare behind the beat, extra swing, ghost notes, thinner hats), *Four-floor drive* (off-beat open hats, four-on-the-floor chorus kick, off-beat bass), *Ghost-note groove*, *Bouncing bass* (octave jumps, syncopation), *Log drum bounce* (Amapiano).
+- **Lift (how it leans into a chorus):** reverse cymbal swell, filter sweep, both, a one-beat stop, a two-beat stop, or a bar where the hats and percussion hush.
+- **Extra (a habit at phrase ends):** snare drags, percussion fills, bass runs, open-hat lifts, or none.
+- **The beat always differs from the last ones of its style:** the choice avoids the last three used in that style and never repeats the spice of the beat it follows; each choice also rolls its own details (which clave, which kick pattern, which drum plays it), so 8 beats of one style gave 4 to 8 different main spices.
+- **The spice always has its instrument:** the tracks a spice plays on are switched on in verses, pre-choruses and choruses (the layer cap then drops the least important other layer, so beats do not pile up). The tracks that carry the backbeat are never used for clave or talking drums.
+- **On screen:** Beat Lab has a "Spice" line (name, lift, extra, and what they do in plain words) and a **More spice** button that keeps everything and rolls only the spice. "Make it darker / brighter ..." keep the spice; **Variation** and **New beat** roll a new one. The "Why these sounds?" panel also lists it.
+- **Beats made around a voice (Vocal Sketch)** get a gentler version: no half-time chorus, 30% to 45% less strength, and nothing added in bars where the singer is busy (five or more notes); lifts and stops still apply. The timing push of Lazy pocket is not used there.
+- **New files / changes:** `js/spice.js` (new: `spiceRoll`, `spiceApply`, `spiceFeel`, `spiceClaim`, `spiceRespice`, `spiceLine`, constants `SPICE_*`); `js/beatgen.js` (rolls the spice in `generatePattern`, `loopSpice`, a hook in `songBarView` and `loopBarView`, short stab lengths, lead lengths follow cut hits; `beat.spice` is plain JSON and `beat.swing` may be set by it); `js/engine.js` (`E.fx.reverse`, reversed crash cached in `E._revBuf`, filter sweep in `playBarStart`, `stopAll` also stops the swell); `js/beatlab.js` (`refreshSpiceUI`, "More spice" button, `keepSpice` for the Make-it chips); `index.html` (script tag after beatgen.js, `#bl-spice` row); `css/style.css` (`.beatlab-spice*`); `sw.js` rebuilt; `tools/spice-audit/` (not part of the app).
+- **Measured (a stand-in for listening):** 28 styles x 8 beats: zero invalid bars, spice audible in at least 97% of verse and chorus bars, the same bar is identical every time it is asked for, old drafts without spice still play and can get one with More spice. Roughly a quarter of the note positions differ from the same beat without spice. In a render, the reverse swell lifts the sound above 3 kHz by about 13 dB across the last half bar before a chorus, and the filter sweep takes about 19 dB out of the keys' top end before it opens on the chorus.
+- **Not checked by ear:** whether each spice sounds good in every style. The weights are my judgement of what fits where; tell me which ones you like or dislike and I will change the lists. Backbeat can disappear in about 10% of Afro house bars on purpose (stops at phrase ends).
+
+## v2.24.0 (Beat Lab replaced inside your updated Voxloop, ready for GitHub)
+
+Your updated Voxloop (with your own Studio and Pipeline changes) is the base. The Beat Lab from v2.4 to v2.23.0 replaces the old Beat Lab section, and nothing else of yours was touched.
+
+- **Kept exactly as you had it:** `js/studio.js`, `js/daw.js` (merged, no conflicts), `js/autopilot.js`, `js/autodecide.js`, `js/apdeck.js`, `css/apdeck.css`, `js/fxrack.js`, `js/pitchcorrect.js`, `js/tune.js`, `js/script.js`, `js/automix-vl.js` (merged) and all your tests (`align`, `tone`, `octave`, `spoken`, `tests/e2e/`).
+- **Replaced by the new Beat Lab:** `js/beatgen.js`, `js/beatlab.js`, `js/engine.js`, `js/export.js`, `js/templates*.js`, `js/blux.js`, `js/vocalsketch.js`, `js/vocaldsp.js`, `js/producer.js`, `js/taste.js`, `js/melodyroll.js`, `js/lustguide.js`, `js/genrefeel.js`, `js/mixcal.js`, the sample banks and maps, the `samples/instruments/` and `fileaudio/` folders, `css/blux.css`, `css/vocalsketch.css`.
+- **Moved out of the way (not loaded any more):** the old sound-pack picker `js/packs.js` and the old "Record your vocal" panel `js/vocalrec.js` (with its `#vr-panel`). They are in `archive/old-beatlab/` in case you want anything from them. Vocal Sketch (Sketch tab in Beat Lab) now does the job of singing a part to get a beat. `beatlab.js` still calls `window.VoxloopVocal.refreshSections()` only if it exists, so nothing breaks without it. The older README sections about packs and the vocal recorder below are history.
+- **`index.html`:** the CSS links are `apdeck.css`, `vocalsketch.css`, `blux.css`; the script list is the new Beat Lab scripts in their working order, then your `apdeck.js`, `autodecide.js` and `autopilot.js` at the end. **`sw.js`** was regenerated with `python3 tools/build-sw.py` (357 files cached; the big sample folders download the first time each sound is played).
+- **Checked:** page loads with no errors and no missing files, also from a sub-folder address like GitHub Pages uses, and the service worker installs there; your Pipeline test (`tests/e2e/run.js rap_inSync`) ends "done" with no page errors; `align`, `tone`, `octave`, `spoken`, `brain`, `phrase`, `gate`, `voiceid`, `master`, `harmony` pass or print the same as before; Vocal Sketch builds a beat from a real voice note and plays it with the voice.
+- **Not caused by the merge, but you should know:** `tests/key.test.js` prints "WRONG notes" for 6 major-key cases, and it does so on your own zip as well. `tests/e2e/studio.js` clicks a Studio button that is hidden at phone width, so it stops at the first step in your version too. `beat1.test.js` shows `afroOffbeat 7/8` or `8/8` between runs (random).
+- Not checked by ear. Microphone recording on https is still untested.
+
+## v2.23.0 (found by a beat audit: loudness, too many layers, voice buried)
+
+A new measuring tool (kept outside the app, in `audit/`) renders real beats, then measures the audio: loudness (LUFS), balance, kick and snare punch, timing against the grid, which notes ring, how many layers play, and how loud each section is. It also draws a spectrogram. What it found, and what changed:
+
+- **Normal Afrobeats (Smooth and Afropop), 4 beats:** 19 to 20 LUFS quiet (finished beats sit around -14 to -9), 11.5 to 12.2 layers playing at once in verses and choruses, the chorus only 1.7 to 2.2 dB louder than the verse. The notes themselves are in key: all played notes are chord tones, and the "major third over a minor chord" the audio showed was the 5th overtone of the bass recording, not a wrong note. The instrument recordings are in tune (all within 25 cents except the kalimba and mbira, which are naturally uneven).
+- **`js/beatgen.js`**: `rollPresence` can now cap the number of tracks playing at once (`t.maxLayers`, per kind of section, plus one for the final chorus); the least important tracks step out first (new `LAYER_PRIORITY`: kick, snare, bass, chords, hat, shaker, clap, pluck, pad, perc, rim, log drum, lead, bell, open hat).
+- **`js/templates.js`**: `maxLayers: { default: 8, chorus: 9, bridge: 6, intro: 5, outro: 5 }` on the Afrobeats template only (both styles). Measured after: 8.2 to 8.4 layers (was 11.5 to 12.2). Every other genre is unchanged.
+- **`js/vocalsketch.js`** (Vocal Sketch beat for a voice): `masterBeat(buf, target, makeRoom)` brings the beat to about -15 LUFS (BS.1770 K-weighted, gated loudness measured by `lufsOf`) with a look-ahead peak limiter (`limitChannels`, ceiling -1.5 dB) and a 3.5 dB dip around 2.4 kHz (`carve`) so a voice is clear. The "Hear it with your voice" mix puts the voice about 4 LU above the beat (measured on the sung part, `MIX.vgain`; the slider moves it from there) and brings the whole mix to -15 LUFS. Saving "the beat alone" saves this finished beat.
+- Measured on Tempo114 (Late Night, dark): beat -24 to -25 LUFS before, -16 now, true peak -1.2 dBTP. Voice against beat in the 1 to 4 kHz zone: the voice was 5 dB under the beat (median) with the old preview mix, now +1.6 dB over it (the worst tenth of the bars: -8.5 dB before, -0.6 dB now).
+- Not changed (only measured): the chorus lift is still small (about 2 dB); the Afrobeats beats are bass-heavy (the low-mid band 150 to 400 Hz is the loudest); kick timing wobble of about 9 ms is the humanize setting working as designed.
+- Not checked by ear.
+- No new files in the app. New names in `vocalsketch.js` (inside the closure): `biquad`, `kWeighted`, `lufsOf`, `limitChannels`, `carve`, `masterBeat`. New globals in `beatgen.js`: `LAYER_PRIORITY`.
+
+## v2.22.0 (Afrobeats: the pluck plays a riff, not a wandering run)
+
+- Reported on the normal Beat Lab Afrobeats: the plucks sounded random and out of place. Cause, checked on generated beats: the pluck used `arp: "up"`, a run that climbs through the chord tones, wraps back down by up to two octaves, and starts on a different note every bar (`bar % 3`), so no figure ever came back.
+- **`js/beatgen.js`**: new mode `"riff"` in `arpNotes(hits, c1, c2, mode, bar, kind, seed)` (two new trailing arguments, passed from `finishView` as `p.kind` and `beat.seed`). New `PLUCK_RIFFS` (six 8-step figures), `riffPool(chord)` (the chord's own notes within one octave from A4, plus the octave above) and `riffNotes(...)`: each step of the bar has its own place in the figure (a hit that is left out does not move the others), the figure comes back every bar and follows the chord (the second half of a two-chord bar uses the second chord), choruses use another figure than verses, the figure is picked by the beat's seed, and every fourth bar the second half lifts by one chord note as a small answer. Notes only move by a step or two of the chord.
+- **`js/templates.js`**: Afrobeats styles Smooth and Afropop: `arp: "riff"` (was `"up"`). Every other genre and style keeps its arp.
+- Checked on generated beats (4 keys, both styles): the same notes come back in every bar of a section, all notes are chord tones of the chord playing, all notes within A4 to about A6.
+- Not checked by ear (no way for me to listen): a quick A/B render, old and new, of the same beat is in the delivery. The pluck rhythm itself (which steps play) is unchanged and still varies a little per bar, by design.
+- Tests: harmony, brain, phrase, vocaldsp pass; beat1 shows afroOffbeat 7/8 as before (not related).
+- No new files. New globals: `PLUCK_RIFFS`, `riffPool`, `riffNotes`.
+
+## v2.21.1 (Vocal Sketch: the voice in "Hear it with your voice" no longer sounds like static)
+
+- Cause: `take.pcm` is the 16 kHz copy made for the pitch analysis (`D.resample16k`, a box average: no sound above 8 kHz and aliasing noise). v2.21.0 laid that copy on the beat, so the voice sounded thin and crackly.
+- **`js/vocalsketch.js`**: `addTake` now keeps `t.hi = { x, sr }`, the take as it was recorded or imported (full band, mono). `placeVoice` reads `t.hi` and resamples with a cubic interpolation (it falls back to the 16 kHz copy, also cubic, for takes restored from a draft, because drafts only store the 16 kHz copy, so a restored draft still sounds duller until the voice is imported again). The fade at both ends is now 15 ms in, 5 ms out.
+- Checked on Tempo114: energy of the voice in the mix between 8 and 12 kHz went from 0.9% to 13% (the original note: 9.5% in a different 20 s window), so the top end is back.
+- Not done: drafts do not store the full-quality voice (it would make a draft about 6 times larger).
+- No new files, no new globals.
+
+## v2.21.0 (Vocal Sketch: hear your voice with the beat, nudge it, save it aligned)
+
+- **`js/vocalsketch.js`**: new card 5 "Hear it with your voice" (`vs-mixcard`, shown after a build). `ensureMixBeat()` renders the beat once with the same path as the Download button (`renderBeatForOutput`, so the same sound and mix, bar 1 at time 0 for Vocal Sketch beats) and keeps it until `current` changes. `placeVoice(beat, rate, withNudge)` lays every take on the beat's own time: the take's time 0 sits at (start of the part + nudge - the take's bar-1 offset), so a pickup sung before "1" is kept; each take is cut after its bars + 0.4 s, with a short fade at both ends. `mixBuffer()` adds the voice (x1.5 x the "Voice louder or softer" slider) to the beat (x0.8) and always scales the mix to a peak of 0.9. Buttons: Hear my voice with the beat / Stop, nudge (10 ms per tap, -500 to +500; default +10 ms because the kick samples peak a little after the grid), Save voice + beat (.wav) and Save the beat alone (.wav) (`encodeAudioBufferWav(buf, 16)` + `downloadBlob`, named like the normal export, with `-with-voice`). The preview restarts when the nudge or the level changes; `stopAll()` also stops it. State is in `MIX` (inside the Vocal Sketch closure); test hooks `VocalSketch._mix`, `_mixBuffer`, `_placeVoice`.
+- **`css/vocalsketch.css`**: width for `#vs-nudgeval`.
+- Uses existing globals only: `renderBeatForOutput`, `bootAudio`, `encodeAudioBufferWav`, `downloadBlob`, `exportFileName`, `current`.
+- Checked on Tempo114 (headless): the first sung sound lands at 7.415 s against 7.403 s expected (bar 4 at 8.446 s minus the 1.036 s offset plus the 10 ms nudge); two nudge taps move the voice by exactly 20 ms and restart the playback; both saves work; the saved mix peaks at -0.9 dB. All earlier tests pass.
+- Not checked: playback through a real phone speaker; that the saved mix sounds the same as the in-app preview was not compared sample by sample (both come from `mixBuffer`).
+- No new files, no new globals.
+
+## v2.20.2 (Vocal Sketch: a groove you can nod to)
+
+- Reason: the Light beat of v2.20.1 was about 80% low bass (20 to 120 Hz) with almost no snap, and in some builds the snare entered only after 2 to 4 bars or was missing, and the top percussion was a sparse, random tick. Nothing to nod to.
+- **`js/beatgen.js`** (only beats with `beat.voice.groove`; every other beat is unchanged): new `applyGroove(beat, bar, tracks, probs, present, skip)`, called LAST in `songBarView` (after `applyVoice` and `applyVariety`, so the thinning cannot remove it): the backbeat never drops (every snare step with probability 0.5 or more, and the clap with it), the kick always lands on one, the bass lands with it, the top percussion (hat, else shaker) plays a steady 8th-note pulse (under a very busy line, 35% of the off-beat 8ths of that bar may drop; with `groove.calm` the 16ths between are mostly removed). New `shapeGroove(beat, velocities, present)`, called in `finishView`: kick on one x1.18, snare x1.15, clap x1.1, top percussion: off-beat 8ths x1.25, beats x0.85, 16ths x0.55 (x0.85 more in a calm mood). In `songBarView` the kick, snare, clap, bass, chords, hat and shaker are present from the first bar of every sung part (no slow entrance; the intro keeps its own build-up).
+- **`js/vocalsketch.js`**: `beat.voice.groove = { calm }` (calm for chill, romantic, dreamy, soulful, or dark with low energy). `trimLayers` now always switches on kick, snare, bass, chords in sung parts, and guarantees one top percussion (hat is kept for every mood in Light; the shaker only in Medium and Full).
+- Checked on Tempo114 with 24 builds (Afro-Lust, R&B, Trap, 8 builds each, all different seeds): in every verse bar the snare is present, the kick is on one, and the top percussion has at least 5 hits (usually 8). Rendered Light beat: energy 20 to 120 Hz from 81% to 64%, overall level up from 0.063 to 0.094 RMS (about +3.5 dB).
+- Tests: vocaldsp, brain, harmony, phrase, align, master, vstest3 and tp pass. beat1 shows afroOffbeat 7/8; it does not use Vocal Sketch, and `generatePattern` was not changed.
+- No new files; two new globals in beatgen.js: `applyGroove`, `shapeGroove`.
+
+## v2.20.1 (Vocal Sketch: a lighter beat, "How full")
+
+- Reason: a beat built under a voice had 9 to 10 layers playing at once in the verse (kick, snare, rim, hat, shaker, perc, bass, chords, pad, plus pluck), some of them wrong for the mood.
+- **`js/vocalsketch.js`**: new `trimLayers(beat, entries, vibeKey, level)`, called in `build()` after the calm-palette step and before `beat.voice` is set. New select `vs-full` ("How full": Light (default), Medium, Full). Light keeps kick, snare, bass, chords and ONE top percussion (hat for a driving mood: hard, party, uplifting with energy 0.55 or more, or dark with energy 0.6 or more; shaker otherwise); the pad only in a chorus/bridge, the intro and the outro; drops rim, perc, open hat, pluck, bell, log drum (unless the mood is driving, and then only rim/perc stay off as set by the level). Medium keeps both top percussions and one small extra in the verses. Full changes nothing.
+- Checked on Tempo114 (Afro-Lust, Late Night): verse layers per bar 9 to 10 before; Light 5 to 6 (kick, snare, hi-hat/shaker, bass, chords, plus the answering lead in the pauses); Medium 8 to 9; Full 8 to 9. Each build is seeded differently, so exact counts move a little between builds.
+- All earlier tests pass. No new files, no new globals (`trimLayers` stays inside the Vocal Sketch code). Beats outside Vocal Sketch are untouched.
+
+## v2.20.0 (Vocal Sketch: tap-along, groove from the voice, calmer mood reading, answering melody)
+
+- **`js/vocaldsp.js`** (all exported on `window.VocalDSP`): `fitTaps(times, bpm0)` gives tempo + beat line from a person's taps; `swingOf(notes, bpm)` measures how far the off-beat 8ths of a voice sit late (`{s, offset, r, on, off}`, with a confidence gate); `fitTriads`/`triadFit` (chords that follow the sung notes) and `takeFeatures`/`energyOf`/`vibeOf` (mood). `vibeOf` was rebalanced: "Soulful" no longer wins every voice (weights now expressive 0.55, sustain 0.25, wide 0.25, leaps 0.2, minus energy 0.15).
+- **`js/vocalsketch.js`**: tap-along (`startTap/tapNow/finishTap`, test hooks `VocalSketch._tapNow/_finishTap`); `voiceGroove()` sets `beat.swing` only when the singing is clearly on the beat; new `answerLine(entries, beat)` makes `beat.answer = { bars: { <bar>: [{ step, len, midi }] }, level: 0.75 }`: in a pause of the singer (5 or more steps; in every second bar, or in any bar with 9 or more steps of rest; never in the last bar of a part) the lead plays 2 or 3 notes that follow the contour of the last notes sung (steps capped at 5 semitones), shifted up whole octaves to sit above the voice (92nd percentile + 2), each snapped to the chord under it. New checkbox `vs-answer` ("Answer my singing with a short melody in the pauses", on by default). The lead is switched on only in the parts that have an answer.
+- **`js/beatgen.js`**: in `songBarView`, a beat with `beat.answer` no longer plays the hook melody; it plays only the answer notes (not on build or fill bars); `finishView` scales the lead velocity by `beat.answer.level`. Beats without `beat.answer` are unchanged.
+- **`js/beatlab.js`**: `applyBeatSound` uses `beat.swing` when set, else the style's swing.
+- **`css/vocalsketch.css`**: `.vs-hear`, `.vs-tappad`, `.vs-tapbtn`, `.vs-tapcount`.
+- Checked on Tempo114: 3 answers (bars 7, 11 and, before the last-bar rule, 15), all above the sung range (sung G2 to E3, answers G3 to C4), none overlapping a sung step. All earlier tests pass.
+- Honest limits: tap-along gives the tempo and beat line, the position of "1" may still need the arrow chips; swing was not applied to Tempo114 (too loose); mood, swing and answer rules are calibrated on one real voice plus synthetic voices.
+- Correction: the Producer already picks instrument sounds by mood (Vocal Sketch passes `options.vibe`), so "sounds come from the style" in v2.18.0 was only partly true.
+- No new files, new globals: `answerLine` stays inside the Vocal Sketch closure.
+
+## v2.19.0 (Vocal Sketch: less repetition, no clock-like ticks)
+
+- **`js/beatgen.js`**: new `applyVariety(beat, bar, tracks, present, skip)`, called after `applyVoice` at the end of `songBarView`; only beats with `beat.voice` (set `variety: false` to switch it off). For the small percussion (perc, rim, shaker, bell, log drum): the groove is a two-bar loop (bars 1 and 3 alike, 2 and 4 alike) in which off-beat hits drop out (28%) or slide a step later (18%); the percussion sits out the second half of every fourth bar (70%); a new hit appears now and then (never next to another). Rim, perc and bell keep at most one hit on a beat; the others come a step early, because a dry tick on every beat sounds like a metronome. Kick and snare are never touched. Seeded per bar.
+- **`js/vocalsketch.js`**: `beat.voice` now carries `variety: true`.
+- Checked on the Tempo114 note: bars that repeat the previous bar exactly, in the 12-bar verse, perc 2 to 0, shaker 0 to 0 (it was already varied), rim 10 to 7 on one build.
+- Checked on three other (synthetic) voices, to see that nothing is tuned to one recording: bright, fast, loud, major (G) reads Soulful/Hard/Party, built a dance style, chords Em7 Em Dmaj7 D...; slow, soft, minor (A) reads Soulful/Chill/Dreamy, built Airy, chords up an octave; mid-tempo, wide, major (Eb) reads Soulful/Uplifting/Party, built Highlife. Chord fit 66 to 77%. Known limit: a relative key (A minor vs C major) or a neighbouring key (Eb vs Bb) can be read for the key; the chords still follow the notes.
+- No new files, no new globals other than `applyVariety`.
+
+## v2.18.0 (Vocal Sketch: chords clear of the voice, calm palette, change chords without rebuilding)
+
+- **`js/vocalsketch.js`**: the chord step of `build()` is now `harmonize(beat, entries, key)`, so it can be run again on a beat already built. New `liftChords(beat, chords)`: the lowest chord note must clear the top of the sung range (92nd percentile of the sung pitches + 3 semitones); if not, every chord moves up whole octaves together (voice leading stays smooth). Before, a low voice (Tempo114 sings G2 to D#3) sat in the same notes as the keys, strings and plucks (from C3 up). The shift is in `S.lifted`.
+- Changing the **Chords** select (`vs-harm`) after a build now swaps only the chords of the current beat (`harmonize` + `useBeat`): same drums and sounds, so "follow my notes" and "one key" can be compared fairly. `beat.vocalSketch.entries` now stores the form entries for that.
+- **Calm palette**: with a chill, romantic, dreamy or soulful mood (or dark with low energy), `build()` turns off the log drum and the bell (the bright, percussive instruments).
+- No new files, no new globals. Beats outside Vocal Sketch are untouched.
+- Not done: the instrument sounds (e-piano, strings, nylon guitar, balafon...) still come from the style, not from the voice; groove/swing is not read from the voice; the bass and pluck patterns are the style's own.
+
+## v2.17.0 (Vocal Sketch: chords that follow the notes actually sung)
+
+The chords used to be picked among the 7 chords of one detected key. A casual singer wanders by up to a semitone, so on a real voice note (Tempo114) the key was ambiguous (C minor, G# minor and others all explained the notes about equally) and only 53% of the sung notes (by length) sat on the chord under them.
+
+- **`js/vocaldsp.js`**: new `fitTriads(notes, bpm, offsetSec, bars, slotsPerBar, keyHint)` (any of the 24 major/minor triads per bar, scored on the real, unrounded pitches; notes a semitone off a chord tone count against it; a smooth Viterbi path with three levels of movement; the key only adds a small bonus) and `triadFit(chords, notes, ...)` (0..1: how much of the sung material sits on the chord under it). Exported in `VocalDSP`. Tests added to `tests/vocaldsp.js` (a sharp, wobbly Am-F-C-G tune comes out right).
+- **`js/vocalsketch.js`**: `build()` now builds each part's chords from `fitTriads` (new `absChords()` makes chord objects like `buildChord` for any triad, with optional 7th, then `voiceLead`). New select **Chords** in the Build card (`vs-harm`): "Follow my notes (closest)" (default) or "Keep to one key (simpler)" (the old way). The status line says how well it fits: "75% of what you sang sits on the chord under it (staying in one key it would be 53%)". The key's degrees are still kept in `beat.harmony.degrees` (used for hooks); intro/outro borrow the first bars of the verse chords. If the Beat Lab key or chords are regenerated afterwards, they are rebuilt from the degrees (the note-following chords are replaced).
+- No new files, no new globals. Tempo114: C minor key, chords Cm7 Cm7 Cm7 Fmaj7 Abm7 Abm7 Cm7 Cm7 Abm Abm7 Ebmaj7 Eb.
+
+## v2.16.0 (Vocal Sketch: the beat gives room to the voice, and starts exactly on the bar)
+
+- **Exact start (`js/export.js`, `renderSongBuffer`)**: the render keeps its 0.05 s of silence for Tone's sake, but for a beat made by Vocal Sketch (`beat.vocalSketch` is set) it is cut off again, so the first bar starts at 0:00 in the WAV (and in the stems, which use the same render). Every other beat is unchanged. Before, the file started ~70 ms before the first drum hit, which made the beat sound late when laid under a recording at the bar start.
+- **Decimal tempo (`js/vocalsketch.js`, `setBpm`)**: tempo has one decimal (113.9). The tempo box has `step="0.1"`; the - and + buttons go to the next whole number from a decimal. A singer at 113.9 against a 114 beat drifted ~37 ms over 20 bars.
+- **The beat listens to the singing (`js/beatgen.js`, new `applyVoice`, called at the end of `songBarView`)**: `beat.voice = { bars: { <bar>: { act: [16] } } }` (1 = a note starts on that step, 2 = still held, 0 = silent), built by `voiceBars(entries)` in `js/vocalsketch.js` from each take's notes (rap: `flow.onsetT`, new field in `VocalDSP.flow`). A producer's rules:
+  - busy singing (4+ note starts in a bar): the small percussion (shaker, perc, rim, bell, pluck, log drum, open hat) loses off-beat hits, the hats lose some 16ths, and from 6+ starts the bass stops chattering (steps 0 and 8 always stay). Kick and snare are never touched.
+  - a pause of a beat or more: a short answer in it (two ticks on perc/rim/shaker/hat, plus an open hat leading into the next phrase when the pause runs to the end of the bar), at most 2 per bar.
+  - a whole bar of rest: hats and percussion open up.
+  - fill and build-up bars are left alone. Seeded per bar, so playing, looping and downloading give the same notes.
+- No new files, no new globals other than the function `applyVoice` (beatgen.js) and `voiceBars` (inside the Vocal Sketch closure). Beats without `beat.voice` behave exactly as before.
+
+## v2.15.0 (Vocal Sketch: the beat matches the voice's mood)
+
+Before this, the beat fitted the melody (key, tempo, form, chords) but its drums, mood and energy were chosen from the genre and a random style. Now they are read from the voice too.
+
+- **`js/vocaldsp.js`**: new `takeFeatures(pcm, notes, bpm, rapDensity)` (notes per beat, median note length in beats, pitch range, average leap, loudness, how much the loudness moves), `energyOf(features)` (0 calm .. 1 driving, from tempo, busyness and loudness) and `vibeOf(list, scale)` (scores the eight producer moods: chill, romantic, dreamy, soulful, dark, hard, party, uplifting; returns `top`, `order`, `scores`, `energy` and plain-words `traits`). Exported in `VocalDSP`. Tests: `tests/vocaldsp.js`.
+- **`js/vocalsketch.js`**: `readVibe()` (runs after the key is read; fills `S.vibe` and each take's `energy`), `bestStyle(genre, vibe)` (picks the style of the chosen genre whose `STYLE_VIBES` fit the voice; leaves the choice to the generator when nothing fits), a "What I hear" line and a "Beat mood" select (`vs-hear`, `vs-mood`) in the Build card. Style "Auto" now means best match for the voice. `build()` passes `opts.vibe` to `generatePattern`; a part sung calmer than the others (energy 0.1 below the median) loses its percussion and open hats.
+- **`css/vocalsketch.css`**: `.vs-hear`.
+- Needs `STYLE_VIBES` (producer.js) as a global; without it only `opts.vibe` is passed.
+- No new files, no name clashes (new globals: none; new members of `VocalDSP`: `takeFeatures`, `energyOf`, `vibeOf`). Generated files: none changed.
+- Calibration is by measurement on one real voice (the Tempo114 note: soft, low, minor, mid-tempo reads Dark / Romantic / Soulful) and synthetic voices; the weights are judgement and need more voices.
+
+## v2.14.6 (Vocal Sketch: calibration from a real voice)
+
+`js/vocalsketch.js`. Ground truth from one real voice note (a male voice, 114 BPM, sung with a pick-up before the bar): the singer found by ear that the beat grid sits at 113.9 BPM and the bar starts 1.036 s into the note. With `P_SHIFT` 0.16 the automatic beat grid matched the real one to within about 2 ms; the automatic bar-start guess did not (it picked a bar start one beat early, because this singer starts phrases before the 1). So the bar start is still a guess: the status asks the singer to confirm it by ear (higher click = the 1) and the two arrows move it a beat. `P_SHIFT` is now 0.14.
+
+## v2.14.5 (Vocal Sketch: which beat is the 1)
+
+`js/vocalsketch.js`, `css/vocalsketch.css`. Finding: a click can line up on every beat and still be a few beats away from the real bar start, so drums and chord changes land in the wrong places. Imported takes now (1) guess the bar start from where phrases start and long notes are held (`downbeatOf`; a guess, check by ear), (2) allow a pick-up of up to about two beats before bar 1, (3) put the beat lines 0.09 s after the detected pitch start (`P_SHIFT`; measured on one voice only), (4) replace "my first note is on beat N" with "Where does the bar start? 1 beat earlier / later" (the higher click is the 1). Play with click uses the higher click on the bar start.
+
+## v2.14.4 (Vocal Sketch: type where the first bar starts)
+
+`js/vocalsketch.js`. Imported takes get a "First bar starts at (seconds)" box, so a position found elsewhere (for example in the Voice Aligner page, or by ear) can be typed in. Found with a real voice note: the singer started about 1.2 s (2.3 beats) before the first beat, and the auto placement (first note = beat 1) put the voice late. Also `window.VocalSketch.setOffset(id, seconds)`.
+
+## v2.14.3 (Vocal Sketch: timing check for imported voice notes)
+
+`js/vocalsketch.js`, `css/vocalsketch.css`. Imported takes: the beat line is now fitted to where the singing really sits (not simply "first note = beat 1"); new "My first note is on beat 1 / 2 / 3 / 4" choice (pick-up notes); "Fit tempo to my singing" (looks +/-10% around the tempo); each take shows "timing: on the beat / a little loose / loose", and the status warns when the singing does not follow the tempo (measured with a beat-lock score). Recorded takes are unchanged (their start is known from the count-in).
+
+## v2.14.2 (Vocal Sketch fixes from the first real voice note)
+
+`js/vocalsketch.js` only. (1) Importing a voice note no longer overwrites the tempo you set with a guessed one (the guess was 147 for a note sung at 114); it only shows a hint. (2) An intro/outro with no take of its own now borrows only the first bars of the verse chords, cut to its length (it used to get the whole verse list). (3) The waveform in each lane is scaled to the loudness of the take so quiet voices are visible.
+
+## v2.14.1 (producer parts hidden until asked for)
+
+Changed only `js/blux.js` and `css/blux.css`. The pattern grid (Lock / Keep instrument / drum steps) is wrapped in a closed "Pattern editor" box, the melody piano roll in a closed "Melody editor" box, each with a one-line "for producers" hint. The Sound tab starts with a short note that everything there is optional; the mixer title reads "Mixer (volume of each sound)". The wrapping moves the existing elements, so their code and ids are unchanged. New ids: `bl-patternAdv`, `bl-melAdv`.
+
+## v2.14.0 (easier Beat Lab + Vocal Sketch as a small timeline)
+
+- **Beat Lab tabs:** Beat | Sound | Sketch | Export. Nothing removed, the long page is split. (`js/blux.js`, `css/blux.css`)
+- **Transport bar that stays on screen:** Play / Pause (Resume continues from the same bar), Stop, Back, New beat, Variation, and the status line (it used to be at the very bottom). Space bar plays/pauses on a computer. The old hero buttons are moved into this bar (same elements, same code).
+- **Vocal Sketch** is now its own tab and a small timeline: hear the click before recording (tempo +/- / type / tap, click or shaker, volume, count-in), record or import a part, each take is a lane with waveform and found notes against the beat lines. Drag a take left/right (or 10 ms buttons, or Snap to beat) to line it up, Play with the click to check. No bars anywhere: the length of each part is measured from the take. "Try a demo take" makes a melody that is 0.11 s late so it can be tested without a microphone or a file.
+- New files: `js/blux.js`, `css/blux.css`. Changed: `js/vocalsketch.js`, `css/vocalsketch.css`, `js/vocaldsp.js` (gate fix), `index.html` (blux.css link, blux.js script after vocalsketch.js). Globals: `window.VLBLUX {show(tab), sync(), tab()}`, `window.VocalSketch`. blux.js moves existing elements (`#bl-back`, `#bl-regen`, `#bl-variation`) into the bar and hides `.beatlab-hero` via CSS; it reads beatlab.js globals `startPlayback`, `stopPlayback`, `bar`.
+
+## v2.13.0 (Vocal Sketch: sing it, get the beat)
+
+New Beat Lab panel "Vocal Sketch". Sing or rap one part at a time (intro, verse, pre-chorus, chorus, bridge, outro) to a click or soft shaker with a 4-beat count-in, or import a voice note. Beat Lab listens on the phone (nothing is uploaded), finds the notes and the key, and builds a beat only (no voice in it) in the key and BPM you sang, with the form taken from your takes in order and the chords fitted to your melody. Rap takes use flow only (syllables a bar). Takes can be repeated x1-x4, reordered, played back, deleted. The takes are saved with the draft (Drafts) and come back when you reopen it.
+- Microphone recording needs https (e.g. GitHub Pages). "Import a voice note" works anywhere.
+- New files: `js/vocaldsp.js`, `js/vocalsketch.js`, `css/vocalsketch.css`, `tests/vocaldsp.js`. Changed: `index.html` (1 css link, 2 script tags after lustguide.js). Pipeline and Studio untouched.
+- Globals added: `window.VocalDSP`, `window.VocalSketch`. Wraps `window.VLBeatLab.snapshot/restore` to add a `vocal` field (drafts.js not edited). DOM ids use the `vs-` prefix and `bl-vsPanel`.
+
+## v2.12.4 (Afro-rave pushed towards Ozeba and Kelebu)
+
+`A.styles.afrorave` in `js/templates-afro.js`:
+- Tempo 104-112 to **108-120 BPM** (fast).
+- Hook style `chant` (a repeating crowd line, the existing street-pop cells), carried by a **brass lead** (`STYLE_PREFS.afrorave` in `js/producer.js`: trumpet, trombone, sax up; flute down), lead notes short (`gate.lead.max 2`).
+- Harder bass: a busier bass riff and a second `bassExtra` variant; `808-punch` / `808-boom` up, bass guitar and upright down.
+- Fast but not flat out: its own `rules`. The intro and verse pull back (no open hat, lighter hats, percussion and shaker, a closed filter in the verse); the pre-chorus builds; the chorus brings everything. Measured on 6 songs: about 25 drum hits a bar in the verse, about 43 in the chorus.
+- Sources: Wikipedia pages for Ozeba and Kelebu (genre, "frenetic percussion, horns, brash bass, repeated chorus hooks"). Their BPM and keys were not found, so the tempo range is a judgement.
+
+## v2.12.3 (New Afrobeats style: Afro R&B, the Rema "Bout U" lane)
+
+- **New style `afrorb` = "Afro R&B (sparse, sung)"** in the Afrobeats genre (`js/templates-afro.js`, added to `A.styleOrder` after `afrofusion`). Built from the published facts about "Bout U"
+  (94 BPM, D major, a sparse arrangement around an infectious guitar riff, raw close vocal): 92-97 BPM, mostly major, one chord a bar, a repeating clean-guitar riff on the pluck
+  (every section, no separate lead, so the voice sings the tune), soft backbeat, light shaker, short bass, no clave or log drum. It copies `afrofusion` and overrides the groove, so the two stay separate.
+- `js/producer.js`: `STYLE_VIBES.afrorb`, `STYLE_PREFS.afrorb` (electric / nylon guitar riff, Rhodes, bass guitar).
+- Why the lead is off in the style's rules: the producer's calm-vibe rule (`producerArrangeSong`) mutes the pluck whenever a lead plays in a pre-chorus, chorus or bridge, which would have removed the riff.
+
+## v2.12.2 (Trap calmer in the song, Afro-Lust renamed and a Rap style)
+
+- **Trap, full song** (`js/templates-trap.js`): the Melodic Trap chorus pluck played rolling 8th notes (`"x.x. x.x. x.x. x.x."`) with the chords and the lead stacked on top, which sounded like piano rolls.
+  Now the chorus pluck is a sparse bell phrase (`pluckChorus` for all three styles), chorus pluck presence 0.7 to 0.45 and chord presence 1 to 0.8, so the lead carries the hook.
+- **Afro-Lust** (`js/templates-lust.js`): styles are named for what they are for. The ids stay the same (saved beats and merges keep working), only `name` changes:
+  `velvet` = Classic (sung), `tide` = Airy (soft vocals), `moonlit` = Highlife (light), `smoke` = Late Night (dark), `slowwine` = Slow Wine (dance).
+  **New style `rap` = Rap (bars)**: 90-100 BPM, swing .2, the heartbeat kick kept, a steady soft snare and clap on 2 and 4, 8th-note hats, a gliding 808 (long bass notes), chords and pad kept low in the verse so the voice has room.
+- `js/producer.js`: `STYLE_VIBES.rap`, `STYLE_PREFS.rap` (808 bass up, bass guitar down, cello pad, nylon-guitar lick).
+
+## v2.12.1 (Trap kept cold, Afrobeats timing; Boom Bap withdrawn)
+
+v2.12.0 added a Boom Bap style inside Trap. That was a wrong reading of the request (the problem was that Trap sounded like hip hop), so it is **removed again**: no `boombap` style, no `style.kit`, no `STYLE_BORROW`. Hip hop is not a genre in Beat Lab.
+
+- **Trap sound** (`js/producer.js`, `GENRE_PREFS.trap`): the warm, soulful picks that made Trap read as hip hop are pushed down
+  (sax lead x.25, trumpet x.2, piano chords x.5, nylon-guitar chords/plucks x.4, vibes x.5, kalimba x.6, electric-guitar chords 1.5 to 1.0)
+  and the cold ones pushed up (harp chords x2.5). Across 120 generated trap beats: pad is cello / French horn / violin, pluck is mostly glockenspiel, chords are electric guitar or harp, bass is always an 808.
+- **Afrobeats** (`js/templates.js`, kept from 2.12.0): shaker accent on the off-beats (steps 2, 6, 10, 14); swing smooth .17 to .13, afropop .12 to .10;
+  the 3-3-2 kick keeps step 3 on most variants; the keys get one more verse and chorus rhythm (long chord on 1, stab 7, short 11, hit 13).
+
+## v2.11.0 (better hooks, a brighter R&B and Afro-Lust, a page that fits the phone)
+
+Each part was measured before and after (generated 120 hooks per genre; rendered the same beat with and without the shelf; audited Beat Lab in a 390px phone viewport).
+
+- **Hooks** (`js/beatgen.js`, `buildHook`; new helpers `hookStep`, `fitHookLine`): the hook is now one motif that is said (bar 1), repeated on the next chord with the same shape (bar 2), answered by a contrast that lifts (bar 3) and said once more, settling on the root or fifth (bar 4). Before, bar 2 repeated the rhythm but not the melody (the contour matched 14-19% of the time, now 55-69%), notes piled up against the top of the range (about 4 equal notes in a row, now about 2) and leaps over a fifth were common in the answer bar (now 2-13% of hooks). Existing hooks in saved drafts are untouched; the melody editor works as before.
+- **Air** (`js/engine.js`): a gentle high shelf (`airShelf`, 9 kHz) ahead of the master compressor, set per genre by `fx.air` in `applyFx` (R&B +3 dB, Afro-Lust +3.5, Afrobeats and Trap +1, others 0). R&B and Afro-Lust measured very dark (under 1% of the energy above 6 kHz). On the same beat the shelf adds about 40-80% more energy above 6 kHz in those two, with loudness and peak unchanged. The amounts are set in `js/genrefeel.js` (`AIR`).
+- **Phone** (`css/mobile.css`, appended): the hidden checkbox of the Melody toggle was 390px wide and made the whole Beat Lab page 417px wide on a 390px phone (the browser zoomed out or scrolled sideways); `.toggle` is now positioned and its checkbox is 1px. Tap targets under 36px (instrument chips, panel summaries, mixer buttons, the nav button) are now 36-40px; labels under 10.5px are about 11px; the song-section bar scrolls sideways with 40px-wide sections instead of squeezing ten of them into one row. The step-grid row labels stay 28px high on purpose (17 rows).
+- No new files. New globals: `hookStep`, `fitHookLine` (beatgen.js). Name clash to check: `airShelf` on the engine object. Generated files: none changed.
+
+## v2.10.0 (each genre sounds more like itself)
+
+Researched from producer guides (Soundtrap, Beatstorapon, Audeobox, Native Instruments) and compared with what the generator produced. The drum patterns and tempos were mostly right. What was wrong: every genre reached for the same instruments (flute lead, violin pad, electric bass), the arrangements were the same shape, and nothing moved over the length of a song.
+
+- **`js/genrefeel.js` (new)**: `TEMPLATES[g].rules`, the genre's own layer of section rules, with the filter amount per section (`sec.cut`, uses the v2.9.1 engine filter). Amapiano: filtered keys and shakers first (no snare, clap or bass in the intro), the log drum leads the main section while the keys step back, a quiet breakdown. Afro house: a long closed, dark build that opens at the drop. R&B: the intro is only chords and pad, pads sit under a low-pass, a stripped bridge. Trap: darker verse, open hook. Afrobeats: bright, barely filtered.
+- **`js/beatgen.js`, `resolveTemplate`**: section rules now merge in three layers (shared, then genre, then style); `sec` merges field by field. No change for a genre that has no `rules`.
+- **`js/producer.js`**: new `GENRE_PREFS` (a multiplier per "role:instrument" per genre), used in `producerScore` next to `STYLE_PREFS`. Afrobeats: guitars, keys, wood-percussion plucks, a played bass. Amapiano: piano chords, a sub under the log drum. Afro house: organ and keys, harmonium pads, a rolling sub. R&B: Rhodes and piano, a played bass instead of an 808, warm pads. Trap: bells, harp, dark strings, a guitar loop, no flute or Rhodes. `STYLE_PREFS.trapsoul` gets its 808 back.
+- **Bass lines**: R&B slow jam and pop R&B walk between root, fifth and third; hard trap and melodic trap use a simple root and fifth 808 line (`bassTones` in `templates.js` and `templates-trap.js`).
+- **Tempo**: Afro house deep house now starts at 118 BPM (was 120).
+- No name clashes: new globals are `GENRE_PREFS` (producer.js). `genrefeel.js` has no globals. Generated files: none changed. New script tag in `index.html` after `templates-lust.js`.
+
+## v2.9.1 (section filter for Afro-Lust)
+
+The engine already had a low-pass filter on the chords, pad, pluck and lead, but it was set once per instrument and never moved. Now a section can close it a little and open it again:
+
+- `js/engine.js`: `E.setCut(cut, time)` and the `E.cutBase` table (the open cutoff of the current instruments, filled in `E.applySound`). `E.setSection` calls it with `sec.cut`. A section with no `cut` means fully open, so every other genre sounds exactly as before. The filter eases to its target over about a second (`setTargetAtTime`, constant 0.25 s), with a floor of 400 Hz. The bass and the drums are not filtered.
+- `js/templates-lust.js`: every section rule gets `sec: { harm, drums, cut }` (harm and drums keep the shared values). Cut: intro 0.5, verse 0.65, pre 0.8, chorus 1, breakdown 0.55, outro 0.5. The two styles that override the verse or chorus rules pass `sec` through.
+- No new files, no new globals other than the two engine members above.
+
+## v2.9.0 (Afro-Lust, a more trap-like Trap, Light mode)
+- **New genre: Afro-Lust** (Beat Lab only; Studio and Pipeline are untouched). Afrobeats rebuilt for slow, close, late-night music. See `js/templates-lust.js` for the full explanation. In short: 85-100 BPM with a deep swing; sparse drums with their own soft kit (`samples/afrolust/`, built by `tools/add_kit_lust.py` from existing one-shots); congas, tumba, shaker and a log-drum touch kept low and off the beat; a long warm 808 / bass under the kick; the backbeat leans BEHIND the beat (new `lateMs` in the humanize settings); long reverb and a soft echo; a slow intro and a breakdown (bridge) of only bass and percussion; no lead melody by default (the beat is made to be sung on).
+- **The signature ("tag")** in every Afro-Lust beat: a heartbeat (the kick and the bass answer each other on steps 0 and 3 of every bar, from the first bar of the intro) and one muted nylon-guitar lick (the same figure in every pack, goes away with the Melody switch).
+- **Five sound packs** (styles): Velvet Sway, Slow Tide, Moonlit Highlife, Smoke Room, Slow Wine. Each has its own groove, tempo, swing and space, and the producer gives each its own taste in instruments (`STYLE_PREFS` in `js/producer.js`).
+- **Singing guide**: `docs/afro-lust-singing-guide.md`, also shown in Beat Lab when the genre is Afro-Lust.
+- **Trap**: hat rolls now play in verses too (they were chorus-only, which made verses sound like boom-bap); more broken kick patterns; verses stay bare and the keys come and go; the producer now prefers bells, harp, flute and dark strings over warm piano and electric piano for trap.
+- **Settings > Performance and taste**: Light mode (fewer sounds loaded at once, a small memory budget, half the notes; for slow phones and PCs; applies after a reload) and a switch for the producer's learned taste, with a short list of what it has noted.
+
+## v2.25.1 (Phone walk-through: fixes and a smoother first use)
+
+I opened every page at phone width (400 px: Beat Lab and its four tabs, Vocal Sketch, Studio empty and with a beat, all six Pipeline steps and a full Autopilot run, Drafts, Settings, the menu), took screenshots, and ran automatic checks (sideways scrolling, tap sizes, tiny text, unnamed buttons, broken images, cut-off text, console errors). No page scrolled sideways and no image was broken. What I found and changed:
+
+- **Beat Lab tabs slid behind the top bar** when you scrolled, so you could not switch tab without scrolling up. They now stay visible just under the top bar (`blux.js` measures the bar's height into `--vl-topbar-h`).
+- **"Saved to Drafts" covered the Play buttons.** The message now sits above the bar at the bottom (Beat Lab player or Studio transport); wider on a phone too (`nav.js` `toast()`).
+- **Song-part chips said "Ver…", "Cho…".** They now wrap onto a second row and show full names (Verse 1, Verse 2, Chorus 1, Bridge, Final).
+- **Cut-off drop-downs.** Drum sample and instrument lists are one column on a phone so names fit; three long option labels were shortened (Settings: "Off (cleanest for singing)", "Auto (lifts a quiet take)"; Mix: "Auto (from your beat and take)"). The values did not change.
+- **Collapsed sections looked different** (Sound, Melody editor, Mixer, "More form tools", "Why these sounds?", "More settings"). They now share one look with an arrow that shows they open.
+- **Vocal Sketch takes:** the three drop-downs (Verse / Sing / Once) sit in one row; Play, nudge and Snap, and the Up / Down / Delete buttons, are in a tidy grid instead of a ragged wrap.
+- **Export tab:** grouped as Options, Download, Keep working; the repeated "Ready. Tap Play." line is shown once.
+- **Drafts** said "Press Save to drafts", but the phone button says "Save". The text now says "Save".
+- **Studio start-up guide:** steps 1 to 3 are buttons (they press the real Load beat / Add lane / Import audio buttons); a one-line key names the icon-only buttons in the header (using their own icons); the playhead line no longer cuts through the text.
+- **Tap sizes:** menu button 44 px, close button, Drafts filter, Studio header buttons, editing toolbar, transport buttons, Autopilot pills and the Sketch zoom buttons are at least 36 to 44 px.
+- **New / changed files:** `css/ux.css` (new, loaded last: every visual change above), `js/ux.js` (new: Studio guide steps and icon key), `js/blux.js` (top-bar height, `data-blux-on` on the layout), `js/nav.js` (`toast()` lift), `js/drafts.js` (one sentence), `js/mixui.js` (one label), `index.html` (ux.css and ux.js tags, Export tab grouping, two option labels). No Studio or Pipeline behaviour changed. New names: CSS variable `--vl-topbar-h`, attribute `data-blux-on`, class names `beatlab-export-*`, `studio-empty-legend`; no new globals.
+- **Checked:** all unit tests (align, tone, octave, spoken, brain, phrase, gate, master, voiceid, harmony; `key.test` still prints the same six "WRONG" lines it printed before), the Beat Lab edge cases, a full Studio run with a beat and a vocal, a full Autopilot run, and Vocal Sketch demo take to beat. Pre-existing, left alone: `tests/e2e/studio.js` clicks the hidden top-bar Studio button at phone width.
+- **Not done:** the Studio editing toolbar is still icon-only (a legend explains the header icons only), and the small round "i" info buttons keep their small look (their tap area is already larger). I have not tested on a real phone or by ear.

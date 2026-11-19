@@ -657,7 +657,7 @@
         }
 
         // ---------------------------------------------------------
-        // 4. Synthesis
+        // 4. Playing the recordings
         // ---------------------------------------------------------
 
         function env(t, a, d, s, r, dur) {
@@ -669,127 +669,70 @@
             return 0;
         }
 
-        function synthKick(sr, rnd) {
-            const n = Math.round(0.35 * sr), out = new Float32Array(n);
-            for (let i = 0; i < n; i++) {
-                const t = i / sr;
-                const f = 150 * Math.exp(-t * 18) + 45;
-                const amp = Math.exp(-t * 9) * (t < 0.002 ? t / 0.002 : 1);
-                out[i] = Math.sin(2 * Math.PI * f * t) * amp * 0.9;
-                if (t < 0.01) out[i] += (rnd() * 2 - 1) * Math.exp(-t * 120) * 0.25;
-            }
-            return out;
+        // Everything added here is a RECORDING: drum hits are the genre's drum-machine and hand-percussion samples
+        // (samples/<genre>/...), and the instruments are the recorded piano, cello, bass, marimba... (samples/instruments).
+        // Nothing is synthesized. If a recording could not be loaded, that layer is simply left out.
+        function fillGenre(options) {
+            const st = options.style;
+            if (st === "trap" || st === "rap") return "trap";
+            if (st === "rnb") return "rnb";
+            return options.subgenre === "amapiano" ? "amapiano" : "afrobeats";
         }
-        function synthSnare(sr, rnd) {
-            const n = Math.round(0.28 * sr), out = new Float32Array(n);
-            for (let i = 0; i < n; i++) {
-                const t = i / sr;
-                out[i] = (Math.sin(2 * Math.PI * 180 * t) * Math.exp(-t * 20) * 0.35 + (rnd() * 2 - 1) * Math.exp(-t * 14) * 0.65) * 0.55;
-            }
-            return out;
+        const FILL_TYPES = ["kick", "snare", "clap", "hat", "openhat", "shaker", "perc"];
+        // The recordings a fill will use: each instrument it needs, by the beat's genre
+        function fillInstruments(genre) {
+            return { bass: genre === "trap" ? "808-boom" : genre === "amapiano" ? "upright-bass" : "bass-electric",
+                     chord: "epiano", piano: "piano", strings: "cello", logdrum: "marimba", pluck: genre === "rnb" ? "guitar-nylon" : "kalimba" };
         }
-        function synthHat(sr, rnd, open) {
-            const n = Math.round((open ? 0.18 : 0.08) * sr), out = new Float32Array(n);
-            const decay = open ? 8 : 28;
-            let hp = 0;
-            for (let i = 0; i < n; i++) {
-                const t = i / sr;
-                const noise = rnd() * 2 - 1;
-                hp = noise - hp * 0.95;
-                out[i] = hp * Math.exp(-t * decay) * (open ? 0.22 : 0.18);
-            }
-            return out;
-        }
-        function synthBass(sr, freq, durSec) {
-            const n = Math.max(1, Math.round(durSec * sr)), out = new Float32Array(n);
-            for (let i = 0; i < n; i++) {
-                const t = i / sr, amp = env(t, 0.01, 0.08, 0.7, Math.min(0.12, durSec * 0.4), durSec);
-                const ph = 2 * Math.PI * freq * t;
-                out[i] = (Math.sin(ph) * 0.75 + Math.sin(ph * 2) * 0.18 + Math.sin(ph * 3) * 0.07) * amp;
-            }
-            return out;
-        }
-        function synthChord(sr, freqs, durSec, kind) {
-            const n = Math.max(1, Math.round(durSec * sr)), out = new Float32Array(n);
-            const v = 1 / Math.max(1, freqs.length);
-            for (let i = 0; i < n; i++) {
-                const t = i / sr;
-                let amp, s = 0;
-                if (kind === "piano") amp = env(t, 0.005, 0.25, 0.35, 0.35, durSec);
-                else if (kind === "strings") amp = env(t, 0.08, 0.3, 0.8, 0.4, durSec);
-                else amp = env(t, 0.04, 0.2, 0.7, 0.25, durSec);
-                for (const f of freqs) {
-                    const ph = 2 * Math.PI * f * t;
-                    if (kind === "piano") s += Math.sin(ph) + 0.4 * Math.sin(ph * 2) + 0.15 * Math.sin(ph * 3);
-                    else if (kind === "strings") s += Math.sin(ph) * 0.5 + Math.sin(ph * 2.01) * 0.3 + Math.sin(ph * 3.02) * 0.15;
-                    else s += Math.sin(ph) * 0.55 + Math.sin(ph * 2) * 0.25 + Math.sin(ph * 3) * 0.12;
-                }
-                out[i] = s * amp * v;
-            }
-            return out;
+        // Download what a fill needs (call and wait before fillMissing)
+        function prepare(options) {
+            const genre = fillGenre(options || {}), work = [];
+            FILL_TYPES.forEach(t => { for (let n = 1; n <= SAMPLE_VARIANTS; n++) work.push(loadSample(genre, t, n)); });
+            Object.values(fillInstruments(genre)).forEach(id => { const info = instrumentInfo(id); if (info) info.notes.forEach(m => work.push(loadInstrumentNote(id, m))); });
+            return Promise.all(work).then(() => undefined);
         }
 
-        // --- Afrobeats pack ---
-        function synthClap(sr, rnd) {
-            const n = Math.round(0.16 * sr), out = new Float32Array(n);
-            const aLp = 1 - Math.exp(-2 * Math.PI * 4200 / sr), aHp = 1 - Math.exp(-2 * Math.PI * 900 / sr);
-            let lp = 0, hp = 0;
-            const bursts = [0, 0.009, 0.019];
-            for (let i = 0; i < n; i++) {
-                const t = i / sr;
-                lp += aLp * ((rnd() * 2 - 1) - lp); hp += aHp * (lp - hp);
-                let env = 0.55 * Math.exp(-Math.max(0, t - 0.028) * 28) * (t >= 0.028 ? 1 : 0);
-                for (const b of bursts) if (t >= b && t < b + 0.008) env = Math.max(env, 0.9 * Math.exp(-(t - b) * 220));
-                out[i] = (lp - hp) * env * 1.4;
-            }
+        // An AudioBuffer as a mono Float32Array at the beat's sample rate, played `rate` times faster (linear interpolation)
+        function resampled(buffer, sr, rate, maxSec) {
+            const src = buffer.getChannelData(0), step = rate * buffer.sampleRate / sr;
+            const n = Math.min(Math.floor((src.length - 1) / step), Math.round((maxSec || 99) * sr)), out = new Float32Array(Math.max(1, n));
+            for (let i = 0; i < out.length; i++) { const p = i * step, k = Math.floor(p), f = p - k; out[i] = src[k] + (src[k + 1] - src[k]) * f; }
             return out;
         }
-        function synthShaker(sr, rnd) {
-            const n = Math.round(0.07 * sr), out = new Float32Array(n);
-            let prev = 0;
-            for (let i = 0; i < n; i++) {
-                const t = i / sr, noise = rnd() * 2 - 1;
-                const hp = noise - prev * 0.75; prev = noise;
-                out[i] = hp * Math.min(1, t / 0.004) * Math.exp(-t * 42) * 0.2;
-            }
-            return out;
+        function drumHit(genre, type, sr, rnd, rate) {
+            const n = 1 + Math.floor(rnd() * SAMPLE_VARIANTS), buffer = SAMPLE_BANK[sampleKey(genre, type, n)];
+            return buffer ? resampled(buffer, sr, rate || 1) : new Float32Array(1);
         }
-        function synthConga(sr, freq, slap, rnd) {
-            const n = Math.round(0.28 * sr), out = new Float32Array(n);
-            for (let i = 0; i < n; i++) {
-                const t = i / sr, f = freq * (1 + 0.22 * Math.exp(-t * 70));
-                let v = Math.sin(2 * Math.PI * f * t) * Math.exp(-t * (slap ? 26 : 16)) + 0.25 * Math.sin(2 * Math.PI * f * 2.3 * t) * Math.exp(-t * 40);
-                if (slap && t < 0.006) v += (rnd() * 2 - 1) * Math.exp(-t * 500) * 0.8;
-                out[i] = v * 0.7;
-            }
-            return out;
-        }
-        function synthLogDrum(sr, freq, durSec, rnd) {
-            const n = Math.max(1, Math.round(Math.min(durSec, 0.4) * sr)), out = new Float32Array(n);
-            let phase = 0;
-            for (let i = 0; i < n; i++) {
-                const t = i / sr, f = freq * (1 + 0.16 * Math.exp(-t * 32));
-                phase += 2 * Math.PI * f / sr;
-                const amp = Math.min(1, t / 0.002) * Math.exp(-t * 8.5);
-                let v = Math.sin(phase) + 0.38 * Math.sin(2 * phase) + 0.14 * Math.sin(3 * phase);
-                v = Math.tanh(1.6 * v) * 0.62;
-                if (t < 0.003) v += (rnd() * 2 - 1) * 0.25;
-                out[i] = v * amp;
-            }
-            return out;
-        }
-        function synthPluck(sr, freq, durSec, rnd) {            // Karplus-Strong string
-            const n = Math.max(1, Math.round(durSec * sr)), out = new Float32Array(n);
-            const N = Math.max(2, Math.round(sr / freq)), buf = new Float32Array(N);
-            let prev = 0;
-            for (let i = 0; i < N; i++) { const v = rnd() * 2 - 1; buf[i] = 0.5 * (v + prev); prev = v; }   // softened start = rounder pluck
+        // One note of a recorded instrument, held for durSec, at a frequency (Hz)
+        function instNote(id, sr, hz, durSec, attack, release) {
+            const set = instrumentSet(id);
+            if (!set) return new Float32Array(1);
+            let midi = 69 + 12 * Math.log2(hz / 440);
+            const lo = set.notes[0], hi = set.notes[set.notes.length - 1];
+            while (midi < lo - 4) midi += 12;
+            while (midi > hi + 5) midi -= 12;
+            let root = set.notes[0];
+            set.notes.forEach(m => { if (Math.abs(m - midi) < Math.abs(root - midi)) root = m; });
+            const buffer = set.buffers[root], data = buffer.getChannelData(0), step = Math.pow(2, (midi - root) / 12) * buffer.sampleRate / sr;
+            const att = attack || 0.005, rel = release || 0.15, total = Math.max(1, Math.round((durSec + rel) * sr)), out = new Float32Array(total);
+            const sustain = set.info.kind === "sustain", loopA = data.length * 0.4, loopB = data.length * 0.92;
             let pos = 0;
-            for (let i = 0; i < n; i++) {
-                const cur = buf[pos], nxt = buf[(pos + 1) % N];
-                buf[pos] = 0.5 * (cur + nxt) * 0.996;
-                out[i] = cur * Math.min(1, i / (0.002 * sr)) * Math.min(1, (n - i) / (0.02 * sr));
-                pos = (pos + 1) % N;
+            for (let i = 0; i < total; i++) {
+                const t = i / sr;
+                let a = Math.min(1, t / att);
+                if (t > durSec) a *= Math.max(0, 1 - (t - durSec) / rel);
+                if (a <= 0) break;
+                if (sustain && pos >= loopB) pos = loopA + (pos - loopB);
+                const k = Math.floor(pos);
+                if (k + 1 >= data.length) break;
+                out[i] = (data[k] + (data[k + 1] - data[k]) * (pos - k)) * a;
+                pos += step;
             }
+            return out;
+        }
+        function instChord(id, sr, freqs, durSec, attack, release) {
+            const notes = freqs.map(f => instNote(id, sr, f, durSec, attack, release)), n = Math.max(...notes.map(x => x.length)), out = new Float32Array(n);
+            notes.forEach(x => { for (let i = 0; i < x.length; i++) out[i] += x[i] / notes.length; });
             return out;
         }
 
@@ -838,10 +781,11 @@
             const layers = {};
             const make = (name) => (layers[name] = { L: new Float32Array(n), R: new Float32Array(n), used: [] });
 
-            const kickHit = synthKick(sr, rnd), snareHit = synthSnare(sr, rnd);
-            const hatClosed = synthHat(sr, rnd, false), hatOpen = synthHat(sr, rnd, true);
-            const clapHit = synthClap(sr, rnd), shakerHit = synthShaker(sr, rnd);
-            const congaLow = synthConga(sr, 185 * tune, false, rnd), congaHigh = synthConga(sr, 270 * tune, false, rnd), congaSlap = synthConga(sr, 300 * tune, true, rnd);
+            const genre = fillGenre(options), inst = fillInstruments(genre);
+            const kickHit = drumHit(genre, "kick", sr, rnd), snareHit = drumHit(genre, "snare", sr, rnd);
+            const hatClosed = drumHit(genre, "hat", sr, rnd), hatOpen = drumHit(genre, "openhat", sr, rnd);
+            const clapHit = drumHit(genre, "clap", sr, rnd), shakerHit = drumHit(genre, "shaker", sr, rnd);
+            const congaLow = drumHit(genre, "perc", sr, rnd, 0.85 * tune), congaHigh = drumHit(genre, "perc", sr, rnd, 1.15 * tune), congaSlap = drumHit(genre, "perc", sr, rnd, 1.3 * tune);
 
             // the real kick steps (when the kick is present in the beat) so the bass can lock to them
             const realKick = P.classes.kick.cls === "ok" ? learnPattern(A, "kick", P.classes.kick.bars.filter(b => b.status.kick === "ok")) : null;
@@ -882,14 +826,14 @@
                             const m = (pc) => 38 + (((pc - 38) % 12) + 12) % 12;
                             [[0, root], [3, root], [6, fifth], [10, root], ...(b.j % 2 ? [[12, fifth]] : [])].forEach(([s, pc]) => {
                                 const hz = midiToHz(m(pc)) * tune;
-                                addHit(lay.L, lay.R, synthLogDrum(sr, hz, 0.3, rnd), stepSample(b, s), f, f);
+                                addHit(lay.L, lay.R, instNote(inst.logdrum, sr, hz, 0.25, 0.002, 0.1), stepSample(b, s), f * 3, f * 3);
                             });
                         } else {
                             const v = voice(ch.pcs, 66, 60, 78), seq = [0, 1, 2, 1, 2, 1], steps = [0, 3, 6, 8, 11, 14];
                             steps.forEach((s, idx) => {
                                 const note = v.notes[seq[idx] % v.notes.length] + (idx === 2 ? 12 : 0);
                                 const hz = midiToHz(note) * tune, vel = (s % 4 === 0 ? 1 : 0.8) * f;
-                                addHit(lay.L, lay.R, synthPluck(sr, hz, 0.4, rnd), stepSample(b, s), vel * 0.9, vel * 1.1);
+                                addHit(lay.L, lay.R, instNote(inst.pluck, sr, hz, 0.35, 0.003, 0.2), stepSample(b, s), vel * 0.9, vel * 1.1);
                             });
                         }
                     } else if (name === "hat") {
@@ -909,7 +853,7 @@
                         steps.forEach((s, idx) => {
                             const nextS = idx + 1 < steps.length ? steps[idx + 1] : 16;
                             const durSec = clamp((nextS - s) * stepFrames * A.hopSec * 0.92, 0.12, barSec * 0.95);
-                            addHit(lay.L, lay.R, synthBass(sr, hz, durSec), stepSample(b, s), f, f);
+                            addHit(lay.L, lay.R, instNote(inst.bass, sr, hz, durSec, 0.005, Math.min(0.12, durSec * 0.4)), stepSample(b, s), f, f);
                         });
                     } else {
                         const ch = P.chords && P.chords[b.j];
@@ -921,7 +865,7 @@
                         const stabs = isPiano ? [0, 8] : [0];
                         for (const s of stabs) {
                             const dur = ((isPiano ? 8 : 16) * stepFrames * A.hopSec) * (kind === "pad" ? 0.98 : 0.95);
-                            const chord = synthChord(sr, freqs, dur, kind);
+                            const chord = instChord(kind === "piano" ? inst.piano : kind === "strings" ? inst.strings : inst.chord, sr, freqs, dur, kind === "strings" ? 0.08 : 0.01, kind === "strings" ? 0.4 : 0.3);
                             addHit(lay.L, lay.R, chord, stepSample(b, s), (name === "strings" ? 0.95 : 0.9) * f, (name === "strings" ? 1.05 : 1.1) * f);
                         }
                     }
@@ -1013,7 +957,7 @@
             report.push("Added: " + parts.join("; ") + ".");
             if (P.chords) report.push(`Harmony: followed the beat's own chords in ${P.followed} bar${P.followed === 1 ? "" : "s"}` + (P.fallback ? `, used the key's standard progression in ${P.fallback}` : "") +
                 ` (key ${NOTE_NAMES[A.key.rootPc]} ${A.key.scale}${A.key.source === "estimated" ? ", estimated from the audio" : ""}).`);
-            report.push("Fill is mixed under the real beat, set from the beat's own loudness (optional synth support, not a full arrangement).");
+            report.push("Fill is mixed under the real beat, set from the beat's own loudness (recorded instruments added as support, not a full arrangement).");
 
             return { channels: mixed, report: report, detection: detection, added: added, fillChannels: R.channels, plan: P, analysis: A };
         }
@@ -1024,12 +968,12 @@
             return plan(A, Object.assign({ style: "universal" }, options || {})).detection;
         }
 
-        return { fillMissing, detectInstruments, analyze, plan };
+        return { fillMissing, detectInstruments, analyze, plan, prepare };
     }
 
     if (typeof window !== "undefined" && window.VLStudio && window.VLStudio.engine) {
         const eng = createFillEngine(window.VLStudio.engine);
-        window.VLFill = { detectInstruments: eng.detectInstruments, fillMissing: eng.fillMissing, engine: eng };
+        window.VLFill = { detectInstruments: eng.detectInstruments, fillMissing: eng.fillMissing, prepare: eng.prepare, engine: eng };
     }
 
 })(typeof window !== "undefined" ? window : this);

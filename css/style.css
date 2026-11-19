@@ -2381,6 +2381,8 @@ body.is-recording .tr-btn.tr-rec {
 
 .beatlab-hero-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.6rem;
   flex-shrink: 0;
 }
@@ -2520,36 +2522,88 @@ body.is-recording .tr-btn.tr-rec {
 }
 
 .grid {
+  --g-drums: #8b6cff; --g-hats: #35c4e8; --g-percussion: #f5a524; --g-low: #3ecf8e; --g-harmony: #ff6fa5;
   display: grid;
-  gap: 2px;
+  gap: 4px;
   overflow-x: auto;
   font-size: 0;
+  padding: 10px 8px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
-
-.grid .row {
-  display: flex;
-  gap: 2px;
-  align-items: center;
-}
+.grid .row { display: flex; gap: 3px; align-items: stretch; min-width: 430px; }
+.grid .row.group-start { margin-top: 8px; }
+.grid .row[data-group="drums"] { --gc: var(--g-drums); }
+.grid .row[data-group="hats"] { --gc: var(--g-hats); }
+.grid .row[data-group="percussion"] { --gc: var(--g-percussion); }
+.grid .row[data-group="low"] { --gc: var(--g-low); }
+.grid .row[data-group="harmony"] { --gc: var(--g-harmony); }
 
 .grid .label {
-  width: 72px;
-  flex-shrink: 0;
-  font-size: 0.7rem;
-  color: var(--muted, #a8a4b8);
+  width: 96px; flex-shrink: 0;
+  display: flex; flex-direction: column; justify-content: center; gap: 1px;
+  text-align: left; padding: 0 8px 0 10px;
+  border: 0; border-left: 3px solid var(--gc, rgba(255, 255, 255, 0.2)); border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04); color: inherit; cursor: pointer;
+  position: sticky; left: 0; z-index: 1;
 }
+.grid .label:hover { background: rgba(255, 255, 255, 0.09); }
+.grid .label-name { font-size: 0.76rem; font-weight: 600; text-transform: capitalize; color: #f0eef8; }
+.grid .label-sub { font-size: 0.62rem; color: var(--muted, #a8a4b8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grid .label-sub:empty { display: none; }
+.grid .row.muted .label-name, .grid .row.quiet .label-name { text-decoration: line-through; opacity: .5; }
+.grid .row.solo .label { background: color-mix(in srgb, var(--gc) 30%, transparent); }
 
 .grid .cell {
-  width: 14px;
-  height: 18px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.04);
+  flex: 1 1 0; min-width: 18px; height: 28px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.08s, transform 0.08s, box-shadow 0.08s;
 }
-
+.grid .cell.alt { background: rgba(255, 255, 255, 0.085); }
+.grid .cell:nth-child(4n + 2):not(:nth-child(2)) { margin-left: 5px; }       /* a small gap between the four beats */
 .grid .cell.on {
-  background: var(--accent, #7c5cff);
-  opacity: calc(0.35 + var(--v, 0.6) * 0.65);
+  background: var(--gc, var(--accent, #7c5cff));
+  opacity: calc(0.4 + var(--v, 0.6) * 0.6);
+  box-shadow: 0 0 10px -2px var(--gc, var(--accent, #7c5cff));
 }
+.grid .cell.now { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: -2px; transform: scaleY(1.06); }
+.grid .row.empty .label-name, .grid .row.resting .label-name { opacity: .45; }
+.grid .row.resting .cell { opacity: .45; }
+.grid .row.ruler { min-width: 430px; margin-bottom: 2px; }
+.grid .ruler-label { background: transparent; cursor: default; font-size: 0.62rem; color: var(--muted, #a8a4b8); border-left-color: transparent; position: sticky; left: 0; }
+.grid .cell.tick { height: 18px; background: transparent; box-shadow: none; display: flex; align-items: center; justify-content: flex-start; font-size: 0.66rem; color: var(--muted, #a8a4b8); padding-left: 3px; }
+.grid .cell.tick.beatno { font-weight: 700; }
+.grid .cell.tick.now { background: rgba(255, 255, 255, 0.14); outline: none; transform: none; color: #fff; }
+
+/* Edit pattern */
+.grid.editing { border-color: rgba(124, 92, 255, 0.55); box-shadow: 0 0 0 1px rgba(124, 92, 255, 0.25) inset; }
+.grid.editing .row.editable .cell { cursor: pointer; touch-action: none; }
+.grid.editing .row.editable .cell:hover { background: color-mix(in srgb, var(--gc) 35%, transparent); }
+.grid.editing .row.editable .cell.on:hover { filter: brightness(1.25); }
+.grid.editing .row.readonly { opacity: .55; }
+.grid.editing .row.readonly .label-sub { display: none; }
+
+.gridbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0.6rem 0 0.5rem; }
+.gridbar-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.18); background: transparent; color: inherit;
+  border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 0.85rem; cursor: pointer;
+}
+.gridbar-toggle[aria-pressed="true"] { background: rgba(124, 92, 255, 0.35); border-color: rgba(124, 92, 255, 0.7); }
+.gridbar-kind { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; }
+.gridbar-kind select { min-width: 0; width: auto; background: rgba(20, 18, 28, 0.95); border: 1px solid rgba(255, 255, 255, 0.14); color: #f0eef8; border-radius: 8px; padding: 4px 8px; font-size: 0.85rem; }
+.gridbar-hint { font-size: 0.78rem; opacity: .7; flex-basis: 100%; line-height: 1.35; }
+
+/* Loading indicator */
+.beatlab-loading { display: inline-flex; align-items: center; gap: 8px; font-size: 0.82rem; padding: 6px 12px; border-radius: 999px; background: rgba(124, 92, 255, 0.16); border: 1px solid rgba(124, 92, 255, 0.4); margin: 0.6rem 0 0; }
+.beatlab-loading #bl-loadText { white-space: nowrap; }
+.beatlab-loading .loadbar { width: 90px; }
+.beatlab-loading[hidden] { display: none; }
+.beatlab-loading .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: #fff; animation: vl-spin 0.8s linear infinite; }
+.beatlab-loading .loadbar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.15); overflow: hidden; }
+.beatlab-loading .loadbar i { display: block; height: 100%; width: 0; background: var(--accent, #7c5cff); transition: width 0.12s linear; }
+@keyframes vl-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .beatlab-loading .spinner { animation-duration: 2.4s; } }
 
 .beatlab-export-row {
   display: flex;
@@ -2813,101 +2867,6 @@ body.is-recording .tr-btn.tr-rec {
 }
 
 
-/* =====================================================================
-   Beat Lab: record your vocal
-   ===================================================================== */
-.vocal-rec { display: flex; flex-direction: column; gap: 0.9rem; }
-.vocal-rec .panel-title { margin: 0; }
-.vr-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.35rem 1rem; }
-.vr-tip { font-size: 0.8rem; color: var(--muted, #9a94b2); }
-
-.vr-main { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; }
-.vr-side { display: flex; flex-direction: column; gap: 0.6rem; min-width: 12rem; }
-.vr-field { display: flex; align-items: center; gap: 0.6rem; font-size: 0.9rem; }
-.vr-field select {
-  flex: 1;
-  background: var(--surface-2, #1f1b2b);
-  color: inherit;
-  border: 1px solid var(--line, #2b2640);
-  border-radius: 8px;
-  padding: 0.4rem 0.5rem;
-  font: inherit;
-}
-
-/* the big round record button */
-.vr-rec {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.85rem 1.7rem 0.85rem 1.25rem;
-  border-radius: 999px;
-  border: 1px solid rgba(251, 113, 133, 0.55);
-  background: rgba(251, 113, 133, 0.12);
-  color: #fff;
-  font: inherit;
-  font-size: 1.05rem;
-  font-weight: 650;
-  cursor: pointer;
-  transition: background 0.15s, box-shadow 0.15s, transform 0.05s;
-}
-.vr-rec:hover:not(:disabled) { background: rgba(251, 113, 133, 0.22); }
-.vr-rec:active:not(:disabled) { transform: translateY(1px); }
-.vr-rec:disabled { opacity: 0.55; cursor: default; }
-.vr-dot {
-  width: 1.05rem; height: 1.05rem;
-  border-radius: 50%;
-  background: #fb7185;
-  box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.25);
-  transition: border-radius 0.15s;
-}
-.vr-rec.is-recording { background: rgba(251, 113, 133, 0.3); box-shadow: 0 0 22px rgba(251, 113, 133, 0.45); }
-.vr-rec.is-recording .vr-dot { border-radius: 3px; animation: vr-pulse 1s ease-in-out infinite; }
-@keyframes vr-pulse { 50% { box-shadow: 0 0 0 7px rgba(251, 113, 133, 0.05); } }
-
-.vr-meter { height: 8px; border-radius: 999px; background: var(--surface-3, #292439); overflow: hidden; }
-.vr-meter i { display: block; height: 100%; width: 0; background: #34d399; transition: width 0.06s linear; }
-.vr-meter i.warm { background: #fbbf24; }
-.vr-meter i.hot { background: #fb7185; }
-.vr-status { margin: 0; font-size: 0.9rem; color: var(--text-2, #c6c2d8); min-height: 1.3em; }
-
-.vr-take {
-  display: flex; flex-direction: column; gap: 1rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--line, #2b2640);
-}
-.vr-take[hidden] { display: none; }
-.vr-row { display: flex; flex-wrap: wrap; gap: 0.6rem; }
-
-.vr-balance { display: flex; flex-direction: column; gap: 0.5rem; }
-.vr-balance-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.85rem; color: var(--muted, #9a94b2); }
-.vr-balance-top strong { color: var(--text, #f1eff8); font-size: 0.95rem; }
-.vr-balance input[type="range"] { width: 100%; accent-color: var(--accent, #7c5cfc); }
-.vr-quick { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.vr-quick button {
-  font: inherit; font-size: 0.8rem;
-  padding: 0.3rem 0.7rem;
-  border-radius: 999px;
-  border: 1px solid var(--line-strong, #3d3659);
-  background: transparent;
-  color: var(--text-2, #c6c2d8);
-  cursor: pointer;
-}
-.vr-quick button:hover:not(:disabled) { border-color: var(--accent, #7c5cfc); color: #fff; }
-
-.vr-more summary { cursor: pointer; font-size: 0.85rem; color: var(--text-2, #c6c2d8); }
-.vr-more .slider { display: flex; align-items: center; gap: 0.7rem; margin-top: 0.6rem; font-size: 0.88rem; }
-.vr-more .slider > span { width: 4.5rem; }
-.vr-more .slider input[type="range"] { flex: 1; accent-color: var(--accent, #7c5cfc); }
-.vr-more output { width: 3.5rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted, #9a94b2); }
-.vr-more .hint { margin: 0.6rem 0 0; }
-
-/* while recording, the other transport buttons are not the way to stop: keep the eye on Stop */
-body.vr-is-recording #bl-regen,
-body.vr-is-recording #bl-export,
-body.vr-is-recording #bl-send-pipeline,
-body.vr-is-recording #bl-send-studio { opacity: 0.45; pointer-events: none; }
-
-
 /* ---- Autopilot ---------------------------------------------------------------------------------------------------- */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ap-card { margin: 12px 0; padding: 14px 16px; border-radius: 14px; background: var(--bg-card, rgba(255,255,255,.06)); border: 1px solid var(--border, rgba(255,255,255,.14)); }
@@ -2992,3 +2951,76 @@ details.ap-summary ul, details.edit-summary ul { margin: 6px 0 0; padding-left: 
 @media (max-width: 720px) {
     .tr-opts .tr-gear { width: 32px; height: 32px; }
 }
+
+/* Beat Lab: quick re-style row and variation */
+.beatlab-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+.beatlab-quick-title { font-weight: 600; font-size: 0.9rem; margin-right: 4px; }
+.beatlab-quick .chip-button { border: 1px solid var(--line, rgba(128,128,128,.35)); background: transparent; color: inherit; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.beatlab-quick .chip-button:hover { border-color: currentColor; }
+.beatlab-quick .chip-button:disabled { opacity: .5; cursor: default; }
+.beatlab-quick-hint { flex-basis: 100%; font-size: 0.8rem; opacity: .7; }
+.beatlab-spice { margin-top: -6px; }
+.beatlab-spice-line { flex: 1 1 12rem; min-width: 0; font-size: 0.88rem; font-weight: 600; color: var(--accent-hi, inherit); overflow-wrap: anywhere; }
+.beatlab-spice-hint:empty, #bl-spiceHint:empty { display: none; }
+@media (max-width: 600px) { .beatlab-hero-actions { flex-wrap: wrap; } }
+
+.beatlab-harmony .timeline .seg.sel { border-color: var(--accent, #7c5cfc); box-shadow: 0 0 0 1px var(--accent, #7c5cfc) inset; color: var(--text, #fff); }
+.formbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
+.formbar-name { font-weight: 600; font-size: 0.9rem; margin-right: auto; }
+.formbar select { min-width: 110px; }
+.formbar-btns { display: inline-flex; gap: 6px; }
+.formbar-btns button { border: 1px solid var(--line, rgba(128,128,128,.35)); background: transparent; color: inherit; border-radius: 8px; min-width: 38px; height: 38px; font: inherit; cursor: pointer; }
+.formbar-btns button:disabled { opacity: .3; cursor: default; }
+.formtrash { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 8px; margin: 8px 0 0; text-align: right; }
+.formtrash-title { font-size: 0.72rem; opacity: .55; }
+.formtrash-list { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.formtrash-list button { border: 1px dashed var(--line, rgba(128,128,128,.5)); background: transparent; color: inherit; opacity: .5; border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 0.78rem; cursor: pointer; filter: grayscale(1); }
+.formtrash-list button:hover, .formtrash-list button:focus-visible { opacity: .95; }
+.formmore { margin: 8px 0 0; font-size: 0.85rem; }
+.formmore > summary { cursor: pointer; opacity: .75; }
+.formmore-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.formmore-row .chip-button { border: 1px solid var(--line, rgba(128,128,128,.35)); background: transparent; color: inherit; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 0.85rem; cursor: pointer; }
+
+.beatlab-why { margin: 0.4rem 0 0.2rem; font-size: 0.85rem; }
+.beatlab-why > summary { cursor: pointer; opacity: .8; }
+.beatlab-whybody { margin-top: 0.5rem; display: grid; gap: 0.45rem; }
+.beatlab-whybody p { margin: 0; line-height: 1.35; }
+.beatlab-whybody .why-role { font-weight: 600; }
+.beatlab-whybody .why-note { opacity: .75; }
+
+.gridbar-tools { display: inline-flex; gap: 6px; }
+.gridbar-tools[hidden] { display: none; }
+/* the note of a bass / log drum hit, written in the box while editing */
+.grid.editing .row[data-row="bass"] .cell.on::after,
+.grid.editing .row[data-row="logdrum"] .cell.on::after {
+  content: attr(data-t); display: flex; align-items: center; justify-content: center; height: 100%;
+  font-size: 0.7rem; font-weight: 800; color: rgba(10, 8, 18, 0.9);
+}
+
+/* ---------- Melody editor (piano roll) ---------- */
+.melody .gridbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 10px; }
+.melody .gridbar-kind select { margin-left: 6px; }
+.roll-scroll { overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+.roll { display: grid; gap: 1px; width: max-content; touch-action: pan-x; user-select: none; -webkit-user-select: none; }
+.roll .rl { position: sticky; left: 0; z-index: 2; background: var(--surface, #16161d); color: var(--muted, #9aa); font-size: 11px; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; }
+.roll .rc { height: 20px; min-width: 20px; background: rgba(255, 255, 255, 0.05); border-radius: 3px; }
+.roll .rc.root { background: rgba(124, 92, 255, 0.12); }
+.roll .rc.b4 { margin-left: 3px; }
+.roll .rc.bar { margin-left: 8px; }
+.roll .rc.note { background: #7c5cff; border-radius: 3px 0 0 3px; }
+.roll .rc.note.tail { border-radius: 0; margin-left: 0; }
+.roll .rc.note.end { border-radius: 0 3px 3px 0; }
+.roll .rc.note.head { box-shadow: inset 2px 0 0 rgba(255, 255, 255, 0.55); }
+.roll .rc.play { outline: 1px solid rgba(255, 255, 255, 0.35); }
+
+.why-taste { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.why-taste-msg { font-size: 12px; color: var(--muted, #9aa); }
+
+.roll .rl.root { color: var(--text, #eee); font-weight: 600; }
+.roll .rc.play { background: rgba(255, 255, 255, 0.22); }
+.roll .rc.note.play { background: #b9a6ff; }
+.roll .rl { min-width: 30px; }
+
+.lust-guide-body h4 { margin: 14px 0 4px; font-size: 14px; }
+.lust-guide-body ul { margin: 0; padding-left: 18px; }
+.lust-guide-body li, .lust-guide-body p { font-size: 13px; line-height: 1.5; margin: 4px 0; color: var(--muted, #9aa); }

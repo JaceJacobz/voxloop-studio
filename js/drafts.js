@@ -241,7 +241,7 @@
         if (!shown.length) {
             host.innerHTML = list.length
                 ? '<p class="drafts-empty">No ' + (filter === "beats" ? "beats" : "songs") + " saved yet.</p>"
-                : '<div class="drafts-empty"><strong>Nothing here yet</strong><p>Made a beat you like but not ready to use it? Working on a song and missing something? Press <b>Save to drafts</b> at the top and it waits here for you.</p><div class="drafts-empty-actions"><button type="button" class="primary-button" data-go="beatlab">Make a beat</button><button type="button" class="secondary-button" data-go="studio">Open Studio</button></div></div>';
+                : '<div class="drafts-empty"><strong>Nothing here yet</strong><p>Made a beat you like but not ready to use it? Working on a song and missing something? Press <b>Save</b> at the top and it waits here for you.</p><div class="drafts-empty-actions"><button type="button" class="primary-button" data-go="beatlab">Make a beat</button><button type="button" class="secondary-button" data-go="studio">Open Studio</button></div></div>';
             host.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => root.VLDAW.setMode(b.dataset.go)));
             return;
         }

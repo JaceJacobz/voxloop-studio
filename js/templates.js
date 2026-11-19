@@ -55,7 +55,7 @@ const TRACK_GROUPS = {
 const TRACK_LABELS = {
   kick: "kick", snare: "snare", clap: "clap", rim: "rim",
   hat: "hat", openhat: "open hat",
-  shaker: "shaker", perc: "conga", bell: "bell",
+  shaker: "shaker", perc: "percussion", bell: "bell",
   bass: "bass", logdrum: "log drum",
   chords: "chords", pad: "pad", pluck: "pluck", lead: "lead"
 };
@@ -148,6 +148,7 @@ const TEMPLATES = {
     name: "Afrobeats",
     styleOrder: ["smooth", "afropop"],
 
+    maxLayers: { default: 8, chorus: 9, bridge: 6, intro: 5, outro: 5 },   // at most this many tracks play at once (the final chorus gets one more)
     logdrum: { tones: [0, 0, 1, 2] },            // chord tone: 0 root, 1 third, 2 fifth
     // How long pitched notes ring, in 16th-note steps (fixed = always, max = up to)
     gate: { bell: {max: 1}, bass: {max: 4}, logdrum: {max: 2}, chords: {max: 2},
@@ -227,7 +228,7 @@ const TEMPLATES = {
       openhat: { velocity: 0.70, variation: 0.10, ghost: 0.7,  timingMs: 8 },
       shaker: {
         velocity: 0.80, variation: 0.10, ghost: 0.7, timingMs: 10,
-        accent: [1,.55,.8,.55, 1,.55,.8,.55, 1,.55,.8,.55, 1,.55,.8,.55]
+        accent: [.6,.5,1,.5, .6,.5,1,.5, .6,.5,1,.5, .6,.5,1,.5]   // Afrobeats shaker: every 16th, the accent on the off-beats
       },
       perc:    { velocity: 0.75, variation: 0.15, ghost: 0.6,  timingMs: 12 },
       bell:    { velocity: 0.70, variation: 0.12, ghost: 0.6,  timingMs: 8 },
@@ -246,7 +247,7 @@ const TEMPLATES = {
       // with a clap, and the hats and shaker swing. Underneath: a round (not harsh) bass and a warm Rhodes.
       smooth: {
         name: "Smooth Afrobeats",
-        bpm: [94, 106], swing: 0.17, looseness: 1,
+        bpm: [94, 106], swing: 0.13, looseness: 1,
         scales: ["minor", "dorian", "minor", "major"],
         progressions: {
           minor:  [[0,5,2,6], [0,6,5,6], [0,3,5,6], [0,6], [0,5,6,4]],
@@ -266,12 +267,12 @@ const TEMPLATES = {
         chordsPerBar: [1],
         chord: { seventh: 0.6, ninth: 0.3 },
         bassTones: ["root","root","fifth","octave","root","fifth"],
-        hookStyle: "afro", arp: "up",
+        hookStyle: "afro", arp: "riff",
         sidechain: { harmony: 0.25, bass: 0.1, release: 0.2 },        // a soft pump: warm, not punchy
         gate: { bass: {max: 3}, chords: {max: 2}, pluck: {max: 1}, logdrum: {max: 2} },
         groove: {
           // kick: the tresillo (3-3-2) with a few maybe-hits, so no two beats sit the same
-          kick:    V("x..5 ..x. x..4 ..5.", "x... ..x. ..x. ...5", "x..4 ..x. x... ..x5", "x... ..x. ..x. .x.."),
+          kick:    V("x..x ..x. x..4 ..5.", "x... ..x. ..x. ...5", "x..6 ..x. x... ..x5", "x..x ..x. x... ..x."),
           // snare + clap together on 2 and 4, with a ghost note leading into the next beat
           snare:   V(".... x... ...3 x..2", ".... x..2 .... x.3.", ".... x... ..3. x..."),
           clap:    V(".... x... .... x...", ".... 8... .... x..4"),
@@ -287,23 +288,19 @@ const TEMPLATES = {
           bassExtra: V(".... .... ..4. ..5.", ".... ...4 .... ..5.", ".... .... .... ..6."),
           logdrum: V(".... ..4. .... ..4.", "...4 .... ..5. ....", ".... .... .... ...5"),
           // keys: offbeat stabs (verse), then a fuller 3-3-2 comp in the chorus
-          chordsVerse:  V("..8. ..6. ..8. ..5.", "...8 ..6. ...8 ..5.", "..8. ...6 ..8. ...5"),
-          chordsChorus: V("x..8 ..8. ..x. .6..", "x..8 ..x. x..8 ..6.", "..x. x..8 ..x. .8.."),
+          chordsVerse:  V("..8. ..6. ..8. ..5.", "x... ..8. ..6. 5...", "...8 ..6. ...8 ..5.", "..8. ...6 ..8. ...5"),
+          chordsChorus: V("x..8 ..8. ..x. .6..", "x... ..x. ..x. x...", "x..8 ..x. x..8 ..6.", "..x. x..8 ..x. .8.."),
           pad:     P("6... .... .... ...."),
           // plucked "Afro guitar" figure on the same 3-3-2 count
           pluckVerse:  V("x..5 ..x. 5..5 ..4.", "x... ..x. ..5. 5..5", "5..x ..5. x... ..4."),
           pluckChorus: V("x..x ..x. x..x ..x.", "x..x ..x. x..5 ..x5", "x..x ..5. x..x ..x.")
-        },
-        sound: {
-          kit: ["soft", "vintage", "punch"], chords: ["rhodes", "darkKeys", "rhodes"], pad: ["warm", "airy"],
-          bass: ["softSub", "sub808"], lead: ["glass", "vibes", "kalimba"], pluck: ["pluckSaw", "kalimba", "bellPluck"]
         },
         fx: { reverb: { decay: 2.1, send: 0.26 }, delay: { send: 0.22, feedback: 0.3 } }
       },
 
       afropop: {
         name: "Afropop",
-        bpm: [98, 108], swing: 0.12, looseness: 1,
+        bpm: [98, 108], swing: 0.10, looseness: 1,
         scales: ["minor", "dorian", "major"],
         // Chord progressions as scale degrees (0 = first note of the scale).
         // progressions = verse palette, chorusProgressions = chorus palette (a lift),
@@ -326,7 +323,7 @@ const TEMPLATES = {
         chordsPerBar: [1],
         chord: { seventh: 0.3, ninth: 0 },
         bassTones: ["root","root","root","root","fifth","octave"],
-        hookStyle: "afro", arp: "up",
+        hookStyle: "afro", arp: "riff",
         groove: {
           kick:    V("x... ..6. .8.. ..4.", "x... ..5. ..8. .4..", "x..4 ..6. .8.. ...4"),
           snare:   V(".... x..2 ...3 x...", ".... x... ..3. x..2"),
@@ -345,10 +342,6 @@ const TEMPLATES = {
           pad:     P("6... .... .... ...."),
           pluckVerse:  V("8.5. 6.54 7.5. 6.45", "6.5. ..6. 7.5. ..6."),
           pluckChorus: V("8.8. 6.64 8.7. 6.64", "x.7. 7.7. x.7. 7.76")
-        },
-        sound: {
-          kit: ["punch"], chords: ["rhodes", "wurli"], pad: ["warm"], bass: ["sub808"],
-          lead: ["glass", "vibes", "kalimba"], pluck: ["kalimba", "bellPluck"]
         },
         fx: { reverb: { decay: 2.4, send: 0.3 }, delay: { send: 0.2, feedback: 0.3 } }
       }
@@ -458,7 +451,7 @@ const TEMPLATES = {
         },
         chordsPerBar: [1, 1, 2],
         chord: { seventh: 1, ninth: 0.65 },
-        bassTones: ["root","root","root","root","root","fifth"],
+        bassTones: ["root","root","fifth","third","root","octave"],
         hookStyle: "long", arp: "updown",
         gate: { bass: {max: 10}, chords: {max: 8} },
         groove: {
@@ -479,10 +472,6 @@ const TEMPLATES = {
           pad:     P("x... .... .... ...."),
           pluckVerse:  V("..5. .4.. 5..4 ..4.", ".... 5... .... 4..."),
           pluckChorus: V("4.5. .45. 4.5. .45.", "x.5. ..5. x.5. ..5.")
-        },
-        sound: {
-          kit: ["soft"], chords: ["rhodes", "wurli"], pad: ["warm", "airy"], bass: ["sub808", "softSub"],
-          lead: ["glass", "vibes", "softSaw"], pluck: ["kalimba", "bellPluck"]
         },
         fx: { reverb: { decay: 3.2, send: 0.4 }, delay: { send: 0.25, feedback: 0.32 } }
       },
@@ -533,10 +522,6 @@ const TEMPLATES = {
           pluckVerse:  V("5... 5... 5... 5...", "x.5. .... x.5. ...."),
           pluckChorus: V("x.x. x.x. x.x. x.x.", "5.5. 5.5. 5.5. 5.5.")
         },
-        sound: {
-          kit: ["boom", "punch"], chords: ["darkKeys", "rhodes"], pad: ["dark", "airy"], bass: ["glide808"],
-          lead: ["glass", "softSaw"], pluck: ["bellPluck", "kalimba"]
-        },
         fx: { reverb: { decay: 3.6, send: 0.45 }, delay: { send: 0.35, feedback: 0.38 } }
       },
 
@@ -584,10 +569,6 @@ const TEMPLATES = {
           pad:     P("x... .... .... ...."),
           pluckVerse:  V(".... 5... ..4. .3..", ".... ..5. 4... ..3."),
           pluckChorus: V("4.5. .4.5 4.5. .4.5", "5.4. 5.4. 5.4. .5.4")
-        },
-        sound: {
-          kit: ["tight", "soft"], chords: ["wurli", "rhodes"], pad: ["airy", "warm"], bass: ["softSub", "sub808"],
-          lead: ["vibes", "glass"], pluck: ["kalimba", "bellPluck"]
         },
         fx: { reverb: { decay: 2.2, send: 0.28 }, delay: { send: 0.2, feedback: 0.3 } }
       },
@@ -637,10 +618,6 @@ const TEMPLATES = {
           pluckVerse:  V(".... .... 5... ....", "5... .... .... 4..."),
           pluckChorus: V("5... 5... 5... 5...", "x... ..5. x... ..5.")
         },
-        sound: {
-          kit: ["boom", "soft"], chords: ["darkKeys", "rhodes", "vibes"], pad: ["dark", "airy"], bass: ["glide808", "sub808"],
-          lead: ["glass", "softSaw"], pluck: ["bellPluck", "kalimba"]
-        },
         fx: { reverb: { decay: 4.2, send: 0.55 }, delay: { send: 0.4, feedback: 0.4 } }
       },
 
@@ -689,10 +666,6 @@ const TEMPLATES = {
           pluckVerse:  V("..5. ..5. ..5. ..5.", "5... ..5. 5... ..5."),
           pluckChorus: V("5.5. 5.5. 5.5. 5.5.", "x.5. x.5. x.5. x.5.")
         },
-        sound: {
-          kit: ["vintage", "punch"], chords: ["wurli", "organ"], pad: ["warm"], bass: ["moog", "sub808"],
-          lead: ["softSaw", "glass"], pluck: ["pluckSaw", "kalimba"]
-        },
         fx: { reverb: { decay: 1.8, send: 0.22 }, delay: { send: 0.15, feedback: 0.25 } }
       },
 
@@ -718,7 +691,7 @@ const TEMPLATES = {
         },
         chordsPerBar: [1],
         chord: { seventh: 0.5, ninth: 0.3 },
-        bassTones: ["root","root","root","root","fifth","octave"],
+        bassTones: ["root","root","fifth","third","fifth","octave"],
         hookStyle: "anthem", arp: "up",
         sidechain: { harmony: 0.45, bass: 0.2, release: 0.2 },
         groove: {
@@ -739,10 +712,6 @@ const TEMPLATES = {
           pad:     P("x... .... .... ...."),
           pluckVerse:  V("x.5. x.5. x.5. x.5.", "5.5. .... 5.5. ...."),
           pluckChorus: V("x.x. x.x. x.x. x.x.", "x.5. x.5. x.5. x.5.")
-        },
-        sound: {
-          kit: ["punch", "tight"], chords: ["rhodes", "vibes", "wurli"], pad: ["airy", "warm"], bass: ["sub808", "softSub"],
-          lead: ["glass", "softSaw", "vibes"], pluck: ["bellPluck", "pluckSaw"]
         },
         fx: { reverb: { decay: 2.4, send: 0.3 }, delay: { send: 0.3, feedback: 0.34 } }
       }

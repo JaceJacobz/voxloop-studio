@@ -154,7 +154,7 @@ document.addEventListener("DOMContentLoaded", () => {
         for (let c = 0; c < vocal.numberOfChannels; c++) channels.push(vocal.getChannelData(c));
 
         const selectiveBox = $("tune-selective");
-        const spokenBox = $("tune-spoken"), spokenAutoBox = $("tune-spoken-auto");
+        const spokenBox = $("tune-spoken"), spokenAutoBox = $("tune-spoken-auto"), landBox = $("tune-land");
         const naturalBox = $("tune-natural");
 
         // Auto: speed, strength, vibrato flattening and how picky "selective" is come from the beat's style and this voice (mixbrain.js)
@@ -236,11 +236,13 @@ document.addEventListener("DOMContentLoaded", () => {
             selectiveCents: autoTune ? autoTune.selectiveCents : 6,
             selectiveSoftCents: autoTune ? autoTune.selectiveSoftCents : 14,
             spokenSung: spokenBox ? spokenBox.checked : false,
+            lockMelodic: landBox ? landBox.checked : true,                         // every note of a confidently melodic line lands on the key
+            settleShortNotes: landBox ? landBox.checked : true,                    // short notes get a retune that fits their length
             spokenAuto: spokenAutoBox ? spokenAutoBox.checked : true,        // melodic lines that clash with the key are tuned (rap-like ones stay as performed)
             natural: naturalBox ? naturalBox.checked : true,      // gentle vibrato, quicker arrival on notes, steadier holds
             adaptive: naturalBox ? naturalBox.checked : true      // rawer takes get a stronger, steadier correction
         };
-        if (S) S.tuneOptions = { rootPc: options.rootPc, scale: options.scale, refCents: options.refCents };   // the harmony layer follows this key
+        if (S) { S.tuneOptions = { rootPc: options.rootPc, scale: options.scale, refCents: options.refCents }; S.tuneOptionsUsed = options; }   // (the full set, for the report and for diagnosing a take)   // the harmony layer follows this key
 
         // ---- listen line by line: allowed notes and strength per line (phrasebrain.js), handed to the engine as zones
         let phraseRes = null;
@@ -278,6 +280,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const bits = [];
                 if (s.melodicLifted) bits.push(`${s.melodicLifted} notes on melodic lines that clashed with the key were tuned (the lines hold notes, so they are sung, not rapped)`);
                 else if (s.spokenLifted) bits.push(`${s.spokenLifted} talk-sing notes were pulled onto notes`);
+                if (s.glided) bits.push(`${s.glided} fast-slide fragments were glided through instead of snapped, to keep it natural`);
                 if (s.spokenLeft) bits.push(`${s.spokenLeft} notes on rap-like lines were left as performed`);
                 if (closeAlready) bits.push(`${closeAlready} were already close to the key`);
                 S.tuneWhy = bits.slice();

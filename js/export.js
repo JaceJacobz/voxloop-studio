@@ -23,6 +23,7 @@ const EXPORT_BARS_AHEAD = 3;            // how many bars are queued ahead of the
 // }
 // onProgress(barsDone, totalBars) is called while rendering (optional)
 async function renderSongBuffer(beat, settings, onProgress) {
+  await ensureBeatSound(beat.sound);        // the drum recordings must be loaded before the render starts
   const template = resolveTemplate(beat.genre, beat.style);
   const stepSec = 60 / beat.bpm / 4;
   const barSec = stepSec * 16;
@@ -94,7 +95,17 @@ async function renderSongBuffer(beat, settings, onProgress) {
     Tone.setContext(original);                                // always give Tone its real-time context back
   }
 
-  return rendered.get();                                      // an AudioBuffer
+  const out = rendered.get();                                 // an AudioBuffer
+  // A beat made around a voice (Vocal Sketch) starts exactly on bar 1: the hair of silence is cut off, so the file can be laid under a recording at the bar start
+  const cut = beat.vocalSketch ? Math.round(lead * out.sampleRate) : 0;
+  if (cut > 0 && out.length > cut && typeof AudioBuffer === "function") {
+    try {
+      const trimmed = new AudioBuffer({ numberOfChannels: out.numberOfChannels, length: out.length - cut, sampleRate: out.sampleRate });
+      for (let c = 0; c < out.numberOfChannels; c++) trimmed.copyToChannel(out.getChannelData(c).subarray(cut), c);
+      return trimmed;
+    } catch (err) { console.warn(err); }
+  }
+  return out;
 }
 
 // ---------- WAV encoding ----------

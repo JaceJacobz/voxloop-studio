@@ -556,7 +556,7 @@ function createTuneEngine() {
     // Correction plan: a pitch shift, in cents, for every frame
     // ---------------------------------------------------------
 
-    function smoothRuns(values, midi, hopMs, retuneMs) {
+    function smoothRuns(values, midi, hopMs, retuneMs, perFrameMs) {
 
         if (retuneMs <= 0) return values;
 
@@ -564,6 +564,8 @@ function createTuneEngine() {
         const alpha = 1 - Math.exp(-hopMs / Math.max(1, retuneMs / 2));
         const n = values.length;
         const out = Float32Array.from(values);
+        // perFrameMs (optional): a retune time for each frame, so a short note can settle in time while long notes keep the slow glide
+        const al = (i) => perFrameMs ? 1 - Math.exp(-hopMs / Math.max(1, perFrameMs[i] / 2)) : alpha;
 
         let k = 0;
         while (k < n) {
@@ -572,9 +574,9 @@ function createTuneEngine() {
             while (r < n && !isNaN(midi[r])) r++;
 
             let y = out[k];
-            for (let i = k; i < r; i++) { y += alpha * (out[i] - y); out[i] = y; }
+            for (let i = k; i < r; i++) { y += al(i) * (out[i] - y); out[i] = y; }
             y = out[r - 1];
-            for (let i = r - 1; i >= k; i--) { y += alpha * (out[i] - y); out[i] = y; }
+            for (let i = r - 1; i >= k; i--) { y += al(i) * (out[i] - y); out[i] = y; }
             k = r;
         }
         return out;
@@ -967,7 +969,9 @@ function createTuneEngine() {
                 } else notePull = 1;
             }
 
-            if (melodicLift) notePull *= Math.min(1, lift * 1.25);               // as much as the evidence says, not more
+            const locked = !!(melodicLift && o.lockMelodic && lift >= 0.5);                         // a confidently melodic, clashing line
+            if (locked) notePull = 1;                                                              // land every note of it on the key
+            else if (melodicLift) notePull *= Math.min(1, lift * 1.25);   // as much as the evidence says, not more (a confidently melodic, clashing line is locked fully onto the key)
             if (speechLeft) { notePull = 0; spokenLeft++; }
             if (zk <= 0.02) notePull = 0;                       // this line was set to be left exactly as sung or rapped
             if (notePull <= 0.02) skipped++;
@@ -983,7 +987,7 @@ function createTuneEngine() {
                 if (Math.abs(resid) < dead) resid = 0;
                 resid = Math.max(-cap, Math.min(cap, resid));
             }
-            resid *= effStrength * notePull * zk;
+            resid *= (locked ? 1 : effStrength) * notePull * (locked ? 1 : zk);                   // locked notes go the whole way, whatever the strength slider says
 
             const offset = move * 100 + resid;
             const isLong = (nt.end - nt.start) >= longNoteFrames;
@@ -1010,7 +1014,7 @@ function createTuneEngine() {
                     frameResid = 0.28 * frameResid + 0.72 * centerResid;
                     if (Math.abs(frameResid) < dead) frameResid = 0;
                     frameResid = Math.max(-cap, Math.min(cap, frameResid));
-                    frameResid *= effStrength * notePull;
+                    frameResid *= (locked ? 1 : effStrength) * notePull;
                     const drift = (track.midi[k] - nt.center) * 100;
                     // Preserve more vibrato when pull is only partial
                     const flatAmt = longFlatten * (0.25 + 0.75 * notePull);
@@ -1063,6 +1067,33 @@ function createTuneEngine() {
             });
         }
 
+        // ---- Glides, not notes. The note splitter chops a fast slide into fragments (23-58 ms on a real take). A fragment shorter than
+        // twice the retune time cannot be settled onto (the pitch is still travelling when it ends), and forcing each one onto its own
+        // nearest note makes stair-steps, which is what sounds robotic. So a fragment gets no target of its own: the correction glides
+        // through it from the shift of the real note before to the shift of the real note after. Real notes are untouched by this.
+        let glided = 0;
+        if (o.glideShort !== false && notes.length > 2) {
+            const settleMs = Math.max(o.retuneMs || 0, o.minRetuneMs != null ? o.minRetuneMs : 0, 14);
+            // what counts as too short to land on: if short notes settle on their own clock (settleShortNotes) a note only needs
+            // enough length for that clock (8 ms floor / settle fraction); otherwise it needs twice the retune time
+            const microMs = o.settleShortNotes ? 8 / (o.settleFraction || 0.14) : 2 * settleMs;
+            const microFrames = Math.ceil(microMs / hopMs);
+            const isMicro = notes.map((nt) => (nt.end - nt.start) < microFrames);
+            let i = 0;
+            while (i < notes.length) {
+                if (!isMicro[i]) { i++; continue; }
+                let j = i; while (j + 1 < notes.length && isMicro[j + 1] && notes[j + 1].start - notes[j].end <= 3) j++;
+                const a = notes[i].start, b = notes[j].end;
+                const prevOk = i > 0 && !isMicro[i - 1] && a - notes[i - 1].end <= 3, nextOk = j + 1 < notes.length && !isMicro[j + 1] && notes[j + 1].start - b <= 3;
+                if (prevOk || nextOk) {
+                    const v0 = prevOk ? raw[notes[i - 1].end - 1] : raw[notes[j + 1].start], v1 = nextOk ? raw[notes[j + 1].start] : raw[notes[i - 1].end - 1];
+                    for (let k = a; k < b; k++) { const t = (k - a + 0.5) / Math.max(1, b - a); raw[k] = v0 + (v1 - v0) * t; }
+                    for (let q = i; q <= j; q++) { info[q].glide = true; glided++; }
+                }
+                i = j + 1;
+            }
+        }
+
         // Make it sound sung, not just corrected (can be switched off with natural: false)
         const natural = o.natural !== false ? naturalize(track, notes, info, raw, o, hopSec) : null;
 
@@ -1085,13 +1116,26 @@ function createTuneEngine() {
             if (corrected + partial > 0 && retuneMs < 18) retuneMs = Math.max(retuneMs, 18);
         }
 
+        // ---- Short notes must be able to settle. One retune time for every note cannot land a 90 ms note: it is still travelling when
+        // the note ends. A note's retune time is capped at 30% of its own length (so it has arrived by about a third of the way
+        // through, then holds), but never below 8 ms. Long notes, scoops, slides and vibrato keep the slow, natural glide.
+        let perFrameRetune = null;
+        if (o.settleShortNotes && retuneMs > 8) {
+            perFrameRetune = new Float32Array(raw.length).fill(retuneMs);
+            notes.forEach((nt, i) => {
+                if (info[i] && info[i].glide) return;
+                const rt = Math.max(8, (o.settleFraction || 0.14) * (nt.end - nt.start) * hopMs);
+                if (rt < retuneMs) for (let k = nt.start; k < nt.end && k < perFrameRetune.length; k++) perFrameRetune[k] = rt;
+            });
+        }
+
         return {
-            shift: smoothRuns(raw, track.midi, hopMs, retuneMs),
+            shift: smoothRuns(raw, track.midi, hopMs, retuneMs, perFrameRetune),
             notes: info,
             biasCents: smart ? smart.biasCents : 0,
             ambiguous: smart ? smart.ambiguous : 0,
             selective: {
-                skipped, partial, corrected, thresh: selectThresh, soft: selectSoft, spokenLifted, spokenLeft, melodicLifted,
+                skipped, partial, corrected, thresh: selectThresh, soft: selectSoft, spokenLifted, spokenLeft, melodicLifted, glided,
                 lines: lineInfo.map((L) => ({ startSec: +(L.start * hopSec).toFixed(2), endSec: +(L.endFrame * hopSec).toFixed(2), notes: L.notes.length, pitched: +L.pitched.toFixed(2), range: +L.range.toFixed(1), held: +L.held.toFixed(2), clash: +L.clash.toFixed(2), melodic: +L.melodic.toFixed(2), lift: +L.lift.toFixed(2) }))
             },
             natural: natural,

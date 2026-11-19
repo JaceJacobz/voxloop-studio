@@ -1925,7 +1925,6 @@
         });
         els.trSettings?.addEventListener("click", () => setMode("settings"));
         els.trPhone?.addEventListener("click", () => setPhonePreview(!phoneOn));
-        $("vr-open-settings")?.addEventListener("click", () => setMode("settings"));
 
         let saved = "pipeline";
         try {

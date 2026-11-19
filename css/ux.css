@@ -1,0 +1,83 @@
+/* =========================================================
+   Voxloop Studio — phone experience pass (v2.25.1). Loads LAST, so it only adjusts; nothing is removed.
+   1. Beat Lab tabs stay visible under the top bar (they slid behind it)
+   2. Song-part chips wrap, so "Verse 1" and "Verse 2" can be told apart
+   3. Collapsed sections all look alike and show they open (arrow)
+   4. Sound lists: one column on a phone so names are not cut off
+   5. Vocal Sketch takes: tidy button grid
+   6. Export tab: grouped, no repeated status line
+   7. Studio start-up guide: steps are buttons, playhead no longer cuts through the text
+   8. Tap sizes: menu buttons, Drafts filter, Studio header, zoom, settings rows
+   ========================================================= */
+
+/* 1 ---- Beat Lab tabs under the sticky top bar */
+.blux-tabs { top: calc(var(--vl-topbar-h, 46px) + 2px); padding: 4px; scroll-margin-top: calc(var(--vl-topbar-h, 46px) + 2px); }
+.blux-tab { min-height: 40px; font-size: 14px; }
+
+/* 2 ---- song parts */
+.beatlab-harmony .timeline { flex-wrap: wrap; gap: 4px; min-height: 0; }
+.beatlab-harmony .timeline .seg { flex-basis: 62px; min-width: 62px; min-height: 38px; font-size: .72rem; padding: 0 4px; }
+.beatlab-harmony .timeline .seg span { overflow: visible; text-overflow: clip; }
+
+/* 3 ---- collapsed sections: same look everywhere */
+#bl-soundBox > summary, #bl-mixerBox > summary { list-style: none; cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 4px; min-height: 44px; }
+#bl-soundBox > summary::-webkit-details-marker, #bl-mixerBox > summary::-webkit-details-marker { display: none; }
+#bl-soundBox > summary .panel-title, #bl-mixerBox > summary .panel-title { font-size: 1rem; font-weight: 700; }
+#bl-soundBox > summary .panel-title::after, #bl-mixerBox > summary .panel-title::after { content: "  \25BE"; opacity: .6; }
+#bl-soundBox[open] > summary .panel-title::after, #bl-mixerBox[open] > summary .panel-title::after { content: "  \25B4"; }
+.formmore > summary, .beatlab-why > summary, .vocalsketch details > summary { display: flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; list-style: none; }
+.formmore > summary::-webkit-details-marker, .beatlab-why > summary::-webkit-details-marker, .vocalsketch details > summary::-webkit-details-marker { display: none; }
+.formmore > summary::before, .beatlab-why > summary::before, .vocalsketch details > summary::before { content: "\25B8"; display: inline-block; transition: transform .15s; opacity: .8; }
+.formmore[open] > summary::before, .beatlab-why[open] > summary::before, .vocalsketch details[open] > summary::before { transform: rotate(90deg); }
+
+/* 4 ---- sound lists: full width on a phone (names are long) */
+.beatlab-soundgrid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); }
+
+/* 5 ---- Vocal Sketch take: selects in one row, buttons in a tidy grid */
+.vocalsketch .vs-take-head { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.vocalsketch .vs-take-head select { max-width: none; width: 100%; min-width: 0; }
+.vocalsketch .vs-take-head .vs-info { grid-column: 1 / -1; }
+.vocalsketch .vs-take-foot { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
+.vocalsketch .vs-take-foot > .vs-play, .vocalsketch .vs-take-foot > .vs-earlier, .vocalsketch .vs-take-foot > .vs-later { grid-column: span 4; }
+.vocalsketch .vs-take-foot > .vs-snap { grid-column: span 5; }
+.vocalsketch .vs-take-foot > .vs-up, .vocalsketch .vs-take-foot > .vs-down { grid-column: span 2; padding: 0; }
+.vocalsketch .vs-take-foot > .vs-del { grid-column: span 3; }
+.vocalsketch .vs-take-foot > .vs-shift { grid-column: 1 / -1; order: 5; }
+.vocalsketch .vs-take-foot > .vs-shift:empty { display: none; }
+.vocalsketch .vs-take-foot > .vs-import-row { grid-column: 1 / -1; order: 6; }
+.vocalsketch .vs-chip { white-space: nowrap; }
+
+/* 6 ---- Export tab */
+.beatlab-export-group { margin: 14px 0 4px; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted, #9a94b2); }
+.beatlab-export-group:first-of-type { margin-top: 4px; }
+.beatlab-export-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.beatlab-export-opts .field { flex: 0 0 auto; min-width: 130px; }
+.beatlab-export-opts .beatlab-check { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; }
+.beatlab-layout[data-blux-on="export"] .blux-now { display: none; }          /* the card shows the same line */
+
+/* 7 ---- Studio start-up guide */
+.studio-empty { z-index: 7; }                                                 /* above the playhead line */
+.studio-guide li[data-do] { pointer-events: auto; cursor: pointer; border-radius: 10px; padding: 8px 10px; margin: 0 -10px; min-height: 40px; box-sizing: border-box; }
+.studio-guide li[data-do]:hover, .studio-guide li[data-do]:focus-visible { background: var(--accent-soft, rgba(124, 92, 252, .14)); outline: none; }
+.studio-guide li[data-do]::after { content: "\203A"; margin-left: auto; opacity: .5; font-size: 18px; }
+.studio-empty-legend { pointer-events: none; margin: 14px 0 0; max-width: 320px; font-size: 12px; line-height: 1.7; color: var(--muted, #9a94b2); text-align: left; }
+.studio-empty-legend b { color: var(--text-2, #c6c2d8); font-weight: 600; }
+
+/* 8 ---- tap sizes */
+.nav-toggle, .top-bar .nav-toggle { min-width: 44px; min-height: 44px; }
+.nav-close { min-width: 44px; min-height: 44px; }
+.drafts-filter button { min-height: 40px; padding-inline: 16px; }
+.studio-tool-btn { min-height: 40px; }
+.eb-btn { min-height: 38px; }
+.ap-pill { min-height: 36px; }
+.vocalsketch summary { min-height: 40px; }
+.vocalsketch #vs-zout, .vocalsketch #vs-zfit, .vocalsketch #vs-zin { min-width: 40px; min-height: 40px; }
+.beatlab-check, label.toggle { min-height: 40px; }
+@media (max-width: 440px) {
+  .vl-toast { max-width: 92vw; min-width: min(300px, 92vw); }
+}
+.beatlab-export-row > .beatlab-export-group, .beatlab-export-row > .beatlab-export-opts { flex: 1 1 100%; }
+.top-bar #nav-toggle { flex: none; width: 44px; height: 44px; min-width: 44px; min-height: 44px; }  /* beats ".top-bar > button:first-child" (32 px) */
+.eb-btn { min-width: 38px; justify-content: center; }
+#tr-phone, #tr-settings { min-width: 38px; min-height: 38px; }
+#studio-lane-type { min-height: 40px; }

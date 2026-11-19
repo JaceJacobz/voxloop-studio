@@ -7,8 +7,9 @@ import hashlib, os, json
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 files = ["index.html", "manifest.webmanifest", "apple-touch-icon.png", "logo-mark.png"]
-for d in ("js", "css", "lib", "assets", "icons"):
+for d in ("js", "css", "lib", "assets", "icons", "samples"):
     for dp, _, fs in os.walk(d):
+        if dp.replace(os.sep, "/").startswith(("samples/instruments", "fileaudio")): continue   # big: cached the first time each one is played
         for f in sorted(fs):
             if f.startswith("."): continue
             files.append(os.path.join(dp, f).replace(os.sep, "/"))

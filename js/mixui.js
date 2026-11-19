@@ -15,7 +15,7 @@
 // ---------------------------------------------------------
 
 const LOUDNESS_TARGETS = [
-    { lufs: "auto", label: "Auto: set from your beat, style and take (recommended)" },
+    { lufs: "auto", label: "Auto (from your beat and take)" },
     { lufs: -14, label: "Streaming / open, −14 LUFS (keeps vocal character)" },
     { lufs: -12, label: "Balanced, −12 LUFS" },
     { lufs: -10, label: "Punchy, −10 LUFS (hip-hop / trap, tighter limiting)" },

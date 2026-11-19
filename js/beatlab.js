@@ -33,7 +33,7 @@ function ensureEngine() {
 // ---------- State ----------
 const STEPS = 16;
 
-let current = generatePattern("rnb");       // the beat that is playing
+let current = generatePattern("rnb", { structure: "auto" });       // the beat that is playing
 let pending = null;                         // a new beat waiting for the next bar
 let bar = -1;                               // which bar of the song we are in
 let startBar = 0;                           // where Play starts (click a section to change it)
@@ -76,15 +76,19 @@ let lastBarKind = null;                     // what kind of section the bar bein
 const muted = new Set();                    // tracks the user has muted
 const soloed = new Set();                   // tracks the user has soloed (only these play)
 const locked = new Set();                   // groups kept when making a new beat
+const keptRoles = new Set();               // instruments (bass, chords, ...) kept when making a new beat
+const beatHistory = [];                    // the beats you had before, newest last (the Back button)
+let backTarget = null;
 const trim = {};                            // dB the user added or removed per track
 TRACK_ORDER.forEach(name => { trim[name] = 0; });
 
 // What the pickers are set to. "auto" means: choose at random on every new beat.
 const settings = {
-  sound: {},   // parts the user picked in the Sound panel; kept when making a new beat
-  pack: "auto",   // "auto" = a different pack each beat, or the id of the pack the user chose
+  sound: {},   // tonal parts the user picked in the Sound panel; kept when making a new beat
+  drums: {},   // drum samples the user picked, { kick: 2, ... }; the other types get a new random pick on every beat
+  vibe: "auto",   // "auto" = the producer reads the genre, key and tempo; or one of VIBES
   root: "auto", scale: "auto", progression: "auto", style: "auto",
-  structure: "full", bpmAuto: true, bpm: current.bpm, phraseBars: 4
+  structure: "auto", bpmAuto: true, bpm: current.bpm, phraseBars: 4
 };
 
 try { if (typeof Tone !== 'undefined') Tone.Transport.bpm.value = current.bpm; } catch (e) { console.warn(e); }
@@ -118,13 +122,14 @@ Object.entries(TEMPLATES).forEach(([key, template]) => {
 });
 genreEl.value = current.genre;
 
-// Structure dropdown: full song / short song / loop
-Object.entries(STRUCTURES).forEach(([key, structure]) => {
-  const option = document.createElement("option");
-  option.value = key;
-  option.textContent = structure.name;
-  if (structureEl) structureEl.appendChild(option);
-});
+// Structure dropdown: auto (a different form each time) / full song / short song / loop / your own edited form
+[["auto", "Auto (varied)"], ...Object.entries(STRUCTURES).map(([key, s]) => [key, s.name]), ["custom", "Custom (edited)"]]
+  .forEach(([key, name]) => {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = name;
+    if (structureEl) structureEl.appendChild(option);
+  });
 if (structureEl) structureEl.value = settings.structure;
 
 // Style dropdown: Auto plus the styles of the chosen genre
@@ -142,13 +147,57 @@ function fillStyleOptions() {
   styleEl.value = settings.style;
 }
 
-// ---------- Step grid (visual) ----------
+// ---------- Step grid ----------
+// One row per sound, one box per sixteenth note, coloured by family (drums, hats, percussion, low end, harmony).
+// The drum and percussion rows can be edited (tap or drag); the rows that play notes (bass, chords, pad, pluck, lead,
+// log drum) follow the chords and the melody, so they are shown but not drawn by hand.
 const rowEls = {};
+// Everything but the lead can be drawn: the lead's notes are written note by note in its melody, so a new hit would have no note.
+const GRID_EDITABLE = new Set(["kick", "snare", "clap", "rim", "hat", "openhat", "shaker", "perc", "bell", "bass", "logdrum", "chords", "pad", "pluck"]);
+const GRID_PITCHED = new Set(["bass", "logdrum"]);        // these also have a note per hit (Pitch tool)
+let gridTool = "hits";
+let gridEdit = false;                 // Edit pattern is on: the grid shows the pattern itself, and taps change it
+let gridPainting = null;              // while dragging: { track, value }
+let gridKind = "chorus";              // which part's pattern is being edited (song)
+// The note of a bass or log drum hit, as a short label (R = root, 3, 5, 7, 8 = octave) and how to step to the next one
+const PITCH_TOKENS = ["r", "3", "5", "7", "8"], PITCH_TONES = ["root", "third", "fifth", "seventh", "octave"];
+const PITCH_LABEL = { r: "R", "3": "3", "5": "5", "7": "7", "8": "8", "9": "9", "4": "4", l: "\u2193", b: "b7", root: "R", third: "3", fifth: "5", seventh: "7", octave: "8" };
+function pitchLabel(beat, track, step) {
+  const riff = beat.riffs && beat.riffs[track];
+  if (riff) return PITCH_LABEL[riff.tokens[step]] || "R";
+  if (track === "bass") return PITCH_LABEL[beat.bassTones[step]] || "R";
+  return String((beat.logTones[step] || 0) + 1);
+}
+function cyclePitch(beat, track, step, reset) {
+  const riff = beat.riffs && beat.riffs[track];
+  if (riff) {
+    const at = PITCH_TOKENS.indexOf(riff.tokens[step]);
+    riff.tokens[step] = reset ? "r" : PITCH_TOKENS[(at + 1) % PITCH_TOKENS.length];
+  } else if (track === "bass") {
+    const at = PITCH_TONES.indexOf(beat.bassTones[step]);
+    beat.bassTones[step] = reset ? "root" : PITCH_TONES[(at + 1) % PITCH_TONES.length];
+  } else {
+    beat.logTones[step] = reset ? 0 : ((beat.logTones[step] || 0) + 1) % 4;
+  }
+}
+const ROW_SOUND = { bass: "bass", logdrum: "log", chords: "chords", pad: "pad", pluck: "pluck", lead: "lead" };
+
+// The beat numbers above the grid (1 2 3 4), so the sixteenths are easy to count
+const rulerEl = document.createElement("div");
+rulerEl.className = "row ruler";
+rulerEl.appendChild(Object.assign(document.createElement("span"), { className: "label ruler-label", textContent: "beat" }));
+for (let i = 0; i < STEPS; i++) {
+  const t = document.createElement("div");
+  t.className = "cell tick" + (i % 4 === 0 ? " beatno" : "") + (Math.floor(i / 4) % 2 === 1 ? " alt" : "");
+  t.textContent = i % 4 === 0 ? String(i / 4 + 1) : "";
+  rulerEl.appendChild(t);
+}
+gridEl.appendChild(rulerEl);
 
 // Build the rows once: a name button plus 16 cells per track
 TRACK_ORDER.forEach((trackName, index) => {
   const rowEl = document.createElement("div");
-  rowEl.className = "row";
+  rowEl.className = "row" + (GRID_EDITABLE.has(trackName) ? " editable" : " readonly");
   rowEl.dataset.row = trackName;
   rowEl.dataset.group = TRACK_GROUPS[trackName];
   if (index > 0 && TRACK_GROUPS[trackName] !== TRACK_GROUPS[TRACK_ORDER[index - 1]]) {
@@ -159,7 +208,12 @@ TRACK_ORDER.forEach((trackName, index) => {
   const label = document.createElement("button");
   label.type = "button";
   label.className = "label";
-  label.textContent = TRACK_LABELS[trackName];
+  const nameEl = document.createElement("span");
+  nameEl.className = "label-name";
+  nameEl.textContent = TRACK_LABELS[trackName];
+  const subEl = document.createElement("span");
+  subEl.className = "label-sub";
+  label.append(nameEl, subEl);
   label.title = "Click to mute or unmute";
   label.setAttribute("aria-pressed", "false");
   label.addEventListener("click", () => toggleMute(trackName));
@@ -167,13 +221,69 @@ TRACK_ORDER.forEach((trackName, index) => {
 
   for (let i = 0; i < STEPS; i++) {
     const cell = document.createElement("div");
-    cell.className = "cell";
+    cell.className = "cell" + (Math.floor(i / 4) % 2 === 1 ? " alt" : "");
     rowEl.appendChild(cell);
   }
 
   gridEl.appendChild(rowEl);
   rowEls[trackName] = rowEl;
 });
+
+// The instrument's name under the name of each melodic row ("bass: 808 punch")
+function refreshRowSubs(beat) {
+  Object.entries(ROW_SOUND).forEach(([track, role]) => {
+    const id = beat.sound && resolveInstrument(role, beat.sound[role]), info = id && instrumentInfo(id);
+    rowEls[track].querySelector(".label-sub").textContent = info ? info.name : "";
+  });
+}
+
+// The pattern the editor works on: a song part's pattern, or the loop's own
+function editPattern(beat) {
+  return isSong(beat) ? beat.patterns[gridKind] || beat.patterns.chorus : null;
+}
+function patternHits(beat, track) {
+  const pat = editPattern(beat);
+  return (pat ? pat.hits[track] : beat.tracks[track]) || Array(STEPS).fill(0);
+}
+function setPatternHit(beat, track, step, on) {
+  const apply = hits => { if (hits && hits[track]) hits[track][step] = on ? 1 : 0; };
+  const pat = editPattern(beat);
+  const val = on ? 1 : 0;
+  // keep a copy of the first state, so Reset pattern can bring it back
+  beat.gridBackup = beat.gridBackup || {};
+  const key = pat ? gridKind : "loop";
+  if (!beat.gridBackup[key]) {
+    beat.gridBackup[key] = pat ? JSON.parse(JSON.stringify({ hits: pat.hits, probs: pat.probs, alt: pat.alt || null }))
+      : JSON.parse(JSON.stringify({ hits: beat.tracks, probs: beat.loopProbs || null }));
+  }
+  const write = p => { apply(p.hits); if (p.probs && p.probs[track]) p.probs[track][step] = val; };
+  if (on && GRID_PITCHED.has(track)) cyclePitch(beat, track, step, true);      // a new bass or log drum hit starts on the root
+  if (pat) {
+    write(pat);
+    if (pat.alt) write(pat.alt);
+    if (gridKind === "chorus") beat.tracks[track][step] = val;        // beat.tracks mirrors the chorus pattern
+  } else {
+    beat.tracks[track][step] = val;
+    if (beat.loopProbs && beat.loopProbs[track]) beat.loopProbs[track][step] = val;
+  }
+}
+function resetPattern(beat) {
+  const key = isSong(beat) ? gridKind : "loop", saved = beat.gridBackup && beat.gridBackup[key];
+  if (!saved) return false;
+  const copy = JSON.parse(JSON.stringify(saved));
+  const pat = editPattern(beat);
+  const restore = (into, from) => { Object.keys(from.hits).forEach(t => { into.hits[t] = from.hits[t]; if (from.probs && into.probs) into.probs[t] = from.probs[t]; }); };
+  if (pat) {
+    restore(pat, copy);
+    if (pat.alt && copy.alt) restore(pat.alt, copy.alt);
+    if (gridKind === "chorus") Object.keys(copy.hits).forEach(t => { beat.tracks[t] = copy.hits[t].slice(); });
+  } else {
+    Object.keys(copy.hits).forEach(t => { beat.tracks[t] = copy.hits[t]; });
+    if (copy.probs && beat.loopProbs) Object.keys(copy.probs).forEach(t => { beat.loopProbs[t] = copy.probs[t]; });
+  }
+  delete beat.gridBackup[key];
+  return true;
+}
 
 // Key name, style name and the chord chips (the chords of the section that is playing)
 let chipSignature = "";
@@ -213,16 +323,25 @@ function paint(beat, v) {
   const shown = v || (isSong(beat) ? barView(beat, startBar, true) : null);
   const tracks = shown ? shown.tracks : beat.tracks;
   const velocities = shown ? shown.velocities : beat.velocities;
+  refreshRowSubs(beat);
   TRACK_ORDER.forEach(trackName => {
     const cells = rowEls[trackName].querySelectorAll(".cell");
-    tracks[trackName].forEach((hit, i) => {
+    // Edit pattern: show the pattern itself (what you change), not this bar's fills and variations
+    const hits = gridEdit ? patternHits(beat, trackName) : tracks[trackName];
+    hits.forEach((hit, i) => {
       cells[i].classList.toggle("on", hit === 1);
       // Brightness shows how hard the hit is played
-      const vel = humanize ? velocities[trackName][i] : FLAT_VELOCITY;
+      const vel = gridEdit ? 0.9 : humanize ? velocities[trackName][i] : FLAT_VELOCITY;
       cells[i].style.setProperty("--v", 0.55 + 0.45 * vel);
+      if (GRID_PITCHED.has(trackName)) {
+        if (gridEdit && hit === 1) cells[i].dataset.t = pitchLabel(beat, trackName, i); else delete cells[i].dataset.t;
+      }
     });
-    rowEls[trackName].classList.toggle("empty", !tracks[trackName].some(Boolean));
-    rowEls[trackName].classList.toggle("resting", Boolean(shown) && !shown.present[trackName]);
+    rowEls[trackName].classList.toggle("empty", !hits.some(Boolean));
+    const rests = gridEdit
+      ? isSong(beat) && !beat.sections.some((s, k) => s.kind === gridKind && beat.presence[k][trackName])
+      : Boolean(shown) && !shown.present[trackName];
+    rowEls[trackName].classList.toggle("resting", rests);
   });
   gridEl.classList.toggle("fill", Boolean(v) && v.isFill);
   updateBarInfo(beat, v);
@@ -249,33 +368,53 @@ function updateBarInfo(beat, v) {
 
 // Move the playhead marker (pass null to clear it)
 function showStep(step) {
+  if (typeof melodyPlayhead === "function") melodyPlayhead(step);
   document.querySelectorAll(".cell.now").forEach(c => c.classList.remove("now"));
   if (step === null) return;
   TRACK_ORDER.forEach(trackName => {
     // +1 because the first child of each row is the name button
     rowEls[trackName].children[step + 1].classList.add("now");
   });
+  rulerEl.children[step + 1].classList.add("now");
 }
 
 // ---------- Song timeline ----------
-// One block per section, as wide as it is long. Click a block to play from there.
+// One block per part, as wide as it is long. Tap a block to select it (to edit it) and to play from there.
+const FORM_NAMES = { intro: "Intro", verse: "Verse", pre: "Pre-chorus", chorus: "Chorus", bridge: "Bridge", outro: "Outro" };
+let formDraft = [];            // [{ kind, bars, src, keep? }]  src = the section of the beat it came from (undefined = new)
+let formTrash = [];            // removed parts: [{ kind, bars, at, keep }]
+let formSel = 0;               // the selected part
+let formTimer = null;
+let lastAppliedBeat = null;    // the beat made from the user's own edit (so a swap to it does not reset the list)
 function buildTimeline(beat) {
   timelineEl.innerHTML = "";
   timelineEl.hidden = !isSong(beat);
   songTimeEl.hidden = !isSong(beat);
   if (!isSong(beat)) return;
-  beat.sections.forEach(section => {
+  const items = formDraft.length ? formDraft : beat.sections.map((s, i) => ({ kind: s.kind, bars: s.bars, src: i }));
+  const same = items.length === beat.sections.length && items.every((f, i) => f.kind === beat.sections[i].kind && f.bars === beat.sections[i].bars);
+  const seen = {}, count = {};
+  items.forEach(f => { count[f.kind] = (count[f.kind] || 0) + 1; });
+  items.forEach((item, i) => {
+    seen[item.kind] = (seen[item.kind] || 0) + 1;
+    const name = same ? beat.sections[i].label : FORM_NAMES[item.kind] + (count[item.kind] > 1 ? " " + seen[item.kind] : "");
     const seg = document.createElement("button");
     seg.type = "button";
-    seg.className = "seg";
-    seg.dataset.kind = section.kind;
-    seg.style.flexGrow = Math.max(section.bars, 6);       // wide enough to read, still roughly to scale
-    seg.title = `${section.label} (${section.bars} bars): click to play from here`;
+    seg.className = "seg" + (i === formSel ? " sel" : "");
+    seg.dataset.kind = item.kind;
+    seg.style.flexGrow = Math.max(item.bars, 6);       // wide enough to read, still roughly to scale
+    seg.title = `${name} (${item.bars} bars): tap to select it${same ? " and play from here" : ""}`;
     const label = document.createElement("span");
-    label.textContent = section.label.replace("Pre-chorus", "Pre").replace("Final chorus", "Final");
+    label.textContent = name.replace("Pre-chorus", "Pre").replace("Final chorus", "Final");
     const fill = document.createElement("i");
     seg.append(fill, label);
-    seg.addEventListener("click", () => jumpTo(section.start));
+    seg.addEventListener("click", () => {
+      formSel = i;
+      [...timelineEl.children].forEach((el, k) => el.classList.toggle("sel", k === i));
+      if (gridEdit && same && beat.patterns && beat.patterns[item.kind]) { gridKind = item.kind; syncGridEdit(); }
+      if (typeof renderFormTools === "function") renderFormTools();
+      if (same) jumpTo(beat.sections[i].start);
+    });
     timelineEl.appendChild(seg);
   });
   paintTimeline(null, -1);
@@ -333,7 +472,7 @@ function applyBeatSound(beat) {
   const template = resolveTemplate(beat.genre, beat.style);
   engine.applySound(beat.sound);
   engine.applyFx(template.fx, beat.bpm);
-  swing = template.swing;
+  swing = beat.swing != null ? beat.swing : template.swing;     // (a beat made around a voice can carry the swing of the singer)
   swingEl.value = Math.round(swing * 100);
   swingValEl.textContent = swingEl.value;
   refreshSoundUI(beat);
@@ -342,15 +481,23 @@ function applyBeatSound(beat) {
 // Swap in a beat right now (used while stopped)
 function switchTo(next) {
   const genreChanged = next.genre !== current.genre;
+  if (next !== current) {                          // remember the beat we are leaving, so Back can return to it
+    if (next === backTarget) backTarget = null;
+    else { beatHistory.push(current); if (beatHistory.length > 30) beatHistory.shift(); }
+    if (backBtn) backBtn.disabled = !beatHistory.length;
+  }
   current = next;
   startBar = 0;
   try { if (typeof Tone !== 'undefined') Tone.Transport.bpm.value = current.bpm; } catch (e) { console.warn(e); }
   if (genreChanged) applyGenreSettings(current.genre);
   applyBeatSound(current);
+  syncFormToBeat();
   buildTimeline(current);
   syncStructureControls();
   paint(current);
   paintTimeline(null, -1);
+  if (gridEdit) syncGridEdit();
+  if (typeof syncMelodyRoll === "function") syncMelodyRoll();
 }
 
 // The loop-only controls (phrase length, arrangement) do nothing in a song
@@ -358,21 +505,20 @@ function syncStructureControls() {
   const song = isSong(current);
   if (arrangeEl) arrangeEl.disabled = song;
   if (phraseEl) phraseEl.disabled = song;
-  if (structureEl) structureEl.value = current.structure;
+  if (structureEl) structureEl.value = current.formSource === "auto" ? "auto" : current.formSource === "edited" ? "custom" : current.structure;
   if (song && arrangeEl) arrangeEl.checked = true;
 }
 
 // ---------- Mute, solo and the mixer ----------
 const strips = {};   // the mixer controls of each track (plus "master")
 
-// The melody toggle ("Melody" in the toolbar, on by default). Off removes the melody line: the lead, the pluck and a
-// chime-type bell (which plays chord notes). The chords, pad, bass and all drums stay. Downloads, stems and the
-// Mix Doctor all follow it, because they use isAudible too.
+// The melody toggle ("Melody" in the toolbar, on by default). Off removes the melody line: the lead and the pluck.
+// The chords, pad, bass and all drums and percussion stay. Downloads, stems and the Mix Doctor all follow it,
+// because they use isAudible too.
 let melodyOn = true;
 function isMelodyTrack(name) {
   if (name === "lead" || name === "pluck") return true;
-  if (name === "bell") return !current || !current.sound || !current.sound.bellKind || current.sound.bellKind === "bell";
-  return false;                                   // agogo, cowbell and clave are percussion, not melody
+  return false;                                   // the bell is a percussion recording, not a melody
 }
 
 // A track plays unless it is muted, or another track is soloed and it is not, or it is melody and the melody is off
@@ -738,6 +884,134 @@ Object.entries(TRACK_GROUP_LABELS).forEach(([group, text]) => {
   locksEl.appendChild(button);
 });
 
+// ---------- Keep an instrument ----------
+// "Keep instrument: Bass" holds the bass instrument while New beat changes everything else (the producer builds around it).
+const keepRolesEl = $("bl-keepRoles");
+const KEEP_ROLES = [["bass", "Bass"], ["chords", "Keys"], ["pad", "Pad"], ["pluck", "Pluck"], ["lead", "Lead"], ["log", "Log drum"]];
+const keepButtons = {};
+KEEP_ROLES.forEach(([role, label]) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute("aria-pressed", "false");
+  button.addEventListener("click", () => {
+    if (keptRoles.has(role)) keptRoles.delete(role); else keptRoles.add(role);
+    button.setAttribute("aria-pressed", String(keptRoles.has(role)));
+    // keeping an instrument tells the producer you like it (un-keeping takes the vote back)
+    try { const id = resolveInstrument(role, current.sound && current.sound[role]); TASTE.vote(role, id, keptRoles.has(role) ? 1 : -1); } catch (err) { /* no taste memory */ }
+  });
+  keepButtons[role] = button;
+  if (keepRolesEl) keepRolesEl.appendChild(button);
+});
+function refreshKeepButtons(beat) {
+  KEEP_ROLES.forEach(([role, label]) => {
+    const id = beat.sound && resolveInstrument(role, beat.sound[role]), info = id && instrumentInfo(id);
+    keepButtons[role].textContent = label + (info ? ": " + info.name : "");
+    keepButtons[role].title = "Keep this " + label.toLowerCase() + " instrument when you press New beat";
+    keepButtons[role].hidden = !info;
+  });
+}
+const backBtn = $("bl-back");
+backBtn?.addEventListener("click", () => {
+  const prev = beatHistory.pop();
+  if (!prev) return;
+  backBtn.disabled = !beatHistory.length;
+  backTarget = prev;
+  useBeat(prev, "Back to the previous beat on the next bar.", "Back to the previous beat.");
+});
+
+// ---------- Edit pattern ----------
+const gridEditBtn = $("bl-gridEdit"), gridKindWrap = $("bl-gridKindWrap"), gridKindEl = $("bl-gridKind");
+const gridResetBtn = $("bl-gridReset"), gridHintEl = $("bl-gridHint");
+const GRID_HINT_OFF = gridHintEl ? gridHintEl.textContent : "";
+
+function fillGridKinds() {
+  const kinds = isSong(current) ? [...new Set(current.sections.map(s => s.kind))] : [];
+  gridKindEl.innerHTML = "";
+  kinds.forEach(k => { const o = document.createElement("option"); o.value = k; o.textContent = FORM_NAMES[k]; gridKindEl.appendChild(o); });
+  if (!kinds.includes(gridKind)) gridKind = kinds.includes("chorus") ? "chorus" : kinds[0] || "chorus";
+  gridKindEl.value = gridKind;
+}
+function syncGridEdit() {
+  if (!gridEditBtn) return;
+  gridEl.classList.toggle("editing", gridEdit);
+  gridEditBtn.setAttribute("aria-pressed", String(gridEdit));
+  gridEditBtn.textContent = gridEdit ? "Done editing" : "Edit pattern";
+  gridKindWrap.hidden = !(gridEdit && isSong(current));
+  gridResetBtn.hidden = !gridEdit;
+  gridToolsEl.hidden = !gridEdit;
+  gridToolsEl.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.tool === gridTool)));
+  if (gridEdit) fillGridKinds();
+  gridHintEl.textContent = !gridEdit ? GRID_HINT_OFF
+    : "Tap or drag the boxes to add or remove hits" + (isSong(current) ? ". A change applies to every " + FORM_NAMES[gridKind].toLowerCase() + " in the song." : " (it changes the loop).")
+      + " Bass and log drum hits also have a note: use the Pitch tool and tap a hit to change it (R = root, 3, 5, 7, 8 = octave). The lead plays its written melody, so it cannot be drawn by hand.";
+  paint(current, playing ? view : null);
+}
+gridEditBtn?.addEventListener("click", () => { gridEdit = !gridEdit; if (!gridEdit) gridTool = "hits"; syncGridEdit(); });
+const gridToolsEl = $("bl-gridTools");
+gridToolsEl?.addEventListener("click", e => {
+  const btn = e.target.closest("button[data-tool]");
+  if (!btn) return;
+  gridTool = btn.dataset.tool;
+  syncGridEdit();
+});
+gridKindEl?.addEventListener("change", () => { gridKind = gridKindEl.value; syncGridEdit(); });
+gridResetBtn?.addEventListener("click", () => {
+  statusEl.textContent = resetPattern(current) ? "Pattern put back as it was." : "Nothing to reset: you have not changed this pattern.";
+  paint(current, playing ? view : null);
+});
+
+// Tap a box to switch a hit on or off; drag along a row to paint several. (A change is heard from the next bar.)
+function gridCellAt(x, y) {
+  const el = document.elementFromPoint(x, y), cell = el && el.closest ? el.closest(".grid .row:not(.ruler) .cell") : null;
+  if (!cell) return null;
+  const row = cell.parentElement;
+  return { track: row.dataset.row, step: [...row.children].indexOf(cell) - 1 };
+}
+function gridSet(track, step, on) {
+  setPatternHit(current, track, step, on);
+  if (pending && pending !== current && isSong(pending) === isSong(current)) { /* the next beat is a different one: leave it */ }
+  paint(current, playing ? view : null);
+}
+gridEl.addEventListener("pointerdown", e => {
+  if (!gridEdit) return;
+  const hit = gridCellAt(e.clientX, e.clientY);
+  if (!hit || hit.step < 0) return;
+  if (!GRID_EDITABLE.has(hit.track)) {
+    statusEl.textContent = "The lead plays its written melody, so it is not drawn by hand. Use New beat, Variation or Keep instrument to change it.";
+    return;
+  }
+  e.preventDefault();
+  if (gridTool === "pitch") {
+    if (!GRID_PITCHED.has(hit.track)) { statusEl.textContent = "The Pitch tool changes the note of a bass or log drum hit. Switch to Hits for the other rows."; return; }
+    if (!patternHits(current, hit.track)[hit.step]) return;
+    cyclePitch(current, hit.track, hit.step, false);
+    paint(current, playing ? view : null);
+    return;
+  }
+  const on = !patternHits(current, hit.track)[hit.step];
+  gridPainting = { track: hit.track, value: on };
+  gridSet(hit.track, hit.step, on);
+  if (on) { try { ensureEngine(); Tone.start(); engine.preview(hit.track); } catch (err) { /* no sound yet */ } }
+});
+gridEl.addEventListener("pointermove", e => {
+  if (!gridPainting) return;
+  const hit = gridCellAt(e.clientX, e.clientY);
+  if (!hit || hit.track !== gridPainting.track || hit.step < 0) return;
+  if (!!patternHits(current, hit.track)[hit.step] !== gridPainting.value) gridSet(hit.track, hit.step, gridPainting.value);
+});
+["pointerup", "pointercancel", "pointerleave"].forEach(type => gridEl.addEventListener(type, () => { gridPainting = null; }));
+
+// The loading indicator: shows while a beat's drums and instruments are being fetched
+BEAT_LOADING_HOOK = p => {
+  const box = $("bl-loading");
+  if (!box) return;
+  if (!p) { box.hidden = true; return; }
+  box.hidden = false;
+  $("bl-loadText").textContent = "Loading sounds " + p.done + "/" + p.total;
+  $("bl-loadFill").style.width = Math.round(100 * p.done / Math.max(1, p.total)) + "%";
+};
+ensureBeatSound(current.sound);                       // start fetching the first beat's sounds now
+
 // ---------- Key, scale and chord pickers ----------
 function addOption(selectEl, value, text) {
   const option = document.createElement("option");
@@ -767,10 +1041,17 @@ function refreshProgressionOptions() {
 }
 
 // ---------- Making beats ----------
+// The song form to hand the generator: the user's own edited form is kept; Auto makes a new one each time.
+function formOpts(beat) {
+  if (beat && beat.structure === "custom" && beat.formSource !== "auto") return { structure: "custom", form: beat.form };
+  if (!beat && settings.structure === "custom") { const c = currentOrPending(); return c.form ? { structure: "custom", form: c.form } : { structure: "auto" }; }
+  if (beat && beat.formSource === "auto") return { structure: "custom", form: beat.form };   // a variation keeps its song form
+  return beat ? { structure: beat.structure } : { structure: settings.structure };
+}
 // Everything the pickers, tempo and locks ask for, in the form the generator wants
 function beatOptions() {
   const options = {
-    from: current, lockGroups: [...locked], phraseBars: settings.phraseBars, structure: settings.structure
+    from: current, lockGroups: [...locked], keepRoles: [...keptRoles], phraseBars: settings.phraseBars, ...formOpts()
   };
   if (settings.style !== "auto") options.style = settings.style;
   if (settings.root !== "auto") options.root = settings.root;
@@ -778,19 +1059,32 @@ function beatOptions() {
   if (settings.progression !== "auto") options.progression = settings.progression;
   if (!settings.bpmAuto) options.bpm = settings.bpm;
   if (Object.keys(settings.sound).length) options.sound = Object.assign({}, settings.sound);
-  if (settings.pack && settings.pack !== "auto") options.pack = settings.pack;
+  if (settings.vibe && settings.vibe !== "auto") options.vibe = settings.vibe;
+  if (Object.keys(settings.drums).length) options.drums = Object.assign({}, settings.drums);
   return options;
 }
 
 // Use a new beat: at the next bar if playing, or straight away if stopped
 function useBeat(next, playingMessage, stoppedMessage) {
-  if (Tone.Transport.state === "started") {
-    pending = next;
-    statusEl.textContent = playingMessage;
+  const go = () => {
+    if (Tone.Transport.state === "started") {
+      pending = next;
+      statusEl.textContent = playingMessage;
+    } else {
+      pending = null;
+      switchTo(next);
+      statusEl.textContent = stoppedMessage;
+    }
+  };
+  // The new beat's drum recordings are fetched first (a few small files; instant once a genre has been loaded),
+  // so it never starts with a missing kick
+  const drums = next.sound && next.sound.drums;
+  if ((drums && !samplesReady(drums)) || !instrumentsReady(next.sound)) {
+    statusEl.textContent = "Loading the drum and instrument sounds\u2026";
+    ensureBeatSound(next.sound).then(() => { go(); producerWarmUp(next.genre); });
   } else {
-    pending = null;
-    switchTo(next);
-    statusEl.textContent = stoppedMessage;
+    go();
+    producerWarmUp(next.genre);
   }
 }
 
@@ -866,6 +1160,7 @@ function sequenceTick(time, step) {
       try { if (typeof Tone !== 'undefined') Tone.Transport.bpm.value = current.bpm; } catch (e) { console.warn(e); }
       if (genreChanged) applyGenreSettings(current.genre);
       applyBeatSound(current);
+      syncFormToBeat();
       buildTimeline(current);
       syncStructureControls();
       startListening("full");      // a new beat or key: listen to the mix again
@@ -921,9 +1216,6 @@ function sequenceTick(time, step) {
 }
 
 // ---------- Play and stop ----------
-// Other panels (the vocal recorder) can ask to be told when playback stops
-const playbackStopHooks = [];
-
 // fromBar: the bar to start at.  atTime: the exact audio time to start at (default: right now).
 // Returns the audio time the first beat plays at.
 function startPlayback(fromBar, atTime) {
@@ -961,16 +1253,49 @@ function stopPlayback(message) {
   paintTimeline(null, -1);
   playBtn.textContent = "Play";
   statusEl.textContent = message || "Stopped.";
-  playbackStopHooks.forEach(hook => { try { hook(); } catch (err) { console.warn(err); } });
+}
+
+// Why there might be no sound, in plain words. Every sound is a recording now, so if the files cannot be fetched the
+// beat is silent: most often because the page was opened from a folder (file://) instead of a web address.
+function soundProblem() {
+  const sound = current && current.sound;
+  const drumFailed = sound && sound.drums && typeof SAMPLE_FAILED !== "undefined" && SAMPLE_TYPES.some(t => SAMPLE_FAILED[sampleKey(sound.drums.genre, t, sound.drums[t])]);
+  const instFailed = typeof INSTRUMENT_FAILED !== "undefined" && soundInstrumentIds(sound).some(id => instrumentInfo(id).notes.some(n => INSTRUMENT_FAILED[id + "/" + n]));
+  if (drumFailed || instFailed) {
+    return location.protocol === "file:"
+      ? "Some sound files could not be found. Keep the whole folder together: the samples and fileaudio folders must sit next to index.html."
+      : "Some sound files could not be loaded (check your internet connection, then press New beat). The beat may be missing parts or silent.";
+  }
+  if (Tone.context.state !== "running") return "The browser is holding the audio back. Tap Play again. On a phone, also check that the silent switch is off and the volume is up.";
+  return "";
+}
+// iPhones keep web audio silent while the ring/silent switch is on, unless the page says it is playing media
+function unlockAudioOnce() {
+  if (unlockAudioOnce.done) return;
+  unlockAudioOnce.done = true;
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) { /* not supported */ }
+  try {
+    const a = document.createElement("audio");
+    a.setAttribute("playsinline", ""); a.loop = true; a.volume = 0.01;
+    a.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+    a.play().catch(() => {});
+    unlockAudioOnce.el = a;
+  } catch (e) { /* ignore */ }
 }
 
 playBtn.addEventListener("click", async () => {
   try {
     if (!bootAudio()) return;
+    unlockAudioOnce();
     // Browsers only allow audio after a user click
     await Tone.start();
     if (Tone.Transport.state === "started") stopPlayback("Stopped.");
-    else startPlayback();
+    else {
+      startPlayback();
+      const loaded = !current.sound || (samplesReady(current.sound.drums) && instrumentsReady(current.sound));
+      const check = () => { const why = soundProblem(); if (why) statusEl.textContent = why; };
+      if (loaded) check(); else ensureBeatSound(current.sound).then(check);
+    }
   } catch (err) {
     console.error(err);
     if (statusEl) statusEl.textContent = "Could not start audio: " + (err && err.message ? err.message : err);
@@ -1001,62 +1326,187 @@ if (soundGridEl && typeof SOUND_MENU !== "undefined") {
   });
 }
 
+// ---------- Drum samples: one select per drum type ----------
+// "Auto" picks a different recording of that type on every new beat (and shows the one this beat uses). A numbered
+// choice keeps that recording for every new beat until you change it, or change the genre.
+const drumGridEl = $("bl-drumGrid");
+const drumSelects = {};
+let drumListGenre = "";
+if (drumGridEl && typeof SAMPLE_TYPES !== "undefined") {
+  SAMPLE_TYPES.forEach(type => {
+    const label = document.createElement("label");
+    label.className = "field";
+    const span = document.createElement("span");
+    span.className = "field-label";
+    span.textContent = SAMPLE_TYPE_NAMES[type];
+    const select = document.createElement("select");
+    select.id = "bl-drum-" + type;
+    select.addEventListener("change", () => setDrumPick(type, Number(select.value) || 0));
+    label.append(span, select);
+    drumGridEl.appendChild(label);
+    drumSelects[type] = select;
+  });
+}
+
+function refreshDrumUI(beat) {
+  const drums = beat && beat.sound && beat.sound.drums;
+  if (!drums) return;
+  SAMPLE_TYPES.forEach(type => {
+    const select = drumSelects[type];
+    if (!select) return;
+    if (drumListGenre !== drums.genre) {                        // the list follows the genre
+      let html = '<option value=""></option>';
+      for (let n = 1; n <= SAMPLE_VARIANTS; n++) html += '<option value="' + n + '">' + n + " \u00B7 " + sampleLabel(drums.genre, type, n) + "</option>";
+      select.innerHTML = html;
+    }
+    select.options[0].textContent = "Auto: " + drums[type] + " \u00B7 " + sampleLabel(drums.genre, type, drums[type]);
+    const custom = settings.drums[type];
+    select.value = custom ? String(custom) : "";
+    select.classList.toggle("is-custom", !!custom);
+  });
+  drumListGenre = drums.genre;
+}
+
+// Pick one recording now, on the beat that is playing and the one waiting to start (0 = back to Auto)
+function setDrumPick(type, n) {
+  if (n) settings.drums[type] = n; else delete settings.drums[type];
+  if (n) [current, pending].filter(Boolean).forEach(beat => { if (beat.sound.drums) beat.sound.drums[type] = n; });
+  ensureEngine();
+  engine.applySound(current.sound);
+  refreshDrumUI(current);
+  // Let the person hear it straight away when the beat is not playing
+  if (n && !playing) {
+    ensureBeatSound(current.sound).then(() => {
+      try {
+        Tone.start();
+        engine.applySound(current.sound);
+        engine.voices[type](Tone.now() + 0.05, 0.9, { step: 0 });
+      } catch (err) { console.warn(err); }
+    });
+  }
+}
+
 function soundLabel(key, id) {
   const hit = SOUND_MENU[key].options.find(o => o[0] === id);
   return hit ? hit[1] : id;
 }
 
-// Show what the beat is using; the first option names the style's own pick
-const packEl = $("bl-pack"), packHintEl = $("bl-packHint");
-let packListKey = "";
+// The producer's note: what it chose for this beat and why
+const packHintEl = $("bl-packHint");
 function refreshPackUI(beat) {
-  if (!packEl || typeof packsFor !== "function") return;
-  const packs = packsFor(beat.genre, beat.style);
-  const key = beat.genre + "/" + beat.style;
-  if (key !== packListKey) {                                  // the list follows the genre and style
-    packListKey = key;
-    packEl.innerHTML = '<option value="auto">Auto: a different pack each beat</option>' +
-      packs.map(p => '<option value="' + p.id + '">' + p.name + '</option>').join("");
-    if (settings.pack !== "auto" && !packs.some(p => p.id === settings.pack)) settings.pack = "auto";
-  }
-  packEl.value = settings.pack;
-  packEl.title = packs.length ? "" : "This style has no packs";
-  if (beat.pack) {
-    const borrowed = (beat.pack.swapped || []).map(s => " (the " + PACK_PART_NAMES[s.part] + " is borrowed from " + s.from + ")").join("");
-    packHintEl.textContent = "This beat: " + beat.pack.name + borrowed + ". " + (beat.pack.blurb || "");
-  } else {
-    packHintEl.textContent = "";
-  }
+  refreshSpiceUI(beat);
+  if (!packHintEl) return;
+  packHintEl.textContent = beat.pack ? beat.pack.name : "";
+  renderWhy(beat);
+  refreshKeepButtons(beat);
 }
 
-// Choose a pack: it replaces all the sounds of the beat that is playing and the one waiting
-function setPack(id) {
-  settings.pack = id;
-  settings.sound = {};                                        // a pack is a whole set: single-part picks start again
-  if (id !== "auto") {
-    const found = packsFor(current.genre, current.style).find(p => p.id === id);
-    if (found) {
-      [current, pending].filter(Boolean).forEach(beat => {
-        beat.autoSound = packParts(found);
-        beat.sound = Object.assign({}, beat.autoSound);
-        beat.pack = { id: found.id, name: found.name, blurb: found.blurb, swapped: [] };
-      });
-      ensureEngine();
-      engine.applySound(current.sound);
-      refreshStates();                                       // the bell kind can turn the bell into melody or percussion
-    }
-  }
-  refreshSoundUI(current);
+// The spice (see spice.js): one line with its name, and what it does in plain words
+function refreshSpiceUI(beat) {
+  const line = $("bl-spiceLine"), hint = $("bl-spiceHint");
+  if (!line) return;
+  const s = beat && beat.spice;
+  line.textContent = s && typeof spiceLine === "function" ? spiceLine(beat) : "";
+  if (hint) hint.textContent = s ? [s.what, s.lift && s.lift.what, s.extra && s.extra.id !== "none" ? s.extra.what : ""].filter(Boolean).join(" ") : "";
 }
-packEl?.addEventListener("change", () => setPack(packEl.value));
+
+// "Why these sounds?": the producer's reasoning for each instrument of this beat, in plain words
+const WHY_ROLES = [["bass", "Bass"], ["chords", "Keys"], ["pad", "Pad"], ["pluck", "Pluck"], ["lead", "Lead"], ["log", "Log drum"]];
+function whyFit(weight) {
+  if (weight === undefined) return "";
+  return weight >= 0.85 ? "a perfect fit" : weight >= 0.6 ? "a good fit" : weight >= 0.35 ? "an unusual choice" : "a bold choice";
+}
+function renderWhy(beat) {
+  const body = $("bl-whyBody");
+  if (!body) return;
+  body.innerHTML = "";
+  const add = (cls, html) => { const p = document.createElement("p"); if (cls) p.className = cls; p.textContent = html; body.appendChild(p); return p; };
+  if (!beat.pack || typeof PRODUCER_KB === "undefined") { add("", "This beat has no producer notes."); return; }
+  const vibe = beat.pack.vibe, vibeName = vibe && VIBES[vibe] ? VIBES[vibe].toLowerCase() : "";
+  const [head, arr] = String(beat.pack.blurb || "").split(" Arrangement:");
+  if (head) add("", head.split(" I used")[0]);        // the list below says what was used
+  WHY_ROLES.forEach(([role, label]) => {
+    const id = resolveInstrument(role, beat.sound && beat.sound[role]);
+    const info = id && instrumentInfo(id), kb = id && PRODUCER_KB[id];
+    if (!info) return;
+    const p = document.createElement("p");
+    const strong = document.createElement("span");
+    strong.className = "why-role"; strong.textContent = label + ": " + info.name;
+    p.appendChild(strong);
+    const bits = [];
+    if (kb) {
+      bits.push(kb.why);
+      const g = whyFit(kb.genres[beat.genre]), v = vibe ? whyFit(kb.vibes[vibe]) : "";
+      if (g) bits.push(g + " for " + beat.genre);
+      if (v) bits.push(v + " for the " + vibeName + " mood");
+    }
+    p.appendChild(document.createTextNode(bits.length ? " \u2014 " + bits.join("; ") + "." : ""));
+    body.appendChild(p);
+  });
+  if (arr) add("why-note", "Arrangement:" + arr);
+  if (beat.spice) add("why-note", "Spice: " + [beat.spice.name + " \u2014 " + beat.spice.what, beat.spice.lift && beat.spice.lift.what, beat.spice.extra && beat.spice.extra.id !== "none" ? beat.spice.extra.what : ""].filter(Boolean).join(" "));
+  tasteRow(body, beat);
+}
+
+// "More like this" / "Less like this": teaches the producer your taste (see taste.js)
+function tasteRow(body, beat) {
+  if (typeof TASTE === "undefined" || !beat.sound) return;
+  const row = document.createElement("div");
+  row.className = "why-taste";
+  const msg = document.createElement("span");
+  msg.className = "why-taste-msg";
+  const refreshMsg = () => {
+    msg.textContent = beat.tasteVote === 1 ? "Noted: the producer will lean toward these sounds."
+      : beat.tasteVote === -1 ? "Noted: the producer will go easy on these sounds."
+      : TASTE.count() ? "The producer is learning your taste (" + TASTE.count() + " sounds noted)." : "Tell the producer what you like.";
+  };
+  const mk = (label, vote) => {
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "gridbar-toggle"; btn.textContent = label;
+    btn.setAttribute("aria-pressed", String(beat.tasteVote === vote));
+    btn.addEventListener("click", () => {
+      const before = beat.tasteVote || 0, after = before === vote ? 0 : vote;     // tapping the same button again takes it back
+      TASTE.voteSound(beat.sound, after - before);
+      beat.tasteVote = after;
+      row.querySelectorAll("button[data-vote]").forEach(x => x.setAttribute("aria-pressed", String(beat.tasteVote === Number(x.dataset.vote))));
+      refreshMsg();
+      window.dispatchEvent(new Event("vl-taste-changed"));
+    });
+    btn.dataset.vote = String(vote);
+    return btn;
+  };
+  row.appendChild(mk("More like this", 1));
+  row.appendChild(mk("Less like this", -1));
+  const forget = document.createElement("button");
+  forget.type = "button"; forget.className = "gridbar-toggle"; forget.textContent = "Forget my taste";
+  forget.addEventListener("click", () => { TASTE.reset(); beat.tasteVote = 0; renderWhy(beat); });
+  row.appendChild(forget);
+  row.appendChild(msg);
+  refreshMsg();
+  body.appendChild(row);
+}
+
+// Vibe: tell the producer the mood you want (or leave it on Auto). A new beat is made in that mood.
+const vibeEl = $("bl-vibe");
+if (vibeEl && typeof VIBES !== "undefined") {
+  vibeEl.innerHTML = '<option value="auto">Auto: the producer reads the beat</option>' +
+    Object.keys(VIBES).map(v => '<option value="' + v + '">' + VIBES[v] + '</option>').join("");
+  vibeEl.value = settings.vibe;
+  vibeEl.addEventListener("change", () => {
+    settings.vibe = vibeEl.value;
+    settings.sound = {};
+    requestBeat();
+  });
+}
 
 function refreshSoundUI(beat) {
   if (!beat || !beat.sound) return;
   refreshPackUI(beat);
+  refreshDrumUI(beat);
   const auto = beat.autoSound || beat.sound;
   Object.keys(soundSelects).forEach(key => {
     const select = soundSelects[key];
-    select.options[0].textContent = "Style default: " + soundLabel(key, auto[key] || (key === "perc" ? "legacy" : ""));
+    select.options[0].textContent = "Producer's pick: " + soundLabel(key, auto[key] || "");
     const custom = settings.sound[key];
     select.value = custom || "";
     select.classList.toggle("is-custom", !!custom);
@@ -1078,6 +1528,7 @@ function setSoundPart(key, value) {
 
 soundResetEl?.addEventListener("click", () => {
   settings.sound = {};
+  settings.drums = {};
   [current, pending].filter(Boolean).forEach(beat => { if (beat.autoSound) Object.assign(beat.sound, beat.autoSound); });
   ensureEngine();
   engine.applySound(current.sound);
@@ -1096,9 +1547,50 @@ function requestBeat() {
 
 regenBtn.addEventListener("click", requestBeat);
 
+// Variation: keeps the key, chords, drums and instruments; the hats, percussion, bass line (two of the three, at random)
+// and the arrangement are new. Re-style ("Make it darker"): keeps the key, chords, drums, hats and bass line; the
+// producer picks new instruments and a new arrangement for the mood.
+function currentOrPending() { return pending || current; }
+const variationBtn = $("bl-variation");
+variationBtn?.addEventListener("click", () => {
+  const base = currentOrPending();
+  if (!base || !base.pack) return requestBeat();
+  const loose = ["hats", "percussion", "low"].sort(() => Math.random() - 0.5).slice(0, 2);
+  const keep = ["drums", "harmony", "hats", "percussion", "low"].filter(g => !loose.includes(g));
+  useBeat(
+    generatePattern(base.genre, {
+      from: base, lockGroups: keep, style: base.style, bpm: base.bpm, keepSound: true,
+      phraseBars: settings.phraseBars, ...formOpts(base)
+    }),
+    "Variation starts on the next bar.",
+    "Variation ready. Tap Play."
+  );
+});
+document.querySelectorAll("#bl-quick [data-vibe]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const base = currentOrPending();
+    if (!base || !base.pack) return requestBeat();
+    useBeat(
+      generatePattern(base.genre, {
+        from: base, lockGroups: ["drums", "harmony", "hats", "percussion", "low"], style: base.style, bpm: base.bpm,
+        vibe: btn.dataset.vibe, keepSpice: true, phraseBars: settings.phraseBars, ...formOpts(base)
+      }),
+      btn.textContent + ": starts on the next bar.",
+      btn.textContent + ": ready. Tap Play."
+    );
+  });
+});
+
+// "More spice": keep the beat, roll a different spice (see spice.js)
+$("bl-respice")?.addEventListener("click", () => {
+  const base = currentOrPending();
+  if (!base || !base.pack || typeof spiceRespice !== "function") return requestBeat();
+  useBeat(spiceRespice(base), "New spice starts on the next bar.", "New spice ready. Tap Play.");
+});
+
 genreEl.addEventListener("change", () => {
-  settings.sound = {};             // each genre brings its own kits
-  settings.pack = "auto";          // ... and its own packs
+  settings.sound = {};             // each genre brings its own sounds
+  settings.drums = {};             // ... and its own drum recordings
   settings.progression = "auto";   // a progression number means something different in each style
   settings.style = "auto";
   fillStyleOptions();
@@ -1113,6 +1605,7 @@ styleEl.addEventListener("change", () => {
 });
 
 structureEl?.addEventListener("change", () => {
+  if (structureEl.value === "custom") { syncStructureControls(); return; }   // "Custom" only shows that the form was edited
   settings.structure = structureEl.value;
   useBeat(
     rebuildStructure(pending || current, settings.structure),
@@ -1122,6 +1615,136 @@ structureEl?.addEventListener("change", () => {
 });
 
 loopSongEl.addEventListener("change", () => { loopSong = loopSongEl.checked; });
+
+// ---------- Song form editor ----------
+// Edit one part at a time, right on the timeline: tap a block, then shorter / longer / move / duplicate / remove. A
+// removed part goes to the "Removed" tray (greyed, in the corner) and can be brought back where it was. A part that
+// is only moved or resized keeps the tracks it had, so editing does not re-roll the whole arrangement.
+const formBarEl = $("bl-formBar"), formMoreEl = $("bl-formMore"), formAddEl = $("bl-formAdd"), formKindEl = $("bl-formKind");
+const formTrashEl = $("bl-formTrash"), formTrashListEl = $("bl-formTrashList");
+
+function loadFormDraft(beat) {
+  formDraft = isSong(beat) ? beat.sections.map((s, i) => ({ kind: s.kind, bars: s.bars, src: i })) : [];
+}
+function formTotal() { return formDraft.reduce((a, f) => a + f.bars, 0); }
+function renderFormTools() {
+  if (typeof syncMelodyRoll === "function") setTimeout(syncMelodyRoll, 0);
+  const song = formDraft.length > 0;
+  if (formBarEl) formBarEl.hidden = !song;
+  if (formMoreEl) formMoreEl.hidden = !song;
+  if (formSel >= formDraft.length) formSel = formDraft.length - 1;
+  if (formSel < 0) formSel = 0;
+  if (song && formBarEl) {
+    const p = formDraft[formSel];
+    $("bl-formName").textContent = FORM_NAMES[p.kind] + " \u00b7 " + p.bars + " bars  (song: " + formTotal() + " bars)";
+    formKindEl.value = p.kind;
+    const off = (act, v) => { const x = formBarEl.querySelector('[data-act="' + act + '"]'); if (x) x.disabled = v; };
+    off("shorter", p.bars <= 2); off("longer", p.bars >= 32);
+    off("left", formSel === 0); off("right", formSel === formDraft.length - 1);
+    off("dup", formDraft.length >= 24); off("del", formDraft.length <= 1);
+  }
+  if (formTrashEl) {
+    formTrashEl.hidden = !formTrash.length;
+    formTrashListEl.innerHTML = "";
+    formTrash.forEach((t, k) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = FORM_NAMES[t.kind] + " \u00b7 " + t.bars + " \u21ba";
+      btn.title = "Bring back the " + FORM_NAMES[t.kind].toLowerCase();
+      btn.addEventListener("click", () => {
+        const [item] = formTrash.splice(k, 1);
+        formDraft.splice(Math.min(item.at, formDraft.length), 0, { kind: item.kind, bars: item.bars, keep: item.keep });
+        formSel = Math.min(item.at, formDraft.length - 1);
+        formChanged();
+      });
+      formTrashListEl.appendChild(btn);
+    });
+  }
+}
+function formChanged() {
+  buildTimeline(currentOrPending());
+  renderFormTools();
+  clearTimeout(formTimer);
+  formTimer = setTimeout(applyFormDraft, 400);       // wait for the last tap, so a few quick edits are one change
+}
+function applyFormDraft() {
+  formTimer = null;
+  if (!formDraft.length) return;
+  const base = currentOrPending();
+  const form = formDraft.map(f => f.src === undefined ? [f.kind, f.bars] : [f.kind, f.bars, f.src]);
+  const next = rebuildStructure(base, "custom", form, "edited");
+  formDraft.forEach((f, i) => {                      // a part brought back from the tray gets its old tracks back
+    if (f.keep) { next.presence[i] = Object.assign({}, f.keep.presence); next.fillPick[i] = f.keep.fill; }
+  });
+  settings.structure = "custom";
+  formDraft.forEach((f, i) => { f.src = i; delete f.keep; });   // the new beat's sections now match the list
+  lastAppliedBeat = next;
+  useBeat(next, "New song form starts on the next bar.", "Song form changed.");
+}
+// A new beat (not our own edit) replaces the list and empties the tray
+function syncFormToBeat() {
+  if (current !== lastAppliedBeat && !formTimer) { loadFormDraft(current); formTrash = []; formSel = 0; }
+  renderFormTools();
+}
+
+formBarEl?.addEventListener("click", e => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn || !formDraft.length) return;
+  const p = formDraft[formSel], act = btn.dataset.act;
+  if (act === "shorter") p.bars = Math.max(2, p.bars - 2);
+  else if (act === "longer") p.bars = Math.min(32, p.bars + 2);
+  else if (act === "left" && formSel > 0) { [formDraft[formSel - 1], formDraft[formSel]] = [formDraft[formSel], formDraft[formSel - 1]]; formSel--; }
+  else if (act === "right" && formSel < formDraft.length - 1) { [formDraft[formSel + 1], formDraft[formSel]] = [formDraft[formSel], formDraft[formSel + 1]]; formSel++; }
+  else if (act === "dup" && formDraft.length < 24) { formDraft.splice(formSel + 1, 0, { kind: p.kind, bars: p.bars, src: p.src }); formSel++; }
+  else if (act === "del" && formDraft.length > 1) {
+    const base = currentOrPending();
+    const keep = p.keep || (p.src !== undefined && base.presence[p.src] ? { presence: Object.assign({}, base.presence[p.src]), fill: base.fillPick[p.src] } : null);
+    formTrash.push({ kind: p.kind, bars: p.bars, at: formSel, keep });
+    formDraft.splice(formSel, 1);
+    formSel = Math.min(formSel, formDraft.length - 1);
+  } else return;
+  formChanged();
+});
+formKindEl?.addEventListener("change", () => {
+  if (!formDraft.length) return;
+  formDraft[formSel].kind = formKindEl.value;
+  formDraft[formSel].src = undefined; delete formDraft[formSel].keep;
+  formChanged();
+});
+formAddEl?.addEventListener("change", () => {
+  if (!formAddEl.value) return;
+  const kind = formAddEl.value;
+  formAddEl.value = "";
+  if (!formDraft.length || formDraft.length >= 24) return;
+  const size = { intro: 4, verse: 8, pre: 4, chorus: 8, bridge: 4, outro: 4 }[kind];
+  const lastChorus = formDraft.map(f => f.kind).lastIndexOf("chorus");
+  const at = kind === "intro" ? 0 : kind === "outro" ? formDraft.length : (lastChorus >= 0 && kind !== "verse" ? lastChorus + 1 : formDraft.length);
+  formDraft.splice(at, 0, { kind, bars: size });
+  formSel = at;
+  formChanged();
+});
+$("bl-formChorusFirst")?.addEventListener("click", () => {
+  const i = formDraft.findIndex(f => f.kind === "chorus");
+  if (i > 0) { const [c] = formDraft.splice(i, 1); formDraft.unshift(c); formSel = 0; formChanged(); }
+});
+$("bl-formShuffle")?.addEventListener("click", () => {
+  if (formDraft.length < 2) return;
+  // Everything moves, but an intro stays first and an outro stays last so the song still opens and closes
+  const intro = formDraft[0].kind === "intro" ? formDraft[0] : null;
+  const outro = formDraft.length > 1 && formDraft[formDraft.length - 1].kind === "outro" ? formDraft[formDraft.length - 1] : null;
+  const middle = formDraft.filter(f => f !== intro && f !== outro);
+  for (let i = middle.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [middle[i], middle[j]] = [middle[j], middle[i]]; }
+  formDraft = [intro, ...middle, outro].filter(Boolean);
+  formSel = 0;
+  formChanged();
+});
+$("bl-formRandom")?.addEventListener("click", () => {
+  clearTimeout(formTimer); formTimer = null;
+  settings.structure = "auto";
+  formTrash = [];
+  useBeat(rebuildStructure(currentOrPending(), "auto"), "New song form starts on the next bar.", "Song form changed.");
+});
+loadFormDraft(current); renderFormTools(); buildTimeline(current);     // the first beat's form, shown from the start
 
 rootEl.addEventListener("change", () => {
   settings.root = rootEl.value === "auto" ? "auto" : Number(rootEl.value);
@@ -1399,7 +2022,7 @@ stemsBtn?.addEventListener("click", async () => {
 
 // ---------- Your own samples ----------
 const sampleGridEl = $("bl-sampleGrid");
-const SAMPLE_NAMES = { kick: "Kick", snare: "Snare", clap: "Clap", rim: "Rim", hat: "Hi-hat", openhat: "Open hat", shaker: "Shaker", perc: "Percussion", bell: "Bell" };
+const SAMPLE_NAMES = SAMPLE_TYPE_NAMES;
 if (sampleGridEl && typeof SAMPLE_TRACKS !== "undefined") {
   SAMPLE_TRACKS.forEach(track => {
     const slot = document.createElement("div");
@@ -1409,7 +2032,7 @@ if (sampleGridEl && typeof SAMPLE_TRACKS !== "undefined") {
     title.textContent = SAMPLE_NAMES[track] || track;
     const info = document.createElement("span");
     info.className = "sample-name";
-    info.textContent = "Synth sound";
+    info.textContent = "Built-in sample";
     const input = document.createElement("input");
     input.type = "file"; input.accept = "audio/*,.wav,.mp3,.m4a,.ogg"; input.hidden = true;
     const buttons = document.createElement("div");
@@ -1427,20 +2050,18 @@ if (sampleGridEl && typeof SAMPLE_TRACKS !== "undefined") {
         const buffer = await Tone.getContext().rawContext.decodeAudioData(await file.arrayBuffer());
         if (buffer.duration > 10) throw new Error("it is longer than 10 seconds");
         USER_SAMPLES[track] = buffer;
-        ensureEngine(); engine.refreshSamples();
         info.textContent = file.name.length > 24 ? file.name.slice(0, 21) + "\u2026" : file.name;
         clear.hidden = false;
-        statusEl.textContent = (SAMPLE_NAMES[track] || track) + " sample loaded. It plays instead of the synth sound.";
+        statusEl.textContent = (SAMPLE_NAMES[track] || track) + " sample loaded. It plays instead of the built-in one.";
       } catch (err) {
-        info.textContent = USER_SAMPLES[track] ? info.dataset.last || "Your sample" : "Synth sound";
+        info.textContent = USER_SAMPLES[track] ? info.dataset.last || "Your sample" : "Built-in sample";
         statusEl.textContent = "Could not load that sample: " + err.message;
       }
       input.value = "";
     });
     clear.addEventListener("click", () => {
       delete USER_SAMPLES[track];
-      ensureEngine(); engine.refreshSamples();
-      info.textContent = "Synth sound"; clear.hidden = true;
+      info.textContent = "Built-in sample"; clear.hidden = true;
     });
     buttons.append(load, clear);
     slot.append(title, info, buttons, input);
@@ -1452,7 +2073,7 @@ if (sampleGridEl && typeof SAMPLE_TRACKS !== "undefined") {
 window.VoxloopBeatLab = {
   pause() {
     try {
-      if (playing) stopPlayback("");                        // also lets the vocal recorder wrap up its take
+      if (playing) stopPlayback("");
       else if (Tone.Transport.state === "started") Tone.Transport.stop();
     } catch (e) {}
   },

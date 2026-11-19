@@ -30,6 +30,9 @@
     <link rel="stylesheet" href="css/mobile.css">
     <link rel="stylesheet" href="css/nav.css">
     <link rel="stylesheet" href="css/apdeck.css">
+    <link rel="stylesheet" href="css/vocalsketch.css">
+    <link rel="stylesheet" href="css/blux.css">
+    <link rel="stylesheet" href="css/ux.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=Instrument+Sans:wght@400..700&display=swap" rel="stylesheet">
@@ -123,8 +126,34 @@
                 </div>
                 <div class="beatlab-hero-actions">
                     <button type="button" id="bl-play" class="primary-button">Play</button>
+                    <button type="button" id="bl-back" class="secondary-button" title="Go back to the beat you had before" disabled>Back</button>
                     <button type="button" id="bl-regen" class="secondary-button">New beat</button>
-                </div>
+                    <button type="button" id="bl-variation" class="secondary-button" title="Same key, chords, drums and instruments; new hats, percussion, bass line and arrangement">Variation</button>
+                                    </div>
+            </div>
+
+            <div class="beatlab-loading" id="bl-loading" role="status" aria-live="polite" hidden>
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span id="bl-loadText">Loading sounds</span>
+                        <span class="loadbar" aria-hidden="true"><i id="bl-loadFill"></i></span>
+                    </div>
+            <div class="beatlab-quick" id="bl-quick" role="group" aria-label="Re-style this beat">
+                <span class="beatlab-quick-title">Make it</span>
+                <button type="button" class="chip-button" data-vibe="dark">Darker</button>
+                <button type="button" class="chip-button" data-vibe="uplifting">Brighter</button>
+                <button type="button" class="chip-button" data-vibe="party">More bounce</button>
+                <button type="button" class="chip-button" data-vibe="chill">Calmer</button>
+                <button type="button" class="chip-button" data-vibe="romantic">More romantic</button>
+                <button type="button" class="chip-button" data-vibe="hard">Harder</button>
+                <button type="button" class="chip-button" data-vibe="dreamy">Dreamier</button>
+                <span class="beatlab-quick-hint">Keeps the key, chords and drums; the producer swaps the instruments and the arrangement for the new mood.</span>
+            </div>
+
+            <div class="beatlab-quick beatlab-spice" id="bl-spice" role="group" aria-label="This beat's spice">
+                <span class="beatlab-quick-title">Spice</span>
+                <span class="beatlab-spice-line" id="bl-spiceLine">Each beat gets its own spice.</span>
+                <button type="button" class="chip-button" id="bl-respice" title="Keep the beat, change only the spice">More spice</button>
+                <span class="beatlab-quick-hint" id="bl-spiceHint"></span>
             </div>
 
             <div class="beatlab-toolbar panel-card">
@@ -152,7 +181,7 @@
                     <span class="field-label">Form</span>
                     <select id="bl-structure"></select>
                 </label>
-                <label class="toggle melody-toggle" title="On by default. Turn it off for a beat with no melody line: the lead and pluck (and a chime bell) stop; chords, pad, bass and drums stay.">
+                <label class="toggle melody-toggle" title="On by default. Turn it off for a beat with no melody line: the lead and pluck stop; chords, pad, bass and drums stay.">
                     <input type="checkbox" id="bl-melody" checked>
                     <span class="toggle-ui"></span>
                     Melody
@@ -162,20 +191,28 @@
 
             <details class="panel-card beatlab-sound" id="bl-soundBox">
                 <summary>
-                    <span class="panel-title">Sound: kits &amp; instruments</span>
-                    <span class="beatlab-sound-hint" id="bl-soundHint">Each style picks its own. Change any part, or leave it on the style default.</span>
+                    <span class="panel-title">Sound: drum samples &amp; instruments</span>
+                    <span class="beatlab-sound-hint" id="bl-soundHint">Every drum is a real recording. Each new beat picks a different one of five per type.</span>
                 </summary>
+                <h4 class="beatlab-samples-title">Drum samples</h4>
+                <p class="beatlab-sound-hint">Five recordings of each drum for this genre. Auto picks a new one every beat; choose a number to keep that one.</p>
+                <div class="beatlab-soundgrid" id="bl-drumGrid"></div>
+                <h4 class="beatlab-samples-title">Instruments</h4>
                 <div class="beatlab-packrow">
                     <label class="field">
-                        <span class="field-label">Sound pack</span>
-                        <select id="bl-pack"></select>
+                        <span class="field-label">Vibe</span>
+                        <select id="bl-vibe"></select>
                     </label>
                     <span class="beatlab-sound-hint" id="bl-packHint"></span>
                 </div>
+                <details class="beatlab-why" id="bl-why">
+                    <summary>Why these sounds?</summary>
+                    <div id="bl-whyBody" class="beatlab-whybody"></div>
+                </details>
                 <div class="beatlab-soundgrid" id="bl-soundGrid"></div>
-                <button type="button" id="bl-soundReset" class="secondary-button">Back to style defaults</button>
+                <button type="button" id="bl-soundReset" class="secondary-button">Back to defaults</button>
                 <h4 class="beatlab-samples-title">Your own samples</h4>
-                <p class="beatlab-sound-hint">Replace a synthesized drum with your own recording (WAV, MP3, M4A; up to 10 seconds). It goes through the same fader and mixer, and stays until you clear it or reload the page.</p>
+                <p class="beatlab-sound-hint">Replace a built-in drum with your own recording (WAV, MP3, M4A; up to 10 seconds). It goes through the same fader and mixer, and stays until you clear it or reload the page.</p>
                 <div class="beatlab-soundgrid" id="bl-sampleGrid"></div>
             </details>
 
@@ -222,6 +259,46 @@
                         <div class="chords" id="bl-chords" aria-label="Chord progression"></div>
                     </div>
                     <div class="timeline" id="bl-timeline" aria-label="Song sections"></div>
+                    <div class="formbar" id="bl-formBar" hidden>
+                        <span class="formbar-name" id="bl-formName"></span>
+                        <select id="bl-formKind" aria-label="Type of the selected part">
+                            <option value="intro">Intro</option>
+                            <option value="verse">Verse</option>
+                            <option value="pre">Pre-chorus</option>
+                            <option value="chorus">Chorus</option>
+                            <option value="bridge">Bridge</option>
+                            <option value="outro">Outro</option>
+                        </select>
+                        <span class="formbar-btns">
+                            <button type="button" data-act="shorter" aria-label="Make this part shorter" title="Shorter">&minus;</button>
+                            <button type="button" data-act="longer" aria-label="Make this part longer" title="Longer">+</button>
+                            <button type="button" data-act="left" aria-label="Move this part earlier" title="Move earlier">&larr;</button>
+                            <button type="button" data-act="right" aria-label="Move this part later" title="Move later">&rarr;</button>
+                            <button type="button" data-act="dup" aria-label="Duplicate this part" title="Duplicate">&#10697;</button>
+                            <button type="button" data-act="del" aria-label="Remove this part" title="Remove">&#10005;</button>
+                        </span>
+                    </div>
+                    <div class="formtrash" id="bl-formTrash" hidden>
+                        <span class="formtrash-title">Removed (tap to bring back)</span>
+                        <span class="formtrash-list" id="bl-formTrashList"></span>
+                    </div>
+                    <details class="formmore" id="bl-formMore" hidden>
+                        <summary>More form tools</summary>
+                        <div class="formmore-row">
+                            <select id="bl-formAdd" aria-label="Add a part">
+                                <option value="">+ Add a part</option>
+                                <option value="intro">Intro</option>
+                                <option value="verse">Verse</option>
+                                <option value="pre">Pre-chorus</option>
+                                <option value="chorus">Chorus</option>
+                                <option value="bridge">Bridge</option>
+                                <option value="outro">Outro</option>
+                            </select>
+                            <button type="button" class="chip-button" id="bl-formChorusFirst">Start with the chorus</button>
+                            <button type="button" class="chip-button" id="bl-formShuffle">Shuffle the parts</button>
+                            <button type="button" class="chip-button" id="bl-formRandom">New random form</button>
+                        </div>
+                    </details>
                     <div class="harmony-foot">
                         <span class="songtime" id="bl-songTime"></span>
                         <span class="barinfo" id="bl-barInfo"></span>
@@ -229,65 +306,51 @@
                 </section>
             </div>
 
-            <section class="panel-card vocal-rec" id="vr-panel" aria-label="Record your vocal">
-                <div class="vr-head">
-                    <h3 class="panel-title">Record your vocal</h3>
-                    <span class="vr-tip">Wear headphones so the beat does not leak into the microphone.</span>
-                </div>
-
-                <div class="vr-main">
-                    <button type="button" class="vr-rec" id="vr-record">
-                        <span class="vr-dot" aria-hidden="true"></span>
-                        <span id="vr-record-label">Record</span>
-                    </button>
-                    <div class="vr-side">
-                        <label class="vr-field">
-                            <span>Start from</span>
-                            <select id="vr-start"><option value="0">The beginning</option></select>
-                        </label>
-                        <button type="button" class="link-button" id="vr-open-settings">Mic &amp; count-in settings</button>
-                    </div>
-                </div>
-                <div class="vr-meter" aria-hidden="true"><i id="vr-meter-fill"></i></div>
-                <p class="vr-status" id="vr-status" role="status">Press Record, then sing or rap over the beat. The beat stops when you press Stop.</p>
-
-                <div class="vr-take" id="vr-take" hidden>
-                    <div class="vr-row">
-                        <button type="button" class="primary-button" id="vr-play">Play beat + vocal</button>
-                        <button type="button" class="secondary-button" id="vr-redo">Delete take</button>
-                    </div>
-
-                    <div class="vr-balance">
-                        <div class="vr-balance-top"><span>Beat</span><strong id="vr-balance-readout">Even</strong><span>Vocal</span></div>
-                        <input type="range" id="vr-balance" min="-12" max="12" step="0.5" value="0" aria-label="Balance between the beat and your vocal">
-                        <div class="vr-quick">
-                            <button type="button" data-bal="-6">Beat louder</button>
-                            <button type="button" data-bal="0">Even</button>
-                            <button type="button" data-bal="6">Vocal louder</button>
-                            <button type="button" id="vr-auto">Auto balance</button>
-                        </div>
-                    </div>
-
-                    <details class="vr-more">
-                        <summary>Fine-tune timing and space</summary>
-                        <label class="slider"><span>Timing</span><input type="range" id="vr-sync" min="-150" max="150" step="1" value="0"><output id="vr-sync-out">0 ms</output></label>
-                        <label class="slider"><span>Space</span><input type="range" id="vr-reverb" min="0" max="100" step="1" value="18"><output id="vr-reverb-out">18%</output></label>
-                        <p class="hint">Timing: if the vocal sounds late or early against the beat, slide it. Space: a little reverb to sit the voice in the beat.</p>
-                    </details>
-
-                    <div class="vr-row">
-                        <button type="button" class="primary-button" id="vr-download-mix">Download mix (WAV)</button>
-                        <button type="button" class="secondary-button" id="vr-download-vocal">Vocal only (WAV)</button>
-                        <button type="button" class="secondary-button" id="vr-polish">Polish vocal in Pipeline</button>
-                    </div>
-                </div>
-            </section>
-
             <section class="panel-card">
                 <div class="locks" id="bl-locks" role="group" aria-label="Lock parts of the beat">
                     <span class="locks-title">Lock</span>
                 </div>
+                <div class="locks" id="bl-keepRoles" role="group" aria-label="Keep an instrument when making a new beat">
+                    <span class="locks-title">Keep instrument</span>
+                </div>
+                <div class="gridbar" id="bl-gridbar">
+                    <button type="button" id="bl-gridEdit" class="gridbar-toggle" aria-pressed="false" title="Change the drum and percussion hits yourself">Edit pattern</button>
+                    <label class="gridbar-kind" id="bl-gridKindWrap" hidden>Pattern for the
+                        <select id="bl-gridKind" aria-label="Which part of the song to edit"></select>
+                    </label>
+                    <span class="gridbar-tools" id="bl-gridTools" role="group" aria-label="Edit tool" hidden>
+                        <button type="button" class="gridbar-toggle" data-tool="hits" aria-pressed="true" title="Tap a box to add or remove a hit">Hits</button>
+                        <button type="button" class="gridbar-toggle" data-tool="pitch" aria-pressed="false" title="Tap a bass or log drum hit to change its note">Pitch</button>
+                    </span>
+                    <button type="button" id="bl-gridReset" class="gridbar-toggle" hidden title="Put this pattern back as it was before your edits">Reset pattern</button>
+                    <span class="gridbar-hint" id="bl-gridHint">Each row is one sound; each box is a sixteenth note. Press Edit pattern to change the drums.</span>
+                </div>
                 <div class="grid" id="bl-grid" aria-label="Step grid"></div>
+            </section>
+
+            <details class="panel-card lust-guide" id="bl-lustGuide" hidden>
+                <summary class="panel-title">Afro-Lust: how to sing on it</summary>
+                <div class="lust-guide-body" id="bl-lustGuideBody"></div>
+            </details>
+
+            <section class="panel-card melody" id="bl-melPanel" hidden>
+                <div class="gridbar">
+                    <span class="panel-title">Melody</span>
+                    <label class="gridbar-kind">Part
+                        <select id="bl-melKind"></select>
+                    </label>
+                    <label class="gridbar-kind">New note
+                        <select id="bl-melLen">
+                            <option value="1">short</option>
+                            <option value="2" selected>medium</option>
+                            <option value="4">long</option>
+                            <option value="8">very long</option>
+                        </select>
+                    </label>
+                    <button type="button" id="bl-melReset" class="gridbar-toggle" hidden title="Put this melody back as it was">Reset melody</button>
+                    <span class="gridbar-hint" id="bl-melHint">Tap an empty box to add a note (drag right to make it longer). Tap a note to remove it.</span>
+                </div>
+                <div class="roll-scroll"><div class="roll" id="bl-roll" aria-label="Melody editor"></div></div>
             </section>
 
             <details class="panel-card mixer" id="bl-mixerBox">
@@ -327,19 +390,23 @@
             <section class="panel-card beatlab-export">
                 <h3 class="panel-title">Export &amp; continue</h3>
                 <div class="beatlab-export-row">
+                    <div class="beatlab-export-opts">
+                        <label class="field">
+                            <span class="field-label">Quality</span>
+                            <select id="bl-bits">
+                                <option value="24">24-bit</option>
+                                <option value="16">16-bit</option>
+                            </select>
+                        </label>
+                        <label class="beatlab-check">
+                            <input type="checkbox" id="bl-doctorOnExport" checked>
+                            <span>Check my mix first</span>
+                        </label>
+                    </div>
+                    <p class="beatlab-export-group">Download</p>
                     <button id="bl-export" type="button" class="primary-button">Download full beat (WAV)</button>
-                    <label class="field">
-                        <span class="field-label">Quality</span>
-                        <select id="bl-bits">
-                            <option value="24">24-bit</option>
-                            <option value="16">16-bit</option>
-                        </select>
-                    </label>
                     <button id="bl-stems" type="button" class="secondary-button">Download stems (zip)</button>
-                    <label class="beatlab-check">
-                        <input type="checkbox" id="bl-doctorOnExport" checked>
-                        <span>Check my mix first</span>
-                    </label>
+                    <p class="beatlab-export-group">Keep working</p>
                     <button id="bl-send-pipeline" type="button" class="secondary-button">Send to Pipeline</button>
                     <button id="bl-send-studio" type="button" class="secondary-button">Open in Studio</button>
                 </div>
@@ -738,6 +805,13 @@
                 <span>
                     Spoken to sung
                     <small>On: rap and talk-sing lines are pulled onto notes. Off (default): they are left exactly as performed. Sung notes are never affected by this.</small>
+                </span>
+            </label>
+            <label class="tune-check">
+                <input type="checkbox" id="tune-land" checked>
+                <span>
+                    Land every note on the key
+                    <small>On (default): each note of a melodic line is locked onto a note of the key, and short notes get a faster retune so they arrive in time. Slides, scoops and vibrato between and inside notes are kept, so it still sounds sung. Off: notes already close to the key are only gently nudged.</small>
                 </span>
             </label>
             <label class="tune-check">
@@ -1155,9 +1229,18 @@
     <!-- ===================== SETTINGS MODE ===================== -->
     <div id="mode-settings" class="mode-panel hidden" aria-hidden="true">
         <div class="settings-layout">
+            <section class="panel-card settings-card" id="st-perf">
+                <h2 class="panel-title">Performance and taste</h2>
+                <label class="settings-choice"><input type="checkbox" id="st-light"><span><strong>Light mode</strong><small>For slow phones and PCs. Loads fewer sounds at a time and keeps less in memory, so it starts a bit simpler but stays smooth. Applies after a reload.</small></span></label>
+                <p class="settings-now" id="st-light-now" role="status" hidden>Reload the app to apply this. <button type="button" class="secondary-button" id="st-light-reload">Reload now</button></p>
+                <label class="settings-choice"><input type="checkbox" id="st-taste" checked><span><strong>Producer uses my taste</strong><small>The producer leans toward sounds you kept or liked. Turn off to compare with an unbiased producer.</small></span></label>
+                <p class="settings-now" id="st-taste-now" role="status"></p>
+                <div class="settings-row"><button type="button" class="secondary-button" id="st-taste-reset">Forget my taste</button></div>
+            </section>
+
             <section class="panel-card settings-card">
                 <h2 class="panel-title">Recording</h2>
-                <p class="settings-note">These apply to recording in Studio and in Beat Lab. They are saved on this device.</p>
+                <p class="settings-note">These apply to recording in Studio. They are saved on this device.</p>
 
                 <fieldset class="settings-group">
                     <legend>Microphone</legend>
@@ -1174,7 +1257,7 @@
                 <label class="settings-field">
                     <span class="field-label">Mic cleanup (the phone's call-style processing)</span>
                     <select id="st-cleanup">
-                        <option value="off">Off: the cleanest sound for singing (recommended)</option>
+                        <option value="off">Off (cleanest for singing)</option>
                         <option value="on">On: only if the beat leaks into your mic</option>
                     </select>
                     <small class="settings-note">With it on, the phone squashes and dulls a singing voice. Use headphones instead, so the beat cannot leak into the mic.</small>
@@ -1183,7 +1266,7 @@
                 <label class="settings-field">
                     <span class="field-label">Quiet singing</span>
                     <select id="st-lift">
-                        <option value="auto">Auto: lift a quiet take a lot (up to +30 dB)</option>
+                        <option value="auto">Auto (lifts a quiet take)</option>
                         <option value="normal">Normal: lift up to +12 dB</option>
                         <option value="off">Off: keep the level as recorded</option>
                     </select>
@@ -1269,10 +1352,20 @@
 </script>
 <script src="js/templates.js"></script>
 <script src="js/templates-afro.js"></script>
-<script src="js/packs.js"></script>
+<script src="js/samplemap.js"></script>
+<script src="js/samplebank.js"></script>
+<script src="js/instrumentmap.js"></script>
+<script src="js/instrumentbank.js"></script>
 <script src="js/beatgen.js"></script>
+<script src="js/spice.js"></script>
 <script src="js/automix-bs.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/producer.js"></script>
+<script src="js/taste.js"></script>
+<script src="js/templates-trap.js"></script>
+<script src="js/templates-lust.js"></script>
+<script src="js/genrefeel.js"></script>
+<script src="js/mixcal.js"></script>
 <script src="js/export.js"></script>
 <script src="js/mixdoctor.js"></script>
 <script src="js/musictheory.js"></script>
@@ -1311,7 +1404,12 @@
 <script src="js/reference.js"></script>
 <script src="js/studioui.js"></script>
 <script src="js/beatlab.js"></script>
-<script src="js/vocalrec.js"></script>
+<script src="js/melodyroll.js"></script>
+<script src="js/lustguide.js"></script>
+<script src="js/vocaldsp.js"></script>
+<script src="js/vocalsketch.js"></script>
+<script src="js/blux.js"></script>
+<script src="js/ux.js"></script>
 
 <script>
 (function () {

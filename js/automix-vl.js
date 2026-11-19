@@ -931,7 +931,7 @@ async function processAutomix(state, options) {
     state.beatEnhance = enh.analysis;
   }
 
-  // Optional fill: synthesize missing/thin instruments under the real beat
+  // Optional fill: add recorded instruments under the real beat where one is missing or thin
   if (opt.fillInstruments && window.VLFill && window.VLFill.fillMissing) {
     setStatus("Checking for missing instruments…");
     await nextFrame();
@@ -950,7 +950,7 @@ async function processAutomix(state, options) {
     }
     const bpm = state.beatBpm || state.bpm || 90;
     // if the key is not known the fill estimates it from the beat's own audio instead of guessing C major
-    const fill = window.VLFill.fillMissing(beatChannels, sr, {
+    const fillOptions = {
       bpm: bpm,
       rootPc: rootPc,
       scale: scaleName,
@@ -959,7 +959,10 @@ async function processAutomix(state, options) {
       subgenre: genreInfo && genreInfo.sub ? genreInfo.sub : null,
       tuningCents: (state.tuneOptions && state.tuneOptions.refCents) || 0,
       strength: 0.75
-    });
+    };
+    setStatus("Loading the drum and instrument recordings…");
+    try { if (window.VLFill.prepare) await window.VLFill.prepare(fillOptions); } catch (err) { console.warn("Fill recordings:", err); }
+    const fill = window.VLFill.fillMissing(beatChannels, sr, fillOptions);
     beatChannels = fill.channels;
     lines.push(...fill.report);
     state.instrumentFill = fill.detection;
