@@ -591,7 +591,9 @@ function createEngine(opts = {}) {
       const riff = c.beat.riffs && c.beat.riffs.bass;
       const tone = (c.view.bassTones || c.beat.bassTones)[c.step];
       const iv = c.chord.intervals;
-      const offset = riff ? riffOffset(riff.tokens[c.step], c.chord)
+      // Melody off (c.flat): the bass keeps its rhythm and the chord it sits under, but plays the root only, so its line
+      // does not tell the singer where to go
+      const offset = c.flat ? 0 : riff ? riffOffset(riff.tokens[c.step], c.chord)
         : tone === "fifth" ? iv[2] : tone === "third" ? iv[1]
         : tone === "seventh" ? (iv[3] !== undefined ? iv[3] : 10) - 12 : (BASS_OFFSET[tone] || 0);
       const midi = c.chord.bassMidi + offset;
@@ -600,7 +602,9 @@ function createEngine(opts = {}) {
     logdrum: (t, v, c) => {
       const riff = c.beat.riffs && c.beat.riffs.logdrum;
       // A written riff plays over the chord's root (an octave above the bass); older beats pick chord tones
-      const midi = riff ? c.chord.bassMidi + 12 + riffOffset(riff.tokens[c.step], c.chord)
+      // Melody off (c.flat): the log drum keeps its bounce but only plays the chord's root, no riff tune
+      const midi = c.flat ? c.chord.bassMidi + 12
+        : riff ? c.chord.bassMidi + 12 + riffOffset(riff.tokens[c.step], c.chord)
         : c.chord.midi[Math.min(c.beat.logTones[c.step], c.chord.midi.length - 1)] - 12;
       logdrum.triggerAttackRelease(name(midi, c.beat), c.s16 * 2, t, v);
     },
@@ -677,6 +681,7 @@ function createEngine(opts = {}) {
 //   template, beat, view,                 what is playing
 //   stepSec, swing, humanize,             feel
 //   sidechainOn, isAudible(name),         switches
+//   flatMelody,                           true when Melody is off: the bass and log drum play the chord root only (no riff, no tune)
 //   floorTime,                            the earliest time a hit may be scheduled (now, live)
 //   lastWhen: {}                          per-track last hit time (single voices refuse earlier hits)
 // }
@@ -706,7 +711,8 @@ function playTrackStep(E, ctx, trackName, step, time) {
     step, beat: ctx.beat, chord, view,
     dur: Math.max(0.03, view.durations[trackName][step] * ctx.stepSec * 0.95),
     strum: ctx.humanize ? (cfg.strumMs || 0) / 1000 : 0,
-    s16: ctx.stepSec
+    s16: ctx.stepSec,
+    flat: ctx.flatMelody === true          // "Melody" is off: the bass and log drum play root notes only
   };
 
   // One failed hit must not stop the other tracks, or the playhead, on this step

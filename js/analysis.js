@@ -419,7 +419,8 @@ function detectBpm(samples, sampleRate, options) {
 
     const separation = 1 - runnerUp / bestScore;
     const prominence = Math.min(1, (bestScore / (scoreSum / scores.length)) / 12);
-    const confidence = gridConfidence !== null
+    // (let, not const: the loop-repeat fallback below can raise it. As const, a sung vocal with sparse beats threw "Assignment to constant variable" and its tempo was never read.)
+    let confidence = gridConfidence !== null
         ? Math.max(0, Math.min(1, gridConfidence))
         : Math.max(0, Math.min(1, 0.6 * separation + 0.4 * prominence));
 

@@ -19,7 +19,7 @@ const EXPORT_BARS_AHEAD = 3;            // how many bars are queued ahead of the
 // settings = {
 //   trim, autos          : dB per track (your faders + the auto-mix)
 //   masterDb             : the auto-mix master level in dB      masterStripDb : the master fader
-//   masteringOn, vocalSpaceOn, sidechainOn, humanize, swing, isAudible(name)
+//   masteringOn, vocalSpaceOn, sidechainOn, humanize, swing, isAudible(name), flatMelody
 // }
 // onProgress(barsDone, totalBars) is called while rendering (optional)
 async function renderSongBuffer(beat, settings, onProgress) {
@@ -64,7 +64,7 @@ async function renderSongBuffer(beat, settings, onProgress) {
 
     const ctx = {
       template, beat, view: null, stepSec, swing: settings.swing, humanize: settings.humanize,
-      sidechainOn: settings.sidechainOn, isAudible: settings.isAudible, floorTime: 0, lastWhen: {}, fxOn: settings.fxOn !== false
+      sidechainOn: settings.sidechainOn, isAudible: settings.isAudible, flatMelody: settings.flatMelody === true, floorTime: 0, lastWhen: {}, fxOn: settings.fxOn !== false
     };
 
     // Queue one bar: its levels and effects, then every step of every track, at their exact times

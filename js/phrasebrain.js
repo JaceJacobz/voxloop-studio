@@ -50,6 +50,8 @@
         c.push({ id: "up4", rootPc: (T + 5) % 12, scale: key.scale, prior: 0.14, label: "lifted to the 4th (" + pcName(T + 5) + " " + key.scale + ")" });
         c.push({ id: "up5", rootPc: (T + 7) % 12, scale: key.scale, prior: 0.14, label: "lifted to the 5th (" + pcName(T + 7) + " " + key.scale + ")" });
         c.forEach((x) => { x.mask = maskOf(x.rootPc, x.scale); });
+        // notes the beat never plays (B or B-flat for Am - F - C - Dm): the key's own set leaves them alone either way
+        if (Array.isArray(key.alsoAllow)) key.alsoAllow.forEach((pc) => { if (pc >= 0 && pc < 12) c[0].mask[pc] = true; });
         return c;
     }
 

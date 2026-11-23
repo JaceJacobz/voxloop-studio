@@ -473,7 +473,7 @@ function peakSoften(channels, ceilingDb) {
  * Listen to the finished mix offline: peak + harsh top.
  * Fix at most 1–2 small things, then stop.
  */
-function listenAndCorrect(channels, sr, harshness) {
+function listenAndCorrect(channels, sr, harshness, ref) {
   const report = [];
   let chs = channels.map((c) => Float32Array.from(c));
   const n = chs[0].length;
@@ -518,7 +518,27 @@ function listenAndCorrect(channels, sr, harshness) {
     peak = samplePeak();
   }
 
-  // 2) Harsh top: measured as the 4-9 kHz band against the 0.3-3 kHz body over the parts that are playing
+  // 2) Producer check: bass, low-mids, rumble and left/right balance of the finished mix against the beat it was built on.
+  //    The limits come from the producer brain (genre, voice); every fix is measured again and explained.
+  const MR = window.VLMixReview;
+  let review = null, reviewFixes = 0;
+  if (MR && ref && ref.beat && ref.beat[0] && ref.beat[0].length) {
+    try {
+      const MBr = window.VLMixBrain, lim = ref.brain && MBr && MBr.review ? MBr.review(ref.brain) : null;
+      // where the singer sings (the finished vocal, shifted by the alignment offset), so the check can measure the parts without a voice
+      let activity = null;
+      try { if (ref.vocal && ref.vocal[0] && ref.vocal[0].length) activity = MR.activityMap(ref.vocal, sr, ref.offsetSec || 0, n / sr); } catch (e) { activity = null; }
+      review = MR.review(chs, sr, { reference: ref.beat, referenceSr: ref.sr || sr, activity, limits: lim ? lim.limits : null });
+      report.push(...review.lines);
+      reviewFixes = review.fixes.length;
+      if (lim && review.fixes.length) report.push(...lim.notes);
+    } catch (error) {
+      console.error("Producer check failed:", error);
+      report.push("Producer check skipped (something went wrong); the mix was left as it is.");
+    }
+  }
+
+  // 3) Harsh top: measured as the 4-9 kHz band against the 0.3-3 kHz body over the parts that are playing
   //    (a smooth mix reads about -15 dB or lower). If it is too bright, a gentle, limited dip around 6 kHz.
   const studio = window.VLStudio && window.VLStudio.engine;
   if (studio && studio.calmMixTop && fixes < 2 && harshness !== "off") {
@@ -532,8 +552,8 @@ function listenAndCorrect(channels, sr, harshness) {
     }
   }
 
-  if (!fixes) report.push("Listen pass: mix already measured clean — no extra changes.");
-  return { channels: chs, report, fixes };
+  if (!fixes) report.push(review ? "Listen pass: peaks and top end are clean too." : "Listen pass: mix already measured clean — no extra changes.");
+  return { channels: chs, report, fixes: fixes + reviewFixes, review: review ? review.heard : null };
 }
 
 
@@ -889,6 +909,7 @@ async function processAutomix(state, options) {
   }
   const vocalChannels = channelsOf(finished).map((c) => engine.resample(c, finished.sampleRate, sr));
   let beatChannels = channelsOf(beat);
+  const beatAsGiven = beatChannels;       // what the singer was given: the reference for the producer check after mastering
 
   // Tone guard: clean-up, tuning and compression can leave the vocal duller than it was recorded (a cover sung over a bright
   // original is where this shows most). Measure the top end against the untouched take and put back what was lost.
@@ -1346,9 +1367,11 @@ async function processAutomix(state, options) {
   // Listen pass: measure finished mix, fix at most 1–2 small issues
   setStatus("Checking the mix…");
   await nextFrame();
+  let producerCheck = null;
   {
-    const qc = listenAndCorrect(channels, sr, harshAuto ? harshAuto.level : (opt.harshness === "auto" ? "standard" : opt.harshness));
+    const qc = listenAndCorrect(channels, sr, harshAuto ? harshAuto.level : (opt.harshness === "auto" ? "standard" : opt.harshness), { beat: beatAsGiven, sr: beat.sampleRate, brain, vocal: vocalChannels, offsetSec: offset });
     channels = qc.channels;
+    producerCheck = qc.review;
     lines.push(...qc.report);
   }
 
@@ -1388,6 +1411,7 @@ async function processAutomix(state, options) {
   state.mixReport = {
     lines,
     master: masterInfo,
+    producerCheck: producerCheck,
     polish: polish,
     recipe: recipe,
     durationInSec,

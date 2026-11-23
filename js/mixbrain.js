@@ -293,5 +293,21 @@
         return { retuneMs, flatten, strength, selectiveCents: Math.round(lerp(4, 6, raw)), selectiveSoftCents: Math.round(lerp(10, 14, raw)), notes };
     }
 
-    root.VLMixBrain = { ready, profile, chain, adaptRecipe, harshness, levels, master, echo, reverbTail, gate, bloom, enhanceCaps, tune, IDEAL_LUFS };
+    // ------------------------------------------------------------------ 9. the producer check after mastering: how far may the finished mix drift from the beat?
+    // The beat is the reference. These are allowances in dB OVER the beat's own balance, measured where the voice is not
+    // singing (there the finished mix is the beat plus what the mixing and mastering did, and the master alone moves bass by
+    // -0.2 to -0.4 dB and low-mids by 0.0 dB on every beat tried). A trap 808 or a log drum is meant to carry weight; a warm
+    // R&B or afrobeats mix carries more low-mid body. When a song has no voice-free stretch the whole song is measured and a
+    // voice adds low-mid weight of its own (more for a low voice), so that allowance is a little bigger.
+    function review(ctx) {
+        const { genreId, prof } = ctx;
+        const lowOverBeatDb = { trap: 3.0, rap: 2.5, amapiano: 2.5, afrobeats: 2.0, rnb: 2.0, universal: 2.0 }[genreId] || 2.0;
+        const mudOverBeatDb = { rnb: 2.5, afrobeats: 2.5, trap: 2.0, rap: 2.0, amapiano: 2.0, universal: 2.0 }[genreId] || 2.0;
+        const reg = prof && prof.voice && prof.voice.register ? String(prof.voice.register) : (prof && prof.range) || "";
+        const lowVoice = /low|bass|baritone/i.test(reg);
+        const notes = ["Producer check limits for " + (ctx.genre && ctx.genre.decided ? ctx.genre.label : "this song") + ": bass up to +" + lowOverBeatDb + " dB and low-mids up to +" + mudOverBeatDb + " dB over what your beat had (a little more when the voice cannot be left out of the measuring" + (lowVoice ? ", and a low voice gets extra" : "") + ")."];
+        return { limits: { lowOverBeatDb, mudOverBeatDb, wholeSongMudSlackDb: lowVoice ? 2.5 : 2.0 }, notes };
+    }
+
+    root.VLMixBrain = { ready, profile, chain, adaptRecipe, harshness, levels, master, echo, reverbTail, gate, bloom, enhanceCaps, tune, review, IDEAL_LUFS };
 })(typeof window !== "undefined" ? window : globalThis);

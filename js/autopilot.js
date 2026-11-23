@@ -169,34 +169,93 @@
         return { stop() { nodes.forEach((n) => { try { n.stop(); } catch (e) { /* already ended */ } }); } };
     }
     const fmtOffset = (v) => (Math.abs(v) < 0.0005 ? "exactly as recorded" : Math.abs(v).toFixed(3) + " s " + (v > 0 ? "later" : "earlier"));
+    // The "Is the vocal lined up?" card. You hear the WHOLE song (beat and vocal) from where the vocal comes in, can tap the picture to
+    // jump anywhere, loop a few seconds, and every nudge moves only the vocal while it plays (js/alignplay.js). v2.25.4: before, "Hear it"
+    // played ten seconds once and went silent while the button still said "Stop".
+    const WAVE_BEAT = "rgba(255, 255, 255, .38)";
+    function peaksOf(buf, n) {
+        const d = buf.getChannelData(0), step = Math.max(1, Math.floor(d.length / n)), out = new Float32Array(n); let mx = 1e-6;
+        for (let i = 0; i < n; i++) { let m = 0; const a0 = i * step, b0 = Math.min(d.length, a0 + step), st = Math.max(1, (b0 - a0) >> 4); for (let k = a0; k < b0; k += st) { const v = Math.abs(d[k]); if (v > m) m = v; } out[i] = m; if (m > mx) mx = m; }
+        for (let i = 0; i < n; i++) out[i] /= mx;
+        return out;
+    }
     async function confirmAlignment() {
         const D = Deck(); if (!D || !D.isOpen) return;
-        const slider = $("offset-slider"), d = window.VLAutopilot.alignment || { confidence: 0, why: [] };
-        let prev = null;
-        const stopPrev = () => { if (prev) { prev.stop(); prev = null; } const b = document.getElementById("apd-prev"); if (b) b.querySelector("span").textContent = "▶ Hear it"; };
+        const S = window.VLState, slider = $("offset-slider"), d = window.VLAutopilot.alignment || { confidence: 0, why: [] };
+        const suggested = parseFloat(slider.value) || 0;
+        let player = null;
+        const stopPlayer = () => { if (player) { try { player.destroy(); } catch (e) { /* ignore */ } player = null; } };
+        const NUDGES = [-100, -10, -1, 1, 10, 100];
         await D.ask({
             key: "align", title: "Is the vocal lined up?",
             html: '<p class="apd-text">' + (d.why && d.why[0] ? d.why[0].replace(/&/g, "&amp;").replace(/</g, "&lt;") : "") + (d.confidence < 0.45 ? " I am not very sure about this one, so listen and nudge it if it feels off." : "") + "</p>" +
                 '<div class="apd-align-offset" id="apd-off" aria-live="polite"></div>' +
-                '<div class="apd-nudge" role="group" aria-label="Nudge the vocal"><button type="button" class="secondary-button" data-ms="-100">−100</button><button type="button" class="secondary-button" data-ms="-10">−10</button><button type="button" class="secondary-button" data-ms="10">+10</button><button type="button" class="secondary-button" data-ms="100">+100</button></div><p class="apd-hint">Nudge the vocal earlier or later, in milliseconds</p>' +
-                '<button type="button" class="secondary-button apd-btn apd-preview" id="apd-prev"><span>▶ Hear it</span></button>',
+                '<div class="apd-wavebox"><canvas id="apd-wave" class="apd-wave" role="img" aria-label="The beat (top) and your vocal (bottom). Tap or drag to jump to another part of the song."></canvas>' +
+                '<div class="apd-time"><span id="apd-pos">0:00</span><span class="apd-tag">tap the picture to jump</span><span id="apd-len">0:00</span></div></div>' +
+                '<div class="apd-transport"><button type="button" class="secondary-button apd-btn apd-preview" id="apd-prev" aria-pressed="false"><span>▶ Play the song</span></button>' +
+                '<button type="button" class="secondary-button apd-toggle" id="apd-loop" aria-pressed="false">Loop 6 s</button>' +
+                '<button type="button" class="secondary-button apd-toggle" id="apd-jump">Jump to vocal</button></div>' +
+                '<div class="apd-nudge" role="group" aria-label="Nudge the vocal">' + NUDGES.map((ms) => '<button type="button" class="secondary-button" data-ms="' + ms + '">' + (ms > 0 ? "+" : "−") + Math.abs(ms) + "</button>").join("") + "</div>" +
+                '<p class="apd-hint">Nudge the vocal earlier (−) or later (+), in milliseconds. You hear it change while the song plays.</p>' +
+                '<button type="button" class="apd-link" id="apd-undo" hidden>Back to the spot Autopilot chose</button>',
             buttons: [{ id: "ok", label: "Looks right", kind: "primary" }],
             onMount(el) {
-                const off = el.querySelector("#apd-off"), show = () => { off.textContent = fmtOffset(parseFloat(slider.value) || 0); };
+                const q = (sel) => el.querySelector(sel);
+                const off = q("#apd-off"), playBtn = q("#apd-prev"), loopBtn = q("#apd-loop"), jumpBtn = q("#apd-jump"), undo = q("#apd-undo"), cv = q("#apd-wave"), posEl = q("#apd-pos"), lenEl = q("#apd-len");
+                const offset = () => parseFloat(slider.value) || 0, fmtT = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
+                const ctx = S && S.audioContext, vb = S && S.vocalBuffer, bb = S && S.beatBuffer, AP = window.VLAlignPlay;
+                const show = () => { off.textContent = fmtOffset(offset()); undo.hidden = Math.abs(offset() - suggested) < 0.0005; };
                 show();
-                const restart = () => { if (prev) { prev.stop(); prev = startPreview(parseFloat(slider.value) || 0); } };
-                el.querySelectorAll("[data-ms]").forEach((b) => b.addEventListener("click", () => {
-                    const v = Math.max(-15, Math.min(15, (parseFloat(slider.value) || 0) + parseInt(b.dataset.ms, 10) / 1000));
-                    slider.value = v.toFixed(3); fire(slider, "input"); show(); restart();
-                }));
-                el.querySelector("#apd-prev").addEventListener("click", () => {
-                    if (prev) { stopPrev(); return; }
-                    prev = startPreview(parseFloat(slider.value) || 0);
-                    if (prev) el.querySelector("#apd-prev span").textContent = "■ Stop";
+                if (!ctx || !vb || !bb || !AP) { playBtn.disabled = loopBtn.disabled = jumpBtn.disabled = true; return; }
+                lenEl.textContent = fmtT(bb.duration);
+                const BN = 480, VN = 960, bp = peaksOf(bb, BN), vp = peaksOf(vb, VN);
+                let shown = 0, dragPos = null;
+                const accent = (getComputedStyle(cv).getPropertyValue("--accent") || "").trim() || "#7c5cff";
+                function draw(posSec) {
+                    shown = posSec;
+                    const w = cv.clientWidth, h = cv.clientHeight, dpr = window.devicePixelRatio || 1; if (!w || !h) return;
+                    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+                    const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+                    const dur = bb.duration, m1 = h * 0.27, m2 = h * 0.73, amp = h * 0.21, o = offset();
+                    const lr = player && player.loopRegion();
+                    if (lr) { g.fillStyle = "rgba(255, 255, 255, .10)"; g.fillRect(lr.a / dur * w, 0, (lr.b - lr.a) / dur * w, h); }
+                    for (let x = 0; x < w; x++) {
+                        const t = x / w * dur, v = bp[Math.min(BN - 1, Math.floor(t / dur * BN))];
+                        g.fillStyle = WAVE_BEAT; g.fillRect(x, m1 - Math.max(0.5, v * amp), 1, Math.max(1, v * amp * 2));
+                        const tv = t - o;
+                        if (tv >= 0 && tv < vb.duration) { const u = vp[Math.min(VN - 1, Math.floor(tv / vb.duration * VN))]; g.fillStyle = accent; g.fillRect(x, m2 - Math.max(0.5, u * amp), 1, Math.max(1, u * amp * 2)); }
+                    }
+                    g.fillStyle = "rgba(255, 255, 255, .55)"; g.font = "10px system-ui, sans-serif"; g.fillText("Beat", 4, 11); g.fillText("Vocal", 4, h - 4);
+                    const px = Math.max(1, Math.min(w - 1, posSec / dur * w)); g.fillStyle = "#fff"; g.fillRect(px - 1, 0, 2, h);
+                    posEl.textContent = fmtT(posSec);
+                }
+                player = AP.create({
+                    ctx, beat: bb, vocal: vb, getOffset: offset,
+                    onTick: (t) => { if (dragPos == null) draw(t); },
+                    onState: (on) => { playBtn.querySelector("span").textContent = on ? "❚❚ Pause" : "▶ Play the song"; playBtn.setAttribute("aria-pressed", on ? "true" : "false"); }
                 });
+                const start0 = player.startPoint(); draw(start0);
+                requestAnimationFrame(() => draw(player ? player.position() : start0));
+                window.addEventListener("resize", () => { if (player) draw(player.position()); });
+                playBtn.addEventListener("click", () => player && player.toggle());
+                loopBtn.addEventListener("click", () => { if (!player) return; const on = loopBtn.getAttribute("aria-pressed") !== "true"; loopBtn.setAttribute("aria-pressed", on ? "true" : "false"); player.setLoop(on); draw(player.position()); });
+                jumpBtn.addEventListener("click", () => { if (!player) return; player.seek(player.startPoint()); });
+                const changed = () => { show(); if (player) { player.retime(); draw(player.position()); } };
+                el.querySelectorAll("[data-ms]").forEach((b) => b.addEventListener("click", () => {
+                    const v = Math.max(-15, Math.min(15, offset() + parseInt(b.dataset.ms, 10) / 1000));
+                    slider.value = v.toFixed(3); fire(slider, "input"); changed();
+                }));
+                undo.addEventListener("click", () => { slider.value = suggested.toFixed(3); fire(slider, "input"); changed(); });
+                // tap or drag the picture to jump: while dragging only the marker moves, the song jumps when you let go
+                const at = (e) => { const r = cv.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width))) * bb.duration; };
+                cv.addEventListener("pointerdown", (e) => { dragPos = at(e); try { cv.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ } draw(dragPos); });
+                cv.addEventListener("pointermove", (e) => { if (dragPos != null) { dragPos = at(e); draw(dragPos); } });
+                const up = () => { if (dragPos == null) return; const t = dragPos; dragPos = null; if (player) player.seek(t); };
+                cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
             },
-            onDone() { stopPrev(); }
+            onDone() { stopPlayer(); }
         });
+        stopPlayer();
         if (A.cancelled) throw new Cancelled();
         const v = parseFloat(slider.value) || 0;
         note("align", "Confirmed: vocal placed " + fmtOffset(v) + ".");
@@ -272,8 +331,9 @@
             const dec = window.AutoDecide.keyDecision({ beat: { rootPc: bkO.rootPc, scale: bkO.scale, tonicConfidence: bk.tonicConfidence, source: bk.source }, singer: { rootPc: g.rootPc, scale: g.scale, tonicConfidence: g.tonicConfidence }, notes: r.notes.length });
             if (dec.change) {
                 const NN = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-                S.beatKey = Object.assign({}, bk, { key: NN[dec.to.rootPc], scale: dec.to.scale, rootPc: dec.to.rootPc, mode: dec.to.scale === "Minor" ? "aeolian" : "ionian", modeRoot: NN[dec.to.rootPc], source: "beat + melody", alsoFits: dec.alsoFits });
+                S.beatKey = Object.assign({}, bk, { key: NN[dec.to.rootPc], scale: dec.to.scale, rootPc: dec.to.rootPc, mode: dec.to.scale === "Minor" ? "aeolian" : "ionian", modeRoot: NN[dec.to.rootPc], source: "beat + melody", alsoFits: [{ key: bk.key, scale: String(bk.scale).toLowerCase().indexOf("min") === 0 ? "Minor" : "Major", rootPc: bkO.rootPc }].concat(Array.isArray(bk.alsoFits) ? bk.alsoFits : []) });
                 const kv = $("beat-key"); if (kv) { kv.textContent = NN[dec.to.rootPc] + " " + dec.to.scale; const sm = kv.parentElement && kv.parentElement.querySelector("small"); if (sm) sm.textContent = "Chords and melody together • also fits " + dec.alsoFits + " (same notes)"; }
+                if (window.VLKeyFits) window.VLKeyFits.render();
             }
             A.keyNotes = dec.why;
         } catch (e) { console.warn("Key second opinion failed, kept the beat's key:", e); }
@@ -292,6 +352,8 @@
         const lines = [];
         lines.push("Beat tempo " + (bpm ? Math.round(bpm * 10) / 10 + " BPM" : "not found") + (k ? ", key " + k.label : ", key not found") + ".");
         if (A.keyNotes && A.keyNotes.length) A.keyNotes.forEach((t) => lines.push(t));
+        { const bk = S.beatKey, fits = bk && bk.source !== "set by you" && bk.source !== "Beat Lab" && Array.isArray(bk.alsoFits) ? bk.alsoFits : [];
+          if (fits.length) lines.push("Also fits: " + fits.map((f) => f.key + " " + f.scale).join(" or ") + " (the same chords read either way). I tuned so that neither " + (bk.tieNotes && bk.tieNotes.length ? "unplayed note" : "reading") + " gets pulled; tap \"Use " + fits[0].key + " " + fits[0].scale + "\" under the key if you know it is that one."); }
         if (prof.voice) lines.push("Heard: " + prof.voice.label + ".");
         lines.push("Style heard in the beat: " + prof.genreId + ".");
         note("analyze", lines);

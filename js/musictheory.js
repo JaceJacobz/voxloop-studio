@@ -414,6 +414,15 @@
             smooth.push(nrm(s));
         }
 
+        // How often each note really sounds: the 90th-percentile share of a note in the (smoothed) frames. A note that is played shows up
+        // in bursts, in the chords that use it; leakage from drums and bass stays a thin constant film. (Used to spot notes nobody plays.)
+        const presence = new Float64Array(12);
+        {
+            const col = [];
+            for (let f = 0; f < nFrames; f++) { let tt = 0; for (let i = 0; i < 12; i++) tt += chromaFrames[f][i]; if (tt > 0) col.push(smooth[f]); }
+            for (let i = 0; i < 12; i++) { const v = col.map((c) => c[i]).sort((a, b) => a - b); presence[i] = v.length ? v[Math.min(v.length - 1, Math.floor(0.9 * v.length))] : 0; }
+        }
+
         // ---- 1b. chord-progression plausibility (music knowledge) ----
         // When a loop only plays two or three chords, several 7-note sets fit the notes equally well (Bm-G fits G major and D major).
         // Popular music uses some chord roles far more than others (I, IV, V, vi are common; iii and vii are rare), so the set in
@@ -453,83 +462,136 @@
         const setFinal = new Float64Array(12);
         for (let r = 0; r < 12; r++) setFinal[r] = setScore[r] >= bestAudio - BAND ? setScore[r] + LAMBDA * plaus[r] : setScore[r] - 10;
         const order = Array.from({ length: 12 }, (_, i) => i).sort((a, b) => setFinal[b] - setFinal[a]);
-        const bestSetRoot = order[0];
+        let bestSetRoot = order[0];
         const margin = setScore[bestSetRoot] - Math.max(...order.slice(1).map((r) => setScore[r]));   // audio-only margin (plausibility never inflates confidence)
         const setConfidence = Math.max(0, Math.min(1, margin / 0.12));
 
-        // ---- 2. chords through time, restricted to the chords that belong to the best set ----
-        const diaIonian = diatonicChords(bestSetRoot, "ionian");
-        const chordPc = new Float64Array(12);        // time spent on each root (pitch class) among diatonic chords
-        const chordLog = [];
-        let firstBlock = null;
-        for (let f = 0; f < nFrames; f += 1) {
-            const c = smooth[f];
-            let tot = 0; for (let i = 0; i < 12; i++) tot += chromaFrames[f][i];
-            if (tot <= 0) { chordLog.push(null); continue; }
-            let best = -1, bestS = -1e9;
-            for (let d = 0; d < 7; d++) {
-                const ch = diaIonian[d];
-                const r = ch.rootPc, th = ch.quality === "min" || ch.quality === "dim" ? 3 : 4, fi = ch.quality === "dim" ? 6 : 7;
-                // triad energy, with a small bonus for the bass actually playing the root
-                const bm = bassFrames[f];
-                let bs = 0; for (let i = 0; i < 12; i++) bs += bm[i];
-                const s = c[r] + c[mod12(r + th)] + c[mod12(r + fi)] - 0.5 * (1 - 0) * (1 / 12) * 0 + (bs > 0 ? 0.35 * bm[r] / bs : 0);
-                if (s > bestS) { bestS = s; best = d; }
+        // ---- 2 + 3. for one candidate 7-note set: the chords through time (restricted to that set), then which of its seven notes is "home" ----
+        const tot = (arr) => { let sum = 0; for (let i = 0; i < arr.length; i++) sum += arr[i]; return sum || 1; };
+        const W = Object.assign({ bass: 1.0, chord: 1.1, support: 0.6, start: 1.2, end: 0.25, energy: 0.6, profile: 0.1, minor: 0 }, opts.weights || {});
+        const evalSet = (setRoot) => {
+            const diaIonian = diatonicChords(setRoot, "ionian");
+            const chordPc = new Float64Array(12);        // time spent on each root (pitch class) among diatonic chords
+            const chordLog = [];
+            for (let f = 0; f < nFrames; f += 1) {
+                const c = smooth[f];
+                let sum = 0; for (let i = 0; i < 12; i++) sum += chromaFrames[f][i];
+                if (sum <= 0) { chordLog.push(null); continue; }
+                let best = -1, bestS = -1e9;
+                for (let d = 0; d < 7; d++) {
+                    const ch = diaIonian[d];
+                    const r = ch.rootPc, th = ch.quality === "min" || ch.quality === "dim" ? 3 : 4, fi = ch.quality === "dim" ? 6 : 7;
+                    // triad energy, with a small bonus for the bass actually playing the root
+                    const bm = bassFrames[f];
+                    let bs = 0; for (let i = 0; i < 12; i++) bs += bm[i];
+                    const sc = c[r] + c[mod12(r + th)] + c[mod12(r + fi)] + (bs > 0 ? 0.35 * bm[r] / bs : 0);
+                    if (sc > bestS) { bestS = sc; best = d; }
+                }
+                chordLog.push(best);
+                chordPc[diaIonian[best].rootPc] += 1;
             }
-            chordLog.push(best);
-            chordPc[diaIonian[best].rootPc] += 1;
-        }
-        // Chord at the start of the first stable stretch (loops usually begin on the tonic chord)
-        const startChords = new Float64Array(12);
-        {
-            let cnt = 0;
-            for (let f = 0; f < chordLog.length && cnt < 24; f++) { if (chordLog[f] == null) continue; startChords[diaIonian[chordLog[f]].rootPc] += 1; cnt++; }
-        }
-        // Last chords
-        const endChords = new Float64Array(12);
-        {
-            let cnt = 0;
-            for (let f = chordLog.length - 1; f >= 0 && cnt < 12; f--) { if (chordLog[f] == null) continue; endChords[diaIonian[chordLog[f]].rootPc] += 1; cnt++; }
-        }
+            // Chord at the start of the first stable stretch (loops usually begin on the tonic chord)
+            const startChords = new Float64Array(12);
+            { let cnt = 0; for (let f = 0; f < chordLog.length && cnt < 24; f++) { if (chordLog[f] == null) continue; startChords[diaIonian[chordLog[f]].rootPc] += 1; cnt++; } }
+            // The very first chord that holds for a moment (3+ frames in a row): a loop begins on its home chord far more often than not.
+            let firstRoot = -1;
+            { let run = 0, prev = -2; for (let f = 0; f < chordLog.length; f++) { const cl = chordLog[f]; if (cl == null) continue; if (cl === prev) run++; else { prev = cl; run = 1; } if (run >= 3) { firstRoot = diaIonian[cl].rootPc; break; } } }
+            // Last chords
+            const endChords = new Float64Array(12);
+            { let cnt = 0; for (let f = chordLog.length - 1; f >= 0 && cnt < 12; f--) { if (chordLog[f] == null) continue; endChords[diaIonian[chordLog[f]].rootPc] += 1; cnt++; } }
 
-        // ---- 3. which of the seven notes is "home"? every mode of the best set is a candidate ----
-        const tot = (a) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s || 1; };
-        const chordTot = tot(chordPc), bassTot = tot(bassChroma), stTot = tot(startChords), enTot = tot(endChords);
-        const W = Object.assign({ bass: 1.0, chord: 1.1, support: 0.6, start: 1.2, end: 0.25, energy: 0.6, profile: 0.1 }, opts.weights || {});
-        const cands = [];
-        for (let d = 0; d < 7; d++) {
-            const tonic = scaleNotes(bestSetRoot, "ionian")[d];
-            const mode = MODE_ORDER.find((mm) => MODE_TO_IONIAN[mm] === mod12(tonic - bestSetRoot)) || "ionian";
-            const dom = mod12(tonic + 7), sub = mod12(tonic + 5);
-            // evidence
-            const ev = {
-                bass: bassChroma[tonic] / bassTot,                              // tonic is the most-played bass note
-                chord: chordPc[tonic] / chordTot,                              // tonic chord is the most-played chord
-                support: (chordPc[dom] * 0.5 + chordPc[sub] * 0.3) / chordTot, // dominant and subdominant chords prop it up
-                start: startChords[tonic] / stTot,
-                end: endChords[tonic] / enTot,
-                energy: chroma[tonic]
-            };
-            // key-profile fit of the whole chroma (major profile for major-third modes, minor profile otherwise)
-            const third = mod12(scaleNotes(bestSetRoot, "ionian")[(d + 2) % 7] - tonic);
-            const prof = third === 4 ? KK_MAJOR : KK_MINOR;
-            const rot = []; for (let i = 0; i < 12; i++) rot.push(prof[mod12(i - tonic)]);
-            ev.profile = pearson(Array.from(chroma), rot);
-            const score = W.bass * ev.bass + W.chord * ev.chord + W.support * ev.support + W.start * ev.start + W.end * ev.end + W.energy * ev.energy + W.profile * ev.profile;
-            cands.push({ tonic, mode, third, score: score * (0.4 + 0.6 * MODE_PRIOR[mode]), ev });
+            // every mode of the set is a candidate home
+            const chordTot = tot(chordPc), bassTot = tot(bassChroma), stTot = tot(startChords), enTot = tot(endChords);
+            const cands = [];
+            for (let d = 0; d < 7; d++) {
+                const tonic = scaleNotes(setRoot, "ionian")[d];
+                const mode = MODE_ORDER.find((mm) => MODE_TO_IONIAN[mm] === mod12(tonic - setRoot)) || "ionian";
+                const dom = mod12(tonic + 7), sub = mod12(tonic + 5);
+                const ev = {
+                    bass: bassChroma[tonic] / bassTot,                              // tonic is the most-played bass note
+                    chord: chordPc[tonic] / chordTot,                              // tonic chord is the most-played chord
+                    support: (chordPc[dom] * 0.5 + chordPc[sub] * 0.3) / chordTot, // dominant and subdominant chords prop it up
+                    start: 0.5 * (startChords[tonic] / stTot) + (firstRoot === tonic ? 0.5 : 0),   // where the loop starts: its first chord, and the first few seconds
+                    end: endChords[tonic] / enTot,
+                    energy: chroma[tonic]
+                };
+                // key-profile fit of the whole chroma (major profile for major-third modes, minor profile otherwise)
+                const third = mod12(scaleNotes(setRoot, "ionian")[(d + 2) % 7] - tonic);
+                const prof = third === 4 ? KK_MAJOR : KK_MINOR;
+                const rot = []; for (let i = 0; i < 12; i++) rot.push(prof[mod12(i - tonic)]);
+                ev.profile = pearson(Array.from(chroma), rot);
+                const score = W.bass * ev.bass + W.chord * ev.chord + W.support * ev.support + W.start * ev.start + W.end * ev.end + W.energy * ev.energy + W.profile * ev.profile + (mode === "aeolian" ? W.minor : 0);
+                cands.push({ setRoot, tonic, mode, third, score: score * (0.4 + 0.6 * MODE_PRIOR[mode]), ev });
+            }
+            cands.sort((a, b) => b.score - a.score);
+            return { setRoot, diaIonian, chordPc, chordLog, startChords, endChords, firstRoot, chordTot, cands };
+        };
+
+        // ---- 2b. sets that differ only by a note nobody plays ----
+        // A loop like Am - F - C - Dm never plays B or B-flat, so "C major / A minor" and "F major / D minor" fit the notes equally well; the
+        // tiny difference between them is leakage from drums and bass, which is not music. Every set that holds all the notes really
+        // played, and differs from the best one only in notes that hardly ever sound (presence below the leakage floor), is a tie. Ties are settled the way a musician would:
+        // where the loop starts, which chord it rests on, and where the bass sits (the same home-note evidence used in step 3).
+        const FLOOR = opts.unplayedFloor != null ? opts.unplayedFloor : 0.12, TIE = opts.tieBand != null ? opts.tieBand : 0.12;
+        const tiedSets = [bestSetRoot];
+        if (opts.tieBreak !== false) {
+            const mb = maskOf(bestSetRoot, "ionian");
+            for (let r = 0; r < 12; r++) {
+                if (r === bestSetRoot || setScore[r] < bestAudio - TIE) continue;
+                const mr = maskOf(r, "ionian"); let same = true;
+                for (let i = 0; i < 12; i++) if (mr[i] !== mb[i] && presence[i] >= FLOOR) { same = false; break; }
+                if (same) tiedSets.push(r);
+            }
         }
-        cands.sort((a, b) => b.score - a.score);
+        const evals = new Map(); tiedSets.forEach((r) => evals.set(r, evalSet(r)));
+        // all candidate homes of all tied sets, best first (a single set when there is no tie: exactly the old behaviour)
+        const allCands = []; tiedSets.forEach((r) => evals.get(r).cands.forEach((c) => allCands.push(c)));
+        allCands.sort((a, b) => b.score - a.score);
+        const cands = allCands, top = cands[0];
+        if (top.setRoot !== bestSetRoot) bestSetRoot = top.setRoot;
+        const E = evals.get(bestSetRoot);
+        const diaIonian = E.diaIonian, chordPc = E.chordPc, chordLog = E.chordLog, chordTot = E.chordTot;
         const tonicMargin = cands[0].score - cands[1].score;
         const tonicConfidence = Math.max(0, Math.min(1, tonicMargin / 0.12));
-        const top = cands[0];
 
         // Spelling that keeps the seven notes right for tuning: dorian etc. are written as the major (ionian) or minor (aeolian) of the same set.
-        let spellRoot, spellScale;
-        if (top.mode === "aeolian") { spellRoot = top.tonic; spellScale = "Minor"; }
-        else if (top.mode === "ionian") { spellRoot = top.tonic; spellScale = "Major"; }
-        else {
-            // modal: write it as the relative major (same notes); keep the modal name in `mode`
-            spellRoot = bestSetRoot; spellScale = "Major";
+        const spell = (c) => c.mode === "aeolian" ? { root: c.tonic, scale: "Minor" } : c.mode === "ionian" ? { root: c.tonic, scale: "Major" } : { root: c.setRoot, scale: "Major" };   // modal: the relative major (same notes); the modal name stays in `mode`
+        const sp = spell(top), spellRoot = sp.root, spellScale = sp.scale;
+
+        // Sets that fit the notes just as well (differ only by a note nobody plays): what else this could be called, and the extra notes a tuner
+        // should leave alone (B and B-flat for Am - F - C - Dm), so a wrong guess between them never pulls a sung note.
+        const alsoFits = [], alsoAllowPcs = [], tieNotePcs = [];
+        if (tiedSets.length > 1) {
+            const mTop = maskOf(bestSetRoot, "ionian");
+            tiedSets.forEach((r) => {
+                if (r === bestSetRoot) return;
+                const c = evals.get(r).cands[0], m = maskOf(r, "ionian");
+                for (let i = 0; i < 12; i++) if (m[i] && !mTop[i] && alsoAllowPcs.indexOf(i) < 0) alsoAllowPcs.push(i);
+                for (let i = 0; i < 12; i++) if (m[i] !== mTop[i] && tieNotePcs.indexOf(i) < 0) tieNotePcs.push(i);       // a note nobody plays: do not pull singers off it either way
+                if (c.score < 0.6 * top.score) return;                                  // clearly the weaker reading: not worth naming
+                const q = spell(c);
+                alsoFits.push({ key: NOTE_NAMES[q.root], scale: q.scale, rootPc: q.root, mode: c.mode, modeRoot: NOTE_NAMES[c.tonic], score: c.score });
+            });
+        }
+
+        // The relative key (F major <-> D minor: the same seven notes). Which one is "home" is mostly a matter of where the file starts, so when
+        // only the start of the file (and the end) separates the two readings, the other one is named too: the same beat in two files (a
+        // video and an audio export, say) can start in different places and would otherwise come out as two different keys.
+        // It is named unless the bass, chords and held notes (everything except the start and end of the file) back the top reading on
+        // their own by a clear margin. This never changes the notes used for tuning (they are the same seven notes either way).
+        const setTie = alsoFits.length > 0;      // the notes themselves cannot decide (B or B-flat never played...): that is what "ambiguous" means
+        let relativeTie = false;
+        {
+            const relTonic = top.mode === "aeolian" ? mod12(top.tonic + 3) : top.mode === "ionian" ? mod12(top.tonic + 9) : -1;
+            const rel = relTonic < 0 ? null : (evals.get(bestSetRoot).cands.find((c) => c.tonic === relTonic && c.mode === (top.mode === "aeolian" ? "ionian" : "aeolian")) || null);
+            if (rel) {
+                const homeless = (c) => (W.bass * c.ev.bass + W.chord * c.ev.chord + W.support * c.ev.support + W.energy * c.ev.energy + W.profile * c.ev.profile) * (0.4 + 0.6 * MODE_PRIOR[c.mode]);
+                const band = opts.relativeBand != null ? opts.relativeBand : 0.15;
+                if (homeless(top) - homeless(rel) < band && !alsoFits.some((f) => f.rootPc === rel.tonic && f.scale === (rel.mode === "aeolian" ? "Minor" : "Major"))) {
+                    alsoFits.unshift({ key: NOTE_NAMES[rel.tonic], scale: rel.mode === "aeolian" ? "Minor" : "Major", rootPc: rel.tonic, mode: rel.mode, modeRoot: NOTE_NAMES[rel.tonic], score: rel.score, relative: true });
+                    relativeTie = true;
+                }
+            }
         }
 
         // chord loop in Roman numerals, relative to the detected home note and mode
@@ -557,14 +619,20 @@
             mask: maskOf(bestSetRoot, "ionian"),
             setRoot: NOTE_NAMES[bestSetRoot],
             chroma: Array.from(chroma),
+            presence: Array.from(presence),
             bassChroma: Array.from(bassChroma),
             tuningCents: tuneCents,
             tuningRaw: tuningRaw,
             tuningStrength: tuningStrength,
             chordTimeShare: Array.from(chordPc).map((v) => v / chordTot),
             alternatives,
+            ambiguous: setTie,
+            relativeTie,
+            alsoFits,
+            alsoAllow: alsoAllowPcs,
+            tieNotes: tieNotePcs.sort((a, b) => a - b),
             progression,
-            candDebug: opts.debug ? cands.map((c) => ({ t: NOTE_NAMES[c.tonic], m: c.mode, s: +c.score.toFixed(3), ev: Object.fromEntries(Object.entries(c.ev).map(([k, v]) => [k, +v.toFixed(2)])) })) : undefined,
+            candDebug: opts.debug ? cands.map((c) => ({ set: NOTE_NAMES[c.setRoot], t: NOTE_NAMES[c.tonic], m: c.mode, s: +c.score.toFixed(3), ev: Object.fromEntries(Object.entries(c.ev).map(([k, v]) => [k, +v.toFixed(2)])) })) : undefined,
             engine: "musictheory-v1"
         };
     }

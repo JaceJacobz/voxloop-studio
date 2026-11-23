@@ -60,7 +60,7 @@
         const ch = []; for (let c = 0; c < buf.numberOfChannels; c++) ch.push(Float32Array.from(buf.getChannelData(c).subarray(s0, s1)));
         return { channels: ch, sr, s0, s1 };
     }
-    function env() { const b = st.beatInfo; return { bpm: b && b.bpm, key: b && b.key ? { rootPc: b.key.rootPc, scale: b.key.scale, refCents: b.key.refCents || 0 } : null }; }
+    function env() { const b = st.beatInfo; return { bpm: b && b.bpm, key: b && b.key ? { rootPc: b.key.rootPc, scale: b.key.scale, refCents: b.key.refCents || 0, alsoAllow: b.key.alsoAllow } : null }; }
     async function ensureBeatInfo() {
         const b = beat().buffer;
         if (!b || !window.VLBrain) return null;
@@ -423,14 +423,28 @@
     }
 
     // ------------------------------------------------------------------ bake into the clip
+    // Every effect step keeps the audio from before it (so "Undo last" works), which is a full copy of the clip each time. A 3-minute
+    // stereo vocal is about 60 MB a copy, so ten of them is more than a phone can hold. Keep as many as fit in a memory budget
+    // (never fewer than the latest one); "Remove all effects" still goes back to the original whatever happens here (v2.25.5).
+    function historyBudgetBytes() {
+        const gb = typeof navigator !== "undefined" && navigator.deviceMemory;       // Chrome reports 0.25 to 8; other browsers do not report it
+        return (gb && gb <= 4 ? 150 : 400) * 1048576;
+    }
+    function trimHistory(clip) {
+        const h = clip.fxHistory, keep = clip.original && clip.original.buffer, bytes = (e) => (e.buffer === keep ? 0 : e.buffer.length * e.buffer.numberOfChannels * 4);
+        let total = h.reduce((a, e) => a + bytes(e), 0);
+        const budget = historyBudgetBytes();
+        while (h.length > 1 && total > budget) total -= bytes(h.shift());
+    }
     function bake(clip, s0, segLen, out, sr, text) {
         const ctx = api().ensureCtx(), buf = clip.buffer;
         const n0 = buf.length, nch = Math.max(buf.numberOfChannels, out.length), outLen = out[0].length, newLen = Math.max(n0, s0 + outLen);
-        const res = [];
-        for (let c = 0; c < nch; c++) { const o = new Float32Array(newLen); o.set(buf.getChannelData(Math.min(c, buf.numberOfChannels - 1))); res.push(o); }
+        // v2.25.5: write straight into the new buffer (this used to build a second full copy first and then copy it over).
+        const nb = ctx.createBuffer(nch, newLen, sr);
+        for (let c = 0; c < nch; c++) nb.getChannelData(c).set(buf.getChannelData(Math.min(c, buf.numberOfChannels - 1)));
         const fade = Math.max(2, Math.round(0.006 * sr));
         for (let c = 0; c < nch; c++) {
-            const oc = out[Math.min(c, out.length - 1)], rc = res[c];
+            const oc = out[Math.min(c, out.length - 1)], rc = nb.getChannelData(c);
             for (let i = 0; i < outLen; i++) {
                 const idx = s0 + i;
                 if (i < segLen) {
@@ -441,12 +455,11 @@
                 } else rc[idx] += oc[i];
             }
         }
-        const nb = ctx.createBuffer(nch, newLen, sr);
-        res.forEach((r, c) => nb.copyToChannel(r, c));
         clip.fxHistory = clip.fxHistory || [];
         if (!clip.original) clip.original = { buffer: buf, duration: clip.duration };
         clip.fxHistory.push({ buffer: buf, duration: clip.duration, log: (clip.fxLog || []).length });
         if (clip.fxHistory.length > 10) clip.fxHistory.shift();
+        trimHistory(clip);
         clip.buffer = nb; clip.duration = newLen / sr;
         clip.fxLog = (clip.fxLog || []).concat([{ text }]);
         st.rev++; st.cache = [];
@@ -497,7 +510,7 @@
         try {
             const bi = await ensureBeatInfo();
             const seg = segAudio(f.clip, st.sel.start, st.sel.end);
-            const r = await window.VLBrain.analyzeClip(seg.channels, seg.sr, { type: f.lane.type, style: st.planStyle, beat: bi || {}, voiceOverride: st.voice, beatKeyConfidence: bi && bi.source && bi.source.key === "Beat Lab" ? 1 : 0 });
+            const r = await window.VLBrain.analyzeClip(seg.channels, seg.sr, { type: f.lane.type, style: st.planStyle, beat: bi || {}, voiceOverride: st.voice, beatKeyConfidence: bi && bi.source && (bi.source.key === "Beat Lab" || bi.source.key === "set by you") ? 1 : 0 });
             st.heard = r.findings; st.chain = r.chain; st.cache = [];
             st.tab = "chain"; renderAll(); schedule();
             status(r.chain.length ? "Here's what this part needs. Press Preview to hear it." : "This part already sounds good. Nothing needed.");
@@ -516,7 +529,7 @@
         try {
             const bi = await ensureBeatInfo();
             const seg = segAudio(f.clip, st.sel.start, st.sel.end);
-            const r = await window.VLBrain.analyzeClip(seg.channels, seg.sr, { type: f.lane.type, style: st.planStyle, beat: bi || {}, voiceOverride: st.voice, beatKeyConfidence: bi && bi.source && bi.source.key === "Beat Lab" ? 1 : 0 });
+            const r = await window.VLBrain.analyzeClip(seg.channels, seg.sr, { type: f.lane.type, style: st.planStyle, beat: bi || {}, voiceOverride: st.voice, beatKeyConfidence: bi && bi.source && (bi.source.key === "Beat Lab" || bi.source.key === "set by you") ? 1 : 0 });
             const hit = r.chain.find((c) => c.type === pl.type);
             const keepMoves = pl.params.moves;
             if (hit) { pl.params = Object.assign({}, hit.params); if (keepMoves) pl.params.moves = keepMoves; pl.reason = hit.reason || "Set by Auto from this audio."; pl.bypass = false; status("Auto set " + Fx.P[pl.type].name + " from this audio."); }
@@ -791,7 +804,7 @@
                 const bi = st.beatInfo || {};
                 if (e.chain.length) {
                     const seg = segAudio(f.clip, 0, f.clip.duration);
-                    const r = await Fx.runChain(seg.channels, seg.sr, e.chain, { bpm: bi.bpm, key: bi.key ? { rootPc: bi.key.rootPc, scale: bi.key.scale, refCents: bi.key.refCents || 0 } : null });
+                    const r = await Fx.runChain(seg.channels, seg.sr, e.chain, { bpm: bi.bpm, key: bi.key ? { rootPc: bi.key.rootPc, scale: bi.key.scale, refCents: bi.key.refCents || 0, alsoAllow: bi.key.alsoAllow } : null });
                     bake(f.clip, 0, seg.s1, r.channels, seg.sr, "Auto: " + e.chain.map((c) => Fx.P[c.type].name).join(" + "));
                 }
                 for (const z of e.extra) {
@@ -840,7 +853,7 @@
         return ran;
     }
     window.VLFxRack = { st, select, openEffects: () => { if (st.sel) select(Object.assign({}, st.sel, { openPanel: true })); }, autoPlugin, autoThis, addPlugin };      // also lets tests drive the rack without pointer gestures
-    window.VLStudioAutopilot = { markDone: (c) => apDone.add(c), isDone: (c) => apDone.has(c), runNow: apRunNow, get on() { return apOn(); }, set: apSet };
+    window.VLStudioAutopilot = { markDone: (c) => apDone.add(c), isDone: (c) => apDone.has(c), runNow: apRunNow, get on() { return apOn(); }, get busy() { return apBusy; }, set: apSet };
 
     // ------------------------------------------------------------------ boot
     function init() {

@@ -39,6 +39,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const NOTE_NAMES = window.VLTune.noteNames;
     const S = window.VLState;
 
+    // Notes to leave alone: when the key reading is only a guess and two keys differ by a note the beat never plays (B or B-flat for
+    // Am - F - C - Dm), both notes are allowed. Only while the chosen key is still the detected one: a key you pick by hand is taken as it is.
+    function alsoAllowFor() {
+        const bk = S && S.beatKey;
+        if (!bk || !Array.isArray(bk.alsoAllow) || !bk.alsoAllow.length) return undefined;
+        if (bk.source === "set by you" || bk.source === "Beat Lab") return undefined;
+        const root = NOTE_NAMES.indexOf(bk.key);
+        if (parseInt(rootSelect.value, 10) !== root || String(scaleSelect.value).toLowerCase() !== String(bk.scale).toLowerCase()) return undefined;
+        return bk.alsoAllow.slice();
+    }
+
     let beatTuningCents = 0;
     let lastResult = null;
     let audioBuffers = {};          // original / detuned / tuned as AudioBuffers
@@ -74,18 +85,15 @@ document.addEventListener("DOMContentLoaded", () => {
     // Open the step
     // -----------------------------------------------------
 
-    continueButton.addEventListener("click", () => {
-
-        section.classList.remove("hidden");
-        section.scrollIntoView({ behavior: "smooth", block: "start" });
-
+    // Show the beat's key in the key selects and notes (also called when the key is switched on the key card).
+    function applyKeyToSelects() {
         const key = S && S.beatKey;
 
         if (key && key.key) {
             rootSelect.value = String(NOTE_NAMES.indexOf(key.key));
             scaleSelect.value = key.scale.toLowerCase();
             keyNote.textContent = key.source === "set by you"
-                ? "Set by you in Studio · exact"
+                ? (key.swappedFrom ? "Set by you on the key card · exact" : "Set by you in Studio · exact")
                 : key.source === "Beat Lab"
                 ? "From the Beat Lab · exact"
                 : `Detected from the beat · ${Math.round(key.confidence * 100)}% confidence`;
@@ -100,6 +108,15 @@ document.addEventListener("DOMContentLoaded", () => {
             autoNote.textContent = "Off because the key is not known yet.";
             keyNote.textContent = "Key not detected yet. Choose it by hand.";
         }
+    }
+
+
+    continueButton.addEventListener("click", () => {
+
+        section.classList.remove("hidden");
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+
+        applyKeyToSelects();
 
         updateShiftReadout();
 
@@ -125,6 +142,17 @@ document.addEventListener("DOMContentLoaded", () => {
             refValue.textContent = "A = 440";
             refNote.textContent = "Could not measure the beat tuning";
         }
+    });
+
+    // The key was switched on the beat key card ("Use F Major"): follow it, and the tuned result is out of date.
+    window.addEventListener("vl-key-changed", () => {
+        if (section.classList.contains("hidden")) return;             // not opened yet: opening reads the new key
+        applyKeyToSelects(); updateShiftReadout();
+        if (!lastResult) return;
+        lastResult = null;
+        if (S) S.tunedVocal = null;
+        results.classList.add("hidden");
+        statusLine.textContent = "The key changed. Run pitch correction again to tune to it.";
     });
 
     // The vocal was cleaned up or re-timed after pitch correction ran: that result is out of date.
@@ -224,6 +252,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const options = {
             rootPc: parseInt(rootSelect.value, 10),
             scale: scaleSelect.value,
+            alsoAllow: alsoAllowFor(),                             // notes the beat never plays, when two keys differ only by one: left alone both ways
             refCents: beatTuningCents,
             strength: Math.min(parseFloat(strengthSlider.value) / 100, (S.autopilotTuneCap != null ? S.autopilotTuneCap : 100) / 100),   // Autopilot can cap it (a mixed sing/rap line is tuned more gently)
             retuneMs: parseFloat(retuneSlider.value),
@@ -252,7 +281,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 await new Promise((r) => setTimeout(r, 30));
                 const eng = createTuneEngine(), mono = eng.mixDown(channels);
                 const tr = eng.trackClean(mono, vocal.sampleRate), notes = eng.segmentNotes(tr.midi);
-                const res = window.PhraseBrain.analyze({ notes, hopSec: tr.hop / vocal.sampleRate, key: { rootPc: options.rootPc, scale: options.scale }, refCents: options.refCents, totalSec: mono.length / vocal.sampleRate });
+                const res = window.PhraseBrain.analyze({ notes, hopSec: tr.hop / vocal.sampleRate, key: { rootPc: options.rootPc, scale: options.scale, alsoAllow: options.alsoAllow }, refCents: options.refCents, totalSec: mono.length / vocal.sampleRate });
                 // only when most of the vocal already lives in this key: a vocal sung in a different key altogether is MOVED as a whole (the old way)
                 if (res.zones.length && !res.globalMismatch && res.keyCoverage >= 0.55) { options.zones = res.zones; options.autoTranspose = false; phraseRes = res; }
             } catch (error) { console.warn("Line-by-line listening failed, using one key:", error); }

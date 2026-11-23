@@ -155,6 +155,8 @@
         if (A && !info.bpm) { try { const r = await A.analyzeBpm(buf); if (r && r.bpm) { info.bpm = r.bpm; info.source.bpm = "listened"; } } catch (e) { /* ignore */ } }
         if (A && !info.key) { try { const r = A.detectKey(buf); const k = r && r.key ? parseKey(r.key + " " + r.scale) : null; if (k) {
             info.key = k; info.source.key = "listened"; info.keyConfidence = r.confidence;
+            if (r.alsoAllow && r.alsoAllow.length) { k.alsoAllow = r.alsoAllow.slice(); k.tieNotes = (r.tieNotes || []).slice(); }                // keys that differ only by a note the beat never plays
+            if (r.alsoFits && r.alsoFits.length) { k.alsoFits = r.alsoFits.map((f) => ({ key: f.key, scale: f.scale, rootPc: f.rootPc, relative: !!f.relative })); if (r.ambiguous) info.keyAmbiguous = true; }
             // how far the beat sits from standard pitch (A = 440). Vocals are tuned to the beat, not to the grid, so they sit in tune WITH it.
             k.refCents = (r.tuningStrength >= 0.35 && Math.abs(r.tuningRaw) >= 8) ? r.tuningRaw : 0;
         } } catch (e) { /* ignore */ } }
@@ -463,13 +465,16 @@
         let pitch = null;
         try { pitch = await Fx.runTask("analyze", { mono: U.mono(ch), sr, rootPc: B.key ? B.key.rootPc : 0, scale: B.key ? B.key.scale : "major", refCents: B.key ? (B.key.refCents || 0) : 0 }); } catch (e) { pitch = null; }
         let key = B.key || null, keyNote = "";
+        // A key the Beat Lab told us, or that YOU set in Studio, is the truth: the singing never overrules it. Only a key that was
+        // listened to can be second-guessed (v2.25.5: a corrected key used to be treated like a listened-to one here).
+        const keyIsExact = ctx.beatKeyConfidence === 1 || !!(B.source && (B.source.key === "set by you" || B.source.key === "Beat Lab"));
         if (pitch && pitch.notes && pitch.notes.length >= 3) {
             const guess = keyFromNotes(pitch.notes, pitch.hop && pitch.sr ? pitch.hop / pitch.sr : 0);
             if (!key) { key = guess; keyNote = " (key worked out from the singing)"; }
             else if (guess && !(guess.rootPc === key.rootPc && guess.scale === key.scale)) {
                 try {
                     const alt = await Fx.runTask("analyze", { mono: U.mono(ch), sr, rootPc: guess.rootPc, scale: guess.scale });
-                    if (alt.stats && pitch.stats && alt.stats.inKeyPct > pitch.stats.inKeyPct + 18 && ctx.beatKeyConfidence !== 1) { key = guess; keyNote = " (the vocal fits " + guess.label + " better than the beat's reading)"; pitch = alt; }
+                    if (alt.stats && pitch.stats && alt.stats.inKeyPct > pitch.stats.inKeyPct + 18 && !keyIsExact) { key = guess; keyNote = " (the vocal fits " + guess.label + " better than the beat's reading)"; pitch = alt; }
                 } catch (e) { /* keep beat key */ }
             }
         }
@@ -593,7 +598,7 @@
                 if (!clip.buffer) continue;
                 if (lane.mixLevel === "mute" || lane.muted) continue;
                 const chans = []; for (let c = 0; c < clip.buffer.numberOfChannels; c++) chans.push(clip.buffer.getChannelData(c));
-                const r = await analyzeClip(chans, clip.buffer.sampleRate, { type: lane.type, style: opts.style, beat, voiceOverride: opts.voiceOverride, beatKeyConfidence: beat.source && beat.source.key === "Beat Lab" ? 1 : 0 });
+                const r = await analyzeClip(chans, clip.buffer.sampleRate, { type: lane.type, style: opts.style, beat, voiceOverride: opts.voiceOverride, beatKeyConfidence: beat.source && (beat.source.key === "Beat Lab" || beat.source.key === "set by you") ? 1 : 0 });
                 // line by line (phrasebrain.js): which lines are rapped, which are sung (the extras below use it)
                 let lineInfo = null;
                 try { if (window.PhraseBrain && r.pitch && r.pitch.notes && r.key) lineInfo = window.PhraseBrain.analyze({ notes: r.pitch.notes, hopSec: r.pitch.hop / r.pitch.sr, key: { rootPc: r.key.rootPc, scale: r.key.scale }, refCents: r.key.refCents || 0, totalSec: clip.duration }); } catch (e) { lineInfo = null; }

@@ -94,20 +94,11 @@
   let AC = null;
   function ctx() { if (!AC) { const C = window.AudioContext || window.webkitAudioContext; AC = new C(); } return AC; }
   function clickAt(c, t, accent) {
-    if (S.click === "off" || S.vol <= 0) return;
-    if (S.click === "click") {
-      const o = c.createOscillator(), g = c.createGain();
-      o.frequency.value = accent ? 1600 : 1100; g.gain.setValueAtTime(S.vol * 0.6, t); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.05);
-      o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + 0.06);
-    } else {
-      const spb = 60 / S.bpm;
-      for (let h = 0; h < 2; h++) {                               // a soft shaker on the eighth notes
-        const len = Math.floor(c.sampleRate * 0.05), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
-        for (let k = 0; k < len; k++) d[k] = (Math.random() * 2 - 1) * Math.exp(-k / (len * 0.25));
-        const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
-        f.type = "highpass"; f.frequency.value = 5000; g.gain.value = S.vol * (h === 0 && accent ? 0.9 : h === 0 ? 0.55 : 0.3);
-        s.buffer = buf; s.connect(f); f.connect(g); g.connect(c.destination); s.start(t + h * spb / 2);
-      }
+    if (S.click === "off" || S.vol <= 0 || !window.VLClick) return;
+    if (S.click === "click") window.VLClick.hit(c, t, accent ? "accent" : "beat", S.vol * (accent ? 0.95 : 0.7));       // recorded rim clicks
+    else {
+      const spb = 60 / S.bpm;                                                                                          // a recorded shaker on the eighth notes
+      for (let h = 0; h < 2; h++) window.VLClick.hit(c, t + h * spb / 2, "shake", S.vol * (h === 0 && accent ? 0.9 : h === 0 ? 0.55 : 0.3));
     }
   }
   // schedules a click on every beat from t0, a little ahead of time (so tempo changes apply at once)
@@ -234,27 +225,31 @@
     const t = await addTake(x, sr, { kind: el.kind.value, mode, bpm: S.bpm, offset: 0, imported: true, name, tempoGuess: guess });
     if (t && guess && Math.abs(guess - S.bpm) > 8) say(el.status.textContent + " (Tempo is " + S.bpm + " BPM. If you sang it at a different tempo, change it above.)", el.status.classList.contains("is-bad"));
   }
-  function demoVoice(bpm) {
+  // The demo take: a short melody played by a RECORDED saxophone (from the instrument library), standing in for a voice so the timing and key
+  // tools have something to work on. Nothing is made up in code: if the recording cannot be loaded this returns null.
+  async function demoVoice(bpm) {
+    const id = "saxophone", R = window.VLMelody && window.VLMelody._internal && window.VLMelody._internal.renderRecorded;
+    if (!R || typeof instrumentInfo !== "function" || typeof loadInstrumentNote !== "function" || typeof instrumentSet !== "function") return null;
+    const info = instrumentInfo(id); if (!info) return null;
+    if (typeof INSTRUMENT_USED !== "undefined") INSTRUMENT_USED[id] = Date.now();
+    try { await Promise.all(info.notes.map((n) => loadInstrumentNote(id, n))); } catch (e) { return null; }
+    if (!instrumentSet(id)) return null;
     const sr = 16000, spb = 60 / bpm, late = 0.11, len = Math.ceil((16 * spb + 0.6) * sr), x = new Float32Array(len);
     const line = [[0, 1, 57], [1, 1, 60], [2, 1, 62], [3, 1, 64], [4, 1, 62], [5, 1, 60], [6, 2, 57], [8, 1, 60], [9, 1, 62], [10, 1, 64], [11, 1, 67], [12, 1, 64], [13, 1, 62], [14, 2, 57]];
-    line.forEach(([b, l, m]) => {
-      const f0 = 440 * Math.pow(2, (m - 69) / 12), s0 = Math.floor((late + b * spb) * sr), n = Math.floor((l * spb - 0.07) * sr); let ph = 0;
-      for (let k = 0; k < n && s0 + k < len; k++) {
-        const t = k / sr; ph += 2 * Math.PI * f0 * (1 + 0.006 * Math.sin(2 * Math.PI * 5.5 * t)) / sr;
-        let v = 0; for (let h = 1; h <= 6; h++) v += Math.sin(h * ph) / h;
-        const env = Math.min(1, t / 0.03) * Math.min(1, (n - k) / (0.08 * sr));
-        x[s0 + k] += 0.22 * v * env + (Math.random() - 0.5) * 0.004;
-      }
-    });
+    line.forEach(([b, l, m]) => R(x, sr, { t: late + b * spb, dur: l * spb - 0.07, midi: m, vel: 0.85, role: "answer" }, {}, id));
+    let pk = 0; for (let i = 0; i < x.length; i++) pk = Math.max(pk, Math.abs(x[i]));
+    if (!(pk > 0)) return null;
+    const g = 0.5 / pk; for (let i = 0; i < x.length; i++) x[i] *= g;
     return x;
   }
   el.demo.addEventListener("click", async () => {
     say("Making a demo take ...");
     try {
     stopAll();
-    const x = demoVoice(S.bpm);
+    const x = await demoVoice(S.bpm);
+    if (!x) { say("The demo take needs the saxophone recording, which could not be loaded. Check your connection and try again, or sing / import a voice note instead.", true); return; }
     const t = await addTake(x, 16000, { kind: el.kind.value, mode: "sing", bpm: S.bpm, offset: 0, imported: true, demo: true, name: "Demo" });
-    if (t) { t.autoOffset = false; t.offset = 0; t.bars = autoBars(t); regrid(t); renderTakes(); updateKey(); say("A demo melody, sung 0.11 s late on purpose. Drag it a little to the left on the timeline until its notes sit on the beat lines, then press Play."); }
+    if (t) { t.autoOffset = false; t.offset = 0; t.bars = autoBars(t); regrid(t); renderTakes(); updateKey(); say("A demo melody (a recorded saxophone standing in for a voice), played 0.11 s late on purpose. Drag it a little to the left on the timeline until its notes sit on the beat lines, then press Play."); }
     } catch (e) { console.warn(e); say("The demo take failed: " + (e && e.message ? e.message : e) + " (tell Claude this message)", true); }
   });
   // anything that goes wrong while this tab is open is shown here instead of failing silently

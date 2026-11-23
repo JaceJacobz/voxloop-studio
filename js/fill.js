@@ -82,10 +82,13 @@
             return m;
         }
 
-        function bandpass(x, lo, hi, sr) {
+        // `scratch` (optional, same length as x) is a work array the caller reuses band after band: the result is written into it
+        // instead of a new song-length array each time (v2.25.5). The numbers are the same either way.
+        function bandpass(x, lo, hi, sr, scratch) {
             hi = Math.min(hi, sr * 0.45);
-            return runCascade(runCascade(x, [design.highpass(lo, sr), design.highpass(lo, sr)]),
-                [design.lowpass(hi, sr), design.lowpass(hi, sr)]);
+            const f = [design.highpass(lo, sr), design.highpass(lo, sr), design.lowpass(hi, sr), design.lowpass(hi, sr)];
+            if (scratch && scratch.length === x.length) { scratch.set(x); for (let i = 0; i < f.length; i++) studio.runBiquad(scratch, f[i], scratch); return scratch; }
+            return runCascade(runCascade(x, f.slice(0, 2)), f.slice(2), true);
         }
 
         function frameRms(x, hop, frames) {
@@ -280,7 +283,8 @@
                 bass: [50, 250], low: [40, 160], chord: [300, 900], pad: [600, 2000], piano: [400, 2500], perc: [250, 1000]
             };
             const E = {};
-            for (const k in BANDS) E[k] = frameRms(bandpass(mono, BANDS[k][0], BANDS[k][1], sr), hop, frames);
+            const scratch = new Float32Array(n);                          // one work array for all the bands
+            for (const k in BANDS) E[k] = frameRms(bandpass(mono, BANDS[k][0], BANDS[k][1], sr, scratch), hop, frames);
             E.full = frameRms(mono, hop, frames);
             E.snareCombo = new Float32Array(frames);
             for (let f = 0; f < frames; f++) E.snareCombo[f] = Math.sqrt(E.crack[f] ** 2 + (0.35 * E.snare[f]) ** 2);

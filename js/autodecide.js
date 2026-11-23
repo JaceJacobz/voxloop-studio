@@ -178,7 +178,7 @@
         c = c || {}; const why = [];
         const genre = c.genreId || "universal", rapped = c.delivery === "rapped", sung = c.delivery === "sung";
         const out = { denoise: true, tempo: true, timing: false, why };
-        why.push("Light noise clean-up allowed: it only works if the recording is noisy, and leaves a clean room alone.");
+        why.push("Noise clean-up allowed: it only works if the recording is noisy, and leaves a clean room alone.");
         why.push("Speed match allowed: it only acts when the singer's speed is clearly different from the beat's.");
         if (rapped || (!LOOSE[genre] && !sung)) { out.timing = true; why.push("Timing tighten on: " + (rapped ? "a rap sits on the grid" : "this style is played tight") + ". Far-off syllables are left as groove."); }
         else why.push("Timing tighten off: " + (sung ? "a sung line breathes around the beat" : "this style keeps a loose feel") + ".");

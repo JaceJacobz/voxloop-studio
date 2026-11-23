@@ -96,3 +96,36 @@
 .info-tip-btn { width: 30px; height: 30px; margin: -4px 0; background: var(--accent-soft, rgba(124, 92, 252, .14)); color: var(--accent-hi, #9d86ff); }
 .info-tip-btn svg { width: 20px; height: 20px; }
 .info-tip-btn::after { inset: -7px; }
+
+/* 11 ---- (v2.25.4) Autopilot "Is the vocal lined up?" card: overview picture, play / pause, loop, jump, six live nudges */
+.apd-card { justify-content: safe center; }                                  /* a tall card scrolls from its top instead of clipping it */
+.apd-wavebox { display: flex; flex-direction: column; gap: 4px; }
+.apd-wave { display: block; width: 100%; height: 84px; border-radius: 12px; background: rgba(255, 255, 255, .05); touch-action: none; cursor: pointer; }
+.apd-time { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; opacity: .8; font-variant-numeric: tabular-nums; }
+.apd-time .apd-tag { opacity: .7; font-size: 11px; }
+.apd-transport { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 8px; }
+.apd-transport .apd-btn { min-height: 52px; }
+.apd-toggle { min-height: 52px; font-size: 14px; line-height: 1.15; padding: 6px 8px; }
+.apd-toggle[aria-pressed="true"] { background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); color: #fff; }
+.apd-nudge { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.apd-nudge button { min-height: 46px; font-size: 13px; padding: 0; }
+@media (max-width: 360px) { .apd-transport { grid-template-columns: 1fr 1fr; } .apd-transport .apd-btn { grid-column: 1 / -1; } }
+.apd-card > * { flex-shrink: 0; }                                              /* nothing in a card is squashed when the screen is short: the card scrolls instead */
+@media (max-height: 760px), (max-width: 380px) {                              /* short or narrow phones: same card, tighter, so the play button and nudges are in view */
+  .apd-card { gap: 9px; padding: 14px 16px; }
+  .apd-card .apd-title { font-size: 20px; }
+  .apd-card .apd-text { font-size: 14px; line-height: 1.4; }
+  .apd-align-offset { font-size: 22px; }
+  .apd-wave { height: 64px; }
+  .apd-transport .apd-btn, .apd-toggle { min-height: 46px; }
+  .apd-nudge button { min-height: 42px; }
+}
+
+/* v2.25.5 — "Also fits" under the beat key card (two keys that differ only by a note the beat never plays) */
+.key-fits { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.key-fits-text { flex: 1 1 100%; margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.4; }
+.key-fits-btn { min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--accent, #7c5cfc); background: transparent; color: var(--accent-hi, #a894ff); font: 600 14px/1 var(--font-body, inherit); cursor: pointer; touch-action: manipulation; }
+.key-fits-btn:hover, .key-fits-btn:focus-visible { background: var(--accent, #7c5cfc); color: #fff; }
+.key-fits-btn.is-quiet { border-color: var(--line-strong, var(--line)); color: var(--text-2); }
+.key-fits-btn.is-quiet:hover, .key-fits-btn.is-quiet:focus-visible { background: var(--surface-3, var(--surface-2)); color: var(--text, inherit); }
+.analysis-grid > .analysis-card:has(.key-fits) { grid-column: 1 / -1; }          /* room for the sentence and the button */

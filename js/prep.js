@@ -84,8 +84,25 @@ function createDenoiseEngine() {
         const sm = new Float64Array(bins);
         for (let k = 0; k < bins; k++) { let s = 0, c = 0; for (let d = -3; d <= 3; d++) { const j = k + d; if (j >= 0 && j < bins) { s += noise[j]; c++; } } sm[k] = s / c; }
 
-        // pass 2: gains, smoothed so the leftover noise does not twinkle
+        // How much of the time is the singer actually there? Frames close to the noise floor are pauses: they can be turned down a lot
+        // (o.pauseReductionDb). Frames well above it are singing or rapping: they only get the gentle cut (o.maxReductionDb), because
+        // heavy subtraction under a voice is what makes static and a "watery" sound. The switch between the two is smoothed in time:
+        // it opens at once (and a little before the voice, so a first consonant is never dulled) and closes slowly (breaths and tails).
+        const deepDb = Math.max(o.maxReductionDb, o.pauseReductionDb);
+        const pres = new Float64Array(frames);
+        for (let f = 0; f < frames; f++) {
+            const ratioDb = toDb(rms[f]) - noiseDb;                                   // how far above the noise this frame is
+            const t = Math.min(1, Math.max(0, (ratioDb - o.presLoDb) / (o.presHiDb - o.presLoDb)));   // presLoDb above the noise: a pause; presHiDb above: singing
+            pres[f] = t * t * (3 - 2 * t);
+        }
+        const look = Math.max(1, Math.round(0.04 * sr / hop)), hold = Math.max(1, Math.round(0.25 * sr / hop));
+        const presS = new Float64Array(frames);
+        for (let f = 0; f < frames; f++) { let m = 0; for (let j = f; j <= f + look && j < frames; j++) if (pres[j] > m) m = pres[j]; presS[f] = m; }   // opens a little before the voice
+        for (let f = 1; f < frames; f++) presS[f] = Math.max(presS[f], presS[f - 1] - 1 / hold);                                                      // and closes slowly
+        const calm = new Float64Array(frames), fPause = Math.pow(10, -deepDb / 20);        // the gain a pause is turned down to, the same on every frequency (so it never twinkles)
+        for (let f = 0; f < frames; f++) calm[f] = fPause + presS[f] * (1 - fPause);
         const floor = Math.pow(10, -o.maxReductionDb / 20);
+        // pass 2: gains, smoothed so the leftover noise does not twinkle
         const alpha = o.oversubtract;
         const out = new Float32Array(n), wsum = new Float32Array(n);
         const gPrev = new Float64Array(bins).fill(1), g = new Float64Array(bins), gs = new Float64Array(bins);
@@ -95,12 +112,14 @@ function createDenoiseEngine() {
             for (let i = 0; i < N; i++) { re[i] = x[f * hop + i] * win[i]; im[i] = 0; }
             fft(re, im);
 
+            const bb = calm[f];
             for (let k = 0; k < bins; k++) {
                 const p = P[f][k] + 1e-20;
                 // Light subtraction only — aggressive values create musical noise / static
                 g[k] = Math.max(floor, Math.sqrt(Math.max(0, 1 - alpha * sm[k] / p)));
                 // Never fully zero a bin (residual floor stops "underwater" static)
                 if (g[k] < 0.35) g[k] = 0.35 * 0.4 + g[k] * 0.6;
+                if (g[k] > bb) g[k] = bb;                       // a pause is turned down as a whole
             }
             for (let k = 0; k < bins; k++) {                       // across frequency
                 let s = 0, c = 0;
@@ -131,7 +150,7 @@ function createDenoiseEngine() {
 
     function process(channels, sr, options) {
 
-        const o = Object.assign({ maxReductionDb: 7, oversubtract: 1.25, cleanBelowDb: -55 }, options || {});
+        const o = Object.assign({ maxReductionDb: 7, pauseReductionDb: 12, presLoDb: 3, presHiDb: 8, oversubtract: 1.25, cleanBelowDb: -55 }, options || {});
         const outs = [], infos = [];
         for (const ch of channels) {
             const r = cleanChannel(ch, sr, o);
@@ -434,11 +453,11 @@ function createPrepEngine(tune) {
 
         if (options.denoise) {
             progress(0.1, "Measuring the background noise");
-            const d = createDenoiseEngine().process(channels, sr, { maxReductionDb: 7, oversubtract: 1.25, cleanBelowDb: -55 });
+            const d = createDenoiseEngine().process(channels, sr, { maxReductionDb: 7, pauseReductionDb: 12, oversubtract: 1.25, cleanBelowDb: -55 });
             stats.denoise = { applied: d.applied, noiseDb: d.noiseDb, reductionDb: d.reductionDb, reason: d.reason };
             if (d.applied) {
                 channels = d.channels;
-                report.push(`Light noise cleanup (~${d.reductionDb.toFixed(0)} dB). Stronger denoise is avoided on purpose — it can add static.`);
+                report.push(`Noise cleanup: the quiet parts between lines are about ${d.reductionDb.toFixed(0)} dB quieter. Under the voice it is kept gentle on purpose, because heavy denoise there adds static.`);
             } else {
                 report.push(`Left the noise alone: ${d.reason}.`);
             }
@@ -574,6 +593,14 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
     const timingNote = $("prep-timing-note"), tempoNote = $("prep-tempo-note");
 
     let running = false, after = null, nodes = [], playing = null;
+    // What the last "Apply" was run with. Ticking boxes and pressing Continue without Apply used to change nothing at all;
+    // now Continue applies the ticked boxes first if they were never applied (or were changed since, or the vocal is a new one).
+    let lastKey = "0|0|0", lastVocal = null;
+    const boxKey = () => [denoiseBox.checked, timingBox.checked, tempoBox.checked].map(v => v ? 1 : 0).join("|");
+    const needsRun = () => !!(S && S.vocalBuffer) && (boxKey() !== lastKey || S.vocalBuffer !== lastVocal) && (boxKey() !== "0|0|0" || !!S.preparedVocal);
+    [denoiseBox, timingBox, tempoBox].forEach(b => b.addEventListener("change", () => {
+        if (!running && needsRun()) status.textContent = "Settings changed. Press Apply, or just press Continue and they are applied for you.";
+    }));
 
     // Resolve the beat tempo: state getter, or the number shown on the analysis step.
     function resolveBeatBpm() {
@@ -646,13 +673,16 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
         });
     }
 
-    $("continue-from-prep-button").addEventListener("click", () => {
+    $("continue-from-prep-button").addEventListener("click", async () => {
         stopPlayback();
+        if (running) return;                                   // still working: the button does nothing until it is done
+        if (needsRun()) await runPrep();
         $("continue-tune-button").click();
     });
 
     // ---- run ----
-    runButton.addEventListener("click", async () => {
+    runButton.addEventListener("click", runPrep);
+    async function runPrep() {
 
         if (running || !S || !S.vocalBuffer) return;
 
@@ -663,6 +693,7 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
             S.preparedVocal = null; after = null;
             compare.classList.add("hidden");
             status.textContent = "Nothing ticked, so the vocal stays exactly as you recorded it.";
+            lastKey = boxKey(); lastVocal = S.vocalBuffer;
             window.dispatchEvent(new Event("vl-prep-changed"));
             return;
         }
@@ -705,8 +736,9 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
             status.textContent = "Clean-up failed. See the console for details.";
         } finally {
             running = false; runButton.disabled = false;
+            lastKey = boxKey(); lastVocal = S.vocalBuffer;
         }
-    });
+    }
 
     // ---- before / after, with the beat underneath ----
     function stopPlayback() {

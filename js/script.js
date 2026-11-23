@@ -1221,6 +1221,7 @@ async function runBeatKeyAnalysis() {
     analyzedKeyBuffer = currentBeat;
 
     window.VLState.beatKey = null;
+    if (window.VLKeyFits) window.VLKeyFits.render();
 
     beatKeyValue.textContent = "…";
 
@@ -1277,7 +1278,7 @@ async function runBeatKeyAnalysis() {
 
             // Music Brain extras: the mode when it is not plain major/minor, and the chord loop it heard.
             const extras = [];
-            if (result.mode && result.modeRoot && result.mode !== "ionian" && result.mode !== "aeolian") extras.push(`${result.modeRoot} ${result.mode} feel`);
+            if (result.mode && result.modeRoot && result.mode !== "ionian" && result.mode !== "aeolian") extras.push(`${result.modeRoot} ${result.mode} feel (same notes as ${result.key} ${result.scale})`);
             if (result.progression && result.progression.text) extras.push(`chords ${result.progression.text}`);
             if (result.tuningCents) extras.push(`recording is ${Math.abs(result.tuningCents)}¢ ${result.tuningCents > 0 ? "sharp" : "flat"}`);
             beatKeyStatus.textContent = (result.source === "set by you"
@@ -1287,6 +1288,9 @@ async function runBeatKeyAnalysis() {
                 : `Detected • ${confidencePercent}% confidence`) + (extras.length ? " • " + extras.join(" • ") : "");
 
         }
+
+        // Two keys that only differ by a note the beat never plays: say so, and offer the other one in one tap.
+        if (window.VLKeyFits) window.VLKeyFits.render();
 
     } catch (error) {
 

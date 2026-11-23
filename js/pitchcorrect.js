@@ -73,7 +73,14 @@ function createTuneEngine() {
         };
     }
 
-    function scaleMask(rootPc, scaleName) {
+    // `also` = extra pitch classes to allow on top of the scale: notes the beat never plays (B or B-flat for Am - F - C - Dm), so a wrong
+    // guess between two keys that differ only by such a note never drags a sung note onto the wrong one.
+    function scaleMask(rootPc, scaleName, also) {
+        const mask = scaleMaskBase(rootPc, scaleName);
+        if (Array.isArray(also)) for (const pc of also) if (pc >= 0 && pc < 12) mask[pc] = true;
+        return mask;
+    }
+    function scaleMaskBase(rootPc, scaleName) {
         const mask = new Array(12).fill(false);
         // "mask:101011010101" = an exact set of pitch classes (C = first digit), whatever its name
         if (typeof scaleName === "string" && scaleName.indexOf("mask:") === 0 && scaleName.length === 17) { for (let i = 0; i < 12; i++) mask[i] = scaleName[5 + i] === "1"; return mask; }
@@ -228,7 +235,7 @@ function createTuneEngine() {
         o = o || {};
 
         const fMin = o.minHz || 70;
-        const fMax = o.maxHz || 1000;
+        const fMax = o.maxHz || 1400;
         const D = Math.max(1, Math.round(sr / 11025));
         const srd = sr / D;
         const hopD = o.hopD || 64;
@@ -470,7 +477,7 @@ function createTuneEngine() {
 
     function measure(track, o) {
 
-        const mask = scaleMask(o.rootPc, o.scale);
+        const mask = scaleMask(o.rootPc, o.scale, o.alsoAllow);
         const ref = (o.refCents || 0) / 100;
         const midi = track.midi;
         const dists = [];
@@ -599,7 +606,7 @@ function createTuneEngine() {
     // its nearest scale note instead drags neighbouring notes in different directions.
     function bestTransposition(notes, o) {
 
-        const mask = scaleMask(o.rootPc, o.scale);
+        const mask = scaleMask(o.rootPc, o.scale, o.alsoAllow);
         const ref = (o.refCents || 0) / 100, manual = o.manualSemitones || 0;
         const use = notes.filter(nt => nt.end - nt.start >= 6);
         if (use.length < 6) return { s: 0, before: null, after: null };
@@ -644,7 +651,7 @@ function createTuneEngine() {
 
     function smartTargets(notes, hopSec, o) {
 
-        const mask = scaleMask(o.rootPc, o.scale);
+        const mask = scaleMask(o.rootPc, o.scale, o.alsoAllow);
         const ref = (o.refCents || 0) / 100;
         const n = notes.length;
         const out = { targets: new Array(n), biasCents: 0, ambiguous: 0 };
@@ -803,7 +810,7 @@ function createTuneEngine() {
 
     function planCorrection(track, notes, o) {
 
-        const mask = scaleMask(o.rootPc, o.scale);
+        const mask = scaleMask(o.rootPc, o.scale, o.alsoAllow);
         const ref = (o.refCents || 0) / 100;
         const hopMs = (1000 * track.hop) / track.sampleRate;
         const zoneOf = makeZoneLookup(o, hopMs / 1000);
@@ -1486,7 +1493,7 @@ function createTuneEngine() {
     function makeDetune(track, notes, o) {
 
         const rand = mulberry32(o.seed || 7);
-        const mask = scaleMask(o.rootPc, o.scale);
+        const mask = scaleMask(o.rootPc, o.scale, o.alsoAllow);
         const ref = (o.refCents || 0) / 100;
         const hopMs = (1000 * track.hop) / track.sampleRate;
         const minFrames = Math.ceil(0.12 / (track.hop / track.sampleRate));
@@ -1780,7 +1787,7 @@ function createTuneEngine() {
 
         progress = progress || function () { };
         const o = Object.assign({ rootPc: 0, scale: "major", refCents: 0, degrees: 2, retuneMs: 25 }, options || {});
-        const mask = scaleMask(o.rootPc, o.scale), ref = (o.refCents || 0) / 100;
+        const mask = scaleMask(o.rootPc, o.scale, o.alsoAllow), ref = (o.refCents || 0) / 100;
 
         const mono = mixDown(channels);
         progress(0.1, "Finding the notes to harmonise");

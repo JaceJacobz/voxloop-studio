@@ -165,7 +165,28 @@
     //   support  (optional) a soft double / harmony of long sung notes in the loudest lines
     // Who plays each job depends on the beat (S.palette): the beat's own lead, pluck, bell and keys, or the recorded trumpet.
     // opts: { amount: "subtle"|"normal"|"lots", answer: bool, support: "off"|"double"|"harmony", seed }
-    const REG = { trumpet: { off: 7, lo: 55, hi: 84 }, lead: { off: 7, lo: 58, hi: 86 }, pluck: { off: 9, lo: 60, hi: 88 }, bell: { off: 19, lo: 72, hi: 96 }, keys: { off: 2, lo: 50, hi: 79 } };
+    const REG = {
+        trumpet: { off: 7, lo: 55, hi: 84 }, lead: { off: 7, lo: 58, hi: 86 }, pluck: { off: 9, lo: 60, hi: 88 }, bell: { off: 19, lo: 72, hi: 96 }, keys: { off: 2, lo: 50, hi: 79 },
+        // "Full band": other recorded instruments (the id is the name of the folder in samples/instruments). off = semitones above the singer's middle note
+        saxophone: { off: 5, lo: 52, hi: 80 }, clarinet: { off: 7, lo: 55, hi: 84 }, flute: { off: 12, lo: 66, hi: 93 }, violin: { off: 12, lo: 60, hi: 92 },
+        vibraphone: { off: 8, lo: 53, hi: 86 }, epiano: { off: 4, lo: 48, hi: 84 }, marimba: { off: 6, lo: 48, hi: 92 }, harp: { off: 9, lo: 55, hi: 96 },
+        kalimba: { off: 10, lo: 60, hi: 88 }, mbira: { off: 10, lo: 58, hi: 82 }, "guitar-nylon": { off: 4, lo: 50, hi: 80 }, balafon: { off: 7, lo: 61, hi: 86 },
+        xylophone: { off: 19, lo: 72, hi: 100 }, glockenspiel: { off: 21, lo: 76, hi: 91 },
+        cello: { off: 0, lo: 43, hi: 72 }, "french-horn": { off: -2, lo: 45, hi: 65 }, harmonium: { off: 0, lo: 45, hi: 74 }, organ: { off: 0, lo: 48, hi: 79 }
+    };
+    // Which recorded instruments each style can bring in as guests (answer = the lines that reply to you, fill = small plucked figures,
+    // sparkle = the chime on a landing note, support = the long soft notes under yours). Only recordings; nothing is synthesized.
+    const GUESTS = {
+        afrobeats: { answer: ["saxophone", "flute", "vibraphone", "clarinet"], fill: ["kalimba", "mbira", "guitar-nylon", "balafon"], sparkle: ["glockenspiel", "vibraphone", "xylophone"], support: ["cello", "french-horn", "harmonium"] },
+        amapiano:  { answer: ["saxophone", "flute", "vibraphone", "epiano"], fill: ["marimba", "kalimba", "guitar-nylon", "mbira"], sparkle: ["vibraphone", "glockenspiel", "xylophone"], support: ["organ", "harmonium", "cello"] },
+        afrohouse: { answer: ["saxophone", "flute", "marimba", "kalimba"], fill: ["mbira", "balafon", "kalimba", "marimba"], sparkle: ["xylophone", "glockenspiel", "vibraphone"], support: ["organ", "cello", "harmonium"] },
+        rnb:       { answer: ["epiano", "saxophone", "clarinet", "violin", "flute"], fill: ["harp", "guitar-nylon", "vibraphone"], sparkle: ["glockenspiel", "harp", "vibraphone"], support: ["cello", "violin", "organ"] },
+        trap:      { answer: ["flute", "violin", "epiano", "harp"], fill: ["harp", "kalimba", "mbira", "xylophone"], sparkle: ["glockenspiel", "xylophone", "harp"], support: ["cello", "violin", "french-horn"] },
+        universal: { answer: ["saxophone", "flute", "epiano", "clarinet"], fill: ["kalimba", "guitar-nylon", "marimba", "harp"], sparkle: ["glockenspiel", "vibraphone", "xylophone"], support: ["cello", "harmonium", "organ"] }
+    };
+    // an instrument that is played from its own recording (the trumpet and the guests), as opposed to Beat Lab's lead / pluck / bell / keys
+    const isRecorded = (inst) => inst === "trumpet" || !!GUEST_IDS[inst];
+    const GUEST_IDS = {}; Object.keys(GUESTS).forEach((g) => ["answer", "fill", "sparkle", "support"].forEach((r) => GUESTS[g][r].forEach((id) => { GUEST_IDS[id] = true; })));
 
     function write(S, opts) {
         const R = rng(opts.seed || 1), beatSec = 60 / S.bpm, eighth = beatSec / 2, pcs = scalePcs(S.key), pal = S.palette || { answer: ["trumpet"], support: "trumpet" };
@@ -199,7 +220,7 @@
             const L = Math.min(maxEnd - start, (opts.amount === "lots" ? 5 : 3.5) * beatSec);
             if (L < 0.9 * beatSec) return;
             if (!needed(start, maxEnd, 4)) return;                                           // the beat is busy there: leave the gap alone
-            const inst = pal.answer[placed % pal.answer.length];
+            const inst = pal.answer[((pal.startAt || 0) + placed) % pal.answer.length];
             const [lo, hi] = regOf(inst);
 
             const last = ln.notes.slice(-4);
@@ -251,15 +272,15 @@
             placed++; answered.add(i);
             // a chime on the landing note, an octave up, only where a verse or chorus ends (or in "lots")
             if ((stanzaEnd || opts.amount === "lots") && pal.sparkle !== false && R() < (stanzaEnd ? 0.9 : 0.5) * (0.5 + amountK)) {
-                const [blo, bhi] = regOf("bell"), mb = nearestIn(seq[seq.length - 1] + 12, new Set([mod12(seq[seq.length - 1])]), blo, bhi);
-                add({ t: tEnd + 0.01, dur: Math.min(finalLen, 2 * beatSec), midi: mb, vel: 0.5, inst: "bell", role: "sparkle" }); sparkles++;
+                const sparkInst = pal.sparkleInst || "bell", [blo, bhi] = regOf(sparkInst), mb = nearestIn(seq[seq.length - 1] + 12, new Set([mod12(seq[seq.length - 1])]), blo, bhi);
+                add({ t: tEnd + 0.01, dur: Math.min(finalLen, 2 * beatSec), midi: mb, vel: 0.5, inst: sparkInst, role: "sparkle" }); sparkles++;
             }
         });
 
         // ---- Fill: a small figure in any gap the answer did not take (a short gap, or a longer one where an answer would be too much),
         //      as a pickup into the next line or a small echo after the last one: only where the beat is quiet in the mids
         if (opts.answer !== false && pal.fill !== false) {
-            const [lo, hi] = regOf("pluck");
+            const fillInst = pal.fillInst || "pluck", [lo, hi] = regOf(fillInst);
             lines.forEach((ln, i) => {
                 const next = lines[i + 1]; if (!next || answered.has(i)) return;
                 const gapStart = ln.t1, gapEnd = next.t0, room = gapEnd - gapStart;
@@ -275,7 +296,7 @@
                 let m = nearestIn(Math.round((lo + hi) / 2) + (pickup ? -2 : 0), new Set(tones), lo, hi);
                 for (let k = 0; k < n; k++) {
                     const tt = start + k * eighth + (k % 2 ? swing * 0.2 * eighth : 0);
-                    add({ t: tt, dur: eighth * 0.9, midi: m, vel: 0.42 + 0.06 * k, inst: "pluck", role: "fill" });
+                    add({ t: tt, dur: eighth * 0.9, midi: m, vel: 0.42 + 0.06 * k, inst: fillInst, role: "fill" });
                     const dir = pickup ? 1 : -1; m = nearestIn(m + dir * 3, new Set(tones.concat([(tones[0] + 7) % 12])), lo, hi);
                 }
                 fills++;
@@ -317,9 +338,26 @@
     // ---------------------------------------------------------------- 3. PLAY: the trumpet
     // A real recorded trumpet (samples/instruments/trumpet), a note every few semitones, re-pitched to the written note.
     // Nothing is synthesized: if the recordings could not be loaded, the trumpet notes are simply not played.
-    function renderTrumpet(out, sr, nt, opts) {
-        const set = typeof instrumentSet === "function" ? instrumentSet("trumpet") : null;
+    function renderTrumpet(out, sr, nt, opts) { renderRecorded(out, sr, nt, opts, "trumpet"); }
+
+    // Any recorded instrument of the pack library (the guests of "Full band"), played the same way: the nearest recording, re-pitched to the
+    // written note. Held instruments (brass, winds, strings, organ) loop their steady middle if a note is longer than the recording;
+    // struck or plucked ones (kalimba, vibraphone, harp, guitar...) ring out as they were recorded and are damped after the note.
+    // Each recording is levelled to the same loudness first (they were recorded at very different levels). Plays nothing if not loaded.
+    // (The six instruments whose recordings sound an octave above their labels are handled where the recordings are offered, in
+    // instrumentSet() of instrumentbank.js, so a written note sounds as written here too, in the Beat Lab and in fills.)
+    const NORM = new WeakMap();
+    function recordingGain(buf, held) {
+        if (NORM.has(buf)) return NORM.get(buf);
+        const d = buf.getChannelData(0), n = d.length, a = held ? Math.floor(n * 0.2) : 0, b = held ? Math.floor(n * 0.8) : Math.min(n, Math.floor(0.6 * buf.sampleRate));
+        let e = 0, c = 0; for (let i = a; i < b; i += 3) { e += d[i] * d[i]; c++; }
+        const rms = c ? Math.sqrt(e / c) : 0, g = rms > 1e-5 ? clamp(0.1 / rms, 0.5, 40) : 1;
+        NORM.set(buf, g); return g;
+    }
+    function renderRecorded(out, sr, nt, opts, id) {
+        const set = typeof instrumentSet === "function" ? instrumentSet(id) : null;
         if (!set) return;
+        const held = !(set.info && set.info.kind === "decay");
         const lo = set.notes[0], hi = set.notes[set.notes.length - 1];
         let midi = nt.midi;
         while (midi < lo - 4) midi += 12;
@@ -328,17 +366,19 @@
         set.notes.forEach((n) => { if (Math.abs(n - midi) < Math.abs(root - midi)) root = n; });
         const buf = set.buffers[root], data = buf.getChannelData(0);
         const step = Math.pow(2, (midi - root) / 12) * buf.sampleRate / sr;                 // source samples per output sample
-        const total = Math.ceil((nt.dur + 0.12) * sr), start = Math.floor(nt.t * sr);
-        const muted = !!opts.muted, vel = nt.vel, att = muted ? 0.05 : 0.03 + (1 - vel) * 0.03;
-        const gain = (0.35 + 0.65 * vel) * 4 * (muted ? 0.8 : 1);                           // the recordings are quiet: lifted to the old level
+        const rel = held ? 0.1 : 0.3;                                                       // how long it takes to stop after the note ends
+        const total = Math.ceil((nt.dur + rel + 0.02) * sr), start = Math.floor(nt.t * sr);
+        const muted = !!opts.muted, vel = nt.vel, att = held ? (muted ? 0.05 : 0.03 + (1 - vel) * 0.03) : 0.004;
+        // the trumpet keeps its original level ("the recordings are quiet: lifted to the old level"); the other recordings are levelled
+        const gain = id === "trumpet" ? (0.35 + 0.65 * vel) * 4 * (muted ? 0.8 : 1) : (0.35 + 0.65 * vel) * recordingGain(buf, held) * lin(ROLE_DB[nt.role] || 0) * (muted ? 0.8 : 1);
         const loopA = data.length * 0.4, loopB = data.length * 0.92;
         let pos = 0;
         for (let i = 0; i < total; i++) {
             const idx = start + i; if (idx >= out.length) break;
             const t = i / sr;
             let a = t < att ? t / att : 1;
-            if (t > nt.dur) { a *= Math.max(0, 1 - (t - nt.dur) / 0.1); if (a <= 0) break; }      // stop when the note has faded out (not at the first sample, where the attack starts at 0)
-            if (pos >= loopB) pos = loopA + (pos - loopB);                                    // hold a long note on the steady middle
+            if (t > nt.dur) { a *= Math.max(0, 1 - (t - nt.dur) / rel); if (a <= 0) break; }      // stop when the note has faded out (not at the first sample, where the attack starts at 0)
+            if (held && pos >= loopB) pos = loopA + (pos - loopB);                            // hold a long note on the steady middle
             const k = Math.floor(pos), fr = pos - k;
             if (k + 1 >= data.length) break;
             out[idx] += (data[k] + (data[k + 1] - data[k]) * fr) * a * gain;
@@ -431,9 +471,9 @@
 
     async function renderAndMix(S, written, opts, report) {
         const sr = S.sr, N = Math.ceil(S.duration * sr), lead = new Float32Array(N), sup = new Float32Array(N);
-        const trumpetNotes = written.notes.filter((n) => n.inst === "trumpet"), engineNotes = written.notes.filter((n) => n.inst !== "trumpet");
-        if (trumpetNotes.length) await ensureTrumpet();
-        for (const n of trumpetNotes) { renderTrumpet(n.role === "support" ? sup : lead, sr, n, { muted: n.role === "support", voices: n.role === "support" ? 2 : 3 }); await Y(); }
+        const trumpetNotes = written.notes.filter((n) => isRecorded(n.inst)), engineNotes = written.notes.filter((n) => !isRecorded(n.inst));
+        if (trumpetNotes.some((n) => n.inst === "trumpet")) await ensureTrumpet();
+        for (const n of trumpetNotes) { renderRecorded(n.role === "support" ? sup : lead, sr, n, { muted: n.role === "support", voices: n.role === "support" ? 2 : 3 }, n.inst); await Y(); }
         if (report.stage) report.stage(0.6, engineNotes.length ? "Playing the beat's instruments…" : "Mixing the melody under your voice…");
         // the beat's own instruments (if the engine is not there, the same notes are played by the recorded trumpet, muted)
         let eng = null;
@@ -452,7 +492,7 @@
         // tone: no low end (the bass and kick own it), a pocket at 2.5 kHz for the voice, no fizz
         [lead, sup, engL, engR].forEach((b) => { biquad(b, sr, "hp", 170, 0.7); biquad(b, sr, "peak", 2600, 0.9, -3.5); biquad(b, sr, "lp", 9000, 0.7); });
         // duck under the singer: -5 dB while there is singing (fast in, slow out), the support line a little more
-        const duck = new Float32Array(N); let cur = 1;
+        let duck = new Float32Array(N); let cur = 1;
         const a = Math.exp(-1 / (0.015 * sr)), r = Math.exp(-1 / (0.22 * sr));
         for (let i = 0; i < N; i++) {
             if ((i & 131071) === 0) await Y();
@@ -460,13 +500,15 @@
             cur = want < cur ? a * cur + (1 - a) * want : r * cur + (1 - r) * want; duck[i] = cur;
         }
         for (let i = 0; i < N; i++) { lead[i] *= duck[i]; sup[i] *= duck[i] * duck[i] * 0.8; engL[i] *= duck[i]; engR[i] *= duck[i]; }
+        duck = null;
 
         // level: against the beat (about 8 dB under its body) and against the vocal (11 dB under it), for all lines together
         const bm = S.beatMono, bdb = frameDb(bm, sr, 0, Math.min(bm.length, N), Math.round(0.1 * sr)), beatRms = pct(Array.from(bdb), 0.6);
-        const mel = new Float32Array(N); for (let i = 0; i < N; i++) mel[i] = lead[i] + sup[i] + (engL[i] + engR[i]) * 0.5;
         // loudness of the melody while it plays: the same measure used for the final report (mean power of the sounding samples), so
         // sustained notes (trumpet) and sharp ones (plucks, chimes) are levelled the same way
-        let mp = 0, mc = 0; for (let i = 0; i < N; i += 5) { if (Math.abs(mel[i]) > 1e-4) { mp += mel[i] * mel[i]; mc++; } }
+        // (v2.25.5: the sum of the lines is measured as it goes instead of being stored in a song-length array of its own; Math.fround
+        // keeps the numbers exactly what the stored array gave)
+        let mp = 0, mc = 0; for (let i = 0; i < N; i += 5) { const m = Math.fround(lead[i] + sup[i] + (engL[i] + engR[i]) * 0.5); if (Math.abs(m) > 1e-4) { mp += m * m; mc++; } }
         const melRms = mc ? 10 * Math.log10(mp / mc) : -60;
         const wantDb = Math.min(beatRms - 8, vdb.length ? vtop - 12 : 0);
         const amountTrim = opts.amount === "lots" ? 1.5 : opts.amount === "normal" ? 0 : -1.5;
@@ -475,9 +517,11 @@
         const g = lin(clamp(gDb, -40, 18));
 
         // reverb: a short plate on the trumpet only (the beat's instruments already carry the beat's own space)
-        const tr = new Float32Array(N); for (let i = 0; i < N; i++) tr[i] = lead[i] + sup[i];
+        let tr = new Float32Array(N); for (let i = 0; i < N; i++) tr[i] = lead[i] + sup[i];
         const wet = await reverbWet(tr, sr, 1.1);
-        const L = new Float32Array(N), Rr = new Float32Array(N), widen = Math.round(0.011 * sr);
+        tr = null;
+        // the left and right results are written over the beat-instrument arrays (each sample is read before it is written)
+        const L = engL, Rr = engR, widen = Math.round(0.011 * sr);
         for (let i = 0; i < N; i++) {
             const c = lead[i], s = sup[i];
             L[i] = (c * 0.95 + s * 0.8 + engL[i]) * g + wet[0][i] * g * 0.22;
@@ -523,7 +567,8 @@
     };
     function buildPlan(beat, info, bpm, seed, mode) {
         const trumpetOnly = { genre: "afrobeats", styleId: null, sound: null, engine: false, source: "the recorded trumpet", palette: { answer: ["trumpet"], support: "trumpet", fill: false, sparkle: false } };
-        if (mode === "trumpet" || typeof createEngine !== "function" || typeof Tone === "undefined" || typeof resolveTemplate !== "function") return trumpetOnly;
+        if (mode === "trumpet") return trumpetOnly;
+        if (typeof createEngine !== "function" || typeof Tone === "undefined" || typeof resolveTemplate !== "function") return mode === "full" ? Object.assign(trumpetOnly, { rolesKey: "universal", guests: chooseGuests("universal", null, seed) }) : trumpetOnly;
         let genre, styleId = null, sound, source, rolesKey;
         if (beat.engine && beat.engine.sound && beat.engine.genre) {
             genre = beat.engine.genre; styleId = beat.engine.styleId || null; sound = Object.assign({}, beat.engine.sound);
@@ -540,11 +585,54 @@
                 source = made ? "chosen by the producer for this beat: " + made.note : "";
             } catch (e) { sound = null; }
         }
-        if (!sound) return trumpetOnly;
+        if (!sound) return mode === "full" ? Object.assign(trumpetOnly, { rolesKey: rolesKey || "universal", guests: chooseGuests(rolesKey || "universal", null, seed) }) : trumpetOnly;
         const roles = ROLES[rolesKey] || ROLES.universal;
         const answer = roles.answer.slice();
         if (mode === "lots-brass" && answer.indexOf("trumpet") < 0) answer.push("trumpet");
-        return { genre, styleId, sound, engine: true, source, rolesKey, palette: { answer, support: roles.support, fill: true, sparkle: true, why: roles.why } };
+        return { genre, styleId, sound, engine: true, source, rolesKey, palette: { answer, support: roles.support, fill: true, sparkle: true, why: roles.why }, guests: mode === "full" ? chooseGuests(rolesKey, sound, seed) : null };
+    }
+
+    // "Full band": instruments the beat does not use, taken from the recorded library for this style. Which ones is decided by the seed, so
+    // "Another take" brings other instruments. Never an instrument the beat already plays; never anything that is not a recording.
+    function chooseGuests(rolesKey, sound, seed) {
+        const pool = GUESTS[rolesKey] || GUESTS.universal, R = rng((seed || 1) * 7919 + 13);
+        let used = []; try { used = typeof soundInstrumentIds === "function" && sound ? soundInstrumentIds(sound) : []; } catch (e) { used = []; }
+        const have = (id) => id !== "trumpet" && used.indexOf(id) < 0 && (typeof instrumentInfo !== "function" || !!instrumentInfo(id));
+        const shuffled = (a) => { const b = a.filter(have); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); const t = b[i]; b[i] = b[j]; b[j] = t; } return b; };
+        const answer = shuffled(pool.answer).slice(0, 2), taken = new Set(answer);
+        const one = (list) => { const c = shuffled(list).filter((id) => !taken.has(id) || list.length < 3)[0] || null; if (c) taken.add(c); return c; };
+        const g = { answer, fill: one(pool.fill), sparkle: one(pool.sparkle), support: one(pool.support) };
+        g.all = [...new Set([...g.answer, g.fill, g.sparkle, g.support].filter(Boolean))];
+        g.start = Math.floor(R() * 1000);                                             // which voice answers first (so it is not always the same one)
+        return g;
+    }
+    // Put the guests that really loaded into the palette: they join the lines that answer you (in turn with the beat's own and the trumpet),
+    // and take the small fills, the chime and the long soft notes. A guest that could not be loaded is simply left out.
+    function seatGuests(plan, loaded) {
+        const g = plan.guests; if (!g) return [];
+        const ok = (id) => id && loaded.indexOf(id) >= 0;
+        const ans = g.answer.filter(ok), mine = plan.palette.answer.slice(), mixed = [];
+        for (let i = 0; i < Math.max(mine.length, ans.length); i++) { if (mine[i]) mixed.push(mine[i]); if (ans[i]) mixed.push(ans[i]); }
+        plan.palette.answer = mixed.length ? mixed : mine;
+        plan.palette.startAt = plan.palette.answer.length ? g.start % plan.palette.answer.length : 0;
+        if (ok(g.fill)) { plan.palette.fillInst = g.fill; plan.palette.fill = true; }
+        if (ok(g.sparkle)) { plan.palette.sparkleInst = g.sparkle; plan.palette.sparkle = true; }
+        if (ok(g.support)) plan.palette.support = g.support;
+        return g.all.filter(ok);
+    }
+    // Load every recording of the given instruments. Resolves with the ids that have something to play.
+    async function ensureRecorded(ids) {
+        const good = [];
+        for (const id of ids) {
+            try {
+                if (typeof instrumentInfo !== "function" || typeof loadInstrumentNote !== "function") break;
+                const info = instrumentInfo(id); if (!info) continue;
+                if (typeof INSTRUMENT_USED !== "undefined") INSTRUMENT_USED[id] = Date.now();
+                await Promise.all(info.notes.map((n) => loadInstrumentNote(id, n)));
+            } catch (err) { /* this one is left out */ }
+            if (typeof instrumentSet === "function" && instrumentSet(id)) good.push(id);
+        }
+        return good;
     }
     const GROOVE_SWING = { rnb: 0.3, trap: 0.05, afrobeats: 0.12, amapiano: 0.1, afrohouse: 0.05, universal: 0.1 };
 
@@ -596,8 +684,13 @@
 
         stage(0.45, "Choosing the sounds and writing the lines…");
         const seed = options && options.seed != null ? options.seed : 1;
-        const opts = { amount: (options && options.amount) || "subtle", answer: !(options && options.answer === false), support: (options && options.support) || "off", seed, instruments: (options && options.instruments) || "auto" };
+        const opts = { amount: (options && options.amount) || "subtle", answer: !(options && options.answer === false), support: (options && options.support) || "off", seed, instruments: (options && options.instruments) || "full" };
         const plan = buildPlan(beat, info, bpm, seed, opts.instruments);
+        let guestNames = [];
+        if (plan.guests && plan.guests.all.length) {
+            stage(0.5, "Loading the guest instruments…");
+            guestNames = seatGuests(plan, await ensureRecorded(plan.guests.all));
+        }
         const activity = beatActivity(beatMono, sr);
         // how loud each sung line is (the loud ones are the big moments)
         lines.forEach((l) => { const a = Math.floor(l.t0 * sr), b = Math.min(N, Math.floor(l.t1 * sr)); let e = 0, c = 0; for (let i = a; i < b; i += 3) { e += vocalMono[i] * vocalMono[i]; c++; } l.db = c ? db(Math.sqrt(e / c)) : -90; });
@@ -619,7 +712,7 @@
             notes: written.notes, chordsUsed: chords,
             report: {
                 key: keyText, tempo: Math.round(bpm) + " BPM",
-                answers: written.answers, fills: written.fills, sparkles: written.sparkles, support: written.supported, dropped: written.dropped, instruments: written.instruments, sounds: plan.source, why: plan.palette.why || "", fallback: !!mixRep.fallback, register: NOTE[mod12(written.register[0])] + " to " + NOTE[mod12(written.register[1])] + ", above your " + NOTE[mod12(written.vocalRange[0])] + "-" + NOTE[mod12(written.vocalRange[1])],
+                answers: written.answers, fills: written.fills, sparkles: written.sparkles, support: written.supported, dropped: written.dropped, instruments: written.instruments, guests: guestNames.filter((id) => written.instruments.indexOf(id) >= 0).map((id) => (typeof instrumentName === "function" ? instrumentName(id) : id)), sounds: plan.source, why: guestNames.length ? "" : (plan.palette.why || ""), fallback: !!mixRep.fallback, register: NOTE[mod12(written.register[0])] + " to " + NOTE[mod12(written.register[1])] + ", above your " + NOTE[mod12(written.vocalRange[0])] + "-" + NOTE[mod12(written.vocalRange[1])],
                 mix: mixRep.gainSteps, melodyDb: mixRep.melodyDb, voiceDb: mixRep.voiceDb, melOverVoice: mixRep.melOverVoice,
                 vocalVersion: heard.clips.map((c) => c.id + ":" + c.start.toFixed(2) + ":" + c.duration.toFixed(2)).join("|")
             }
@@ -650,7 +743,7 @@
     const status = (m) => { if (api().status) api().status(m); };
     const current = () => (api().getMelody ? api().getMelody() : null);
     const optsFromUi = () => ({ amount: ui.amount, answer: ui.answer, support: ui.support, seed: ui.seed, instruments: ui.instruments });
-    const ui = { amount: "subtle", answer: true, support: "off", seed: 1, instruments: "auto", open: false };
+    const ui = { amount: "subtle", answer: true, support: "off", seed: 1, instruments: "full", open: false };
 
     function add() { ui.seed = 1; return apply(optsFromUi()); }
     function regenerate() { ui.seed = (current() ? current().seed : ui.seed) + 1; return apply(optsFromUi()); }
@@ -694,6 +787,7 @@
         if (busy || suppressed || !settings() || !settings().get("autoMelody")) return;
         const Dd = D(); if (!Dd || !Dd.beat.buffer) return;
         const ap = root.VLStudioAutopilot;
+        if (ap && ap.busy) return;                                 // Autopilot is still working on the vocal: writing a melody now would be thrown away (the vocal changes) and costs a lot of memory (v2.25.5)
         const fresh = Dd.lanes.some((l) => l.type === "main" && l.clips.some((c) => c.buffer && ap && ap.isDone && !ap.isDone(c)));
         if (fresh) return;                                         // wait until Autopilot has produced the vocal
         const sig = vocalSignature(); if (!sig || sig === lastAuto) return;
@@ -713,8 +807,8 @@
         const w = { why: (D() && D().beat && D().beat.melodyCheck && D().beat.melodyCheck.why) || "" };
         if (D() && D().beat && D().beat.buffer && !D().beat.melodyCheck) beatHasMelody(D().beat).then(() => { if (ui.open) paint(); });
         sheet.innerHTML =
-            '<p class="ml-lead"><b>Melody that fits your vocal.</b> Short lines written around what you sang, played by the beat\'s own instruments or a trumpet. They answer you in the gaps and never play over the singing.' + (current() ? "" : " Autopilot adds this by itself when the beat has no melody.") + "</p>" +
-            '<div class="ml-row"><span>Sounds</span>' + seg("instruments", ui.instruments, [["auto", "Match the beat"], ["trumpet", "Trumpet only"]]) + "</div>" +
+            '<p class="ml-lead"><b>Melody that fits your vocal.</b> Short lines written around what you sang, played by recorded instruments: the beat\'s own, a trumpet and, in Full band, guests the beat does not use (sax, flute, kalimba, vibraphone, cello and more). They answer you in the gaps and never play over the singing.' + (current() ? "" : " Autopilot adds this by itself when the beat has no melody.") + "</p>" +
+            '<div class="ml-row"><span>Sounds</span>' + seg("instruments", ui.instruments, [["full", "Full band"], ["auto", "Match the beat"], ["trumpet", "Trumpet only"]]) + "</div>" +
             '<div class="ml-row"><span>Answer the voice</span>' + seg("answer", ui.answer, [[true, "On"], [false, "Off"]]) + "</div>" +
             '<div class="ml-row"><span>Support long notes</span>' + seg("support", ui.support, [["off", "Off"], ["double", "Double"], ["harmony", "Harmonise"]]) + "</div>" +
             '<div class="ml-row"><span>How much</span>' + seg("amount", ui.amount, [["subtle", "Subtle"], ["normal", "Normal"], ["lots", "Lots"]]) + "</div>" +
@@ -723,7 +817,7 @@
             (m ? '<button type="button" class="bp-mini" data-ml-act="regen">Regenerate</button><button type="button" class="bp-mini" data-ml-act="toggle">' + (m.on ? "Hide" : "Show") + '</button><button type="button" class="bp-mini" data-ml-act="remove">Remove</button>' : "") +
             (previous !== null && (previous || m) ? '<button type="button" class="bp-mini" data-ml-act="undo">Undo</button>' : "") + "</div>" +
             (note ? '<p class="ml-note">' + note + "</p>" : "") +
-            (rp ? '<ul class="ml-report"><li>' + rp.key + "</li><li>" + describe(rp) + "</li><li>" + (rp.sounds ? "Sounds: " + rp.sounds + (rp.why ? ": " + rp.why + "." : ".") : "Sounds: the recorded trumpet.") + (rp.fallback ? " (The beat's instruments were not available here, so a muted trumpet played those lines.)" : "") + "</li><li>Mix: about " + Math.round(rp.voiceDb - rp.melodyDb) + " dB under your voice, in a pocket at 2.5 kHz, lowered while you sing" + (rp.mix && rp.mix.length > 1 ? "; " + rp.mix.slice(1).join("; ") : "") + ".</li></ul>" : (w.why ? '<p class="ml-note">' + w.why + "</p>" : ""));
+            (rp ? '<ul class="ml-report"><li>' + rp.key + "</li><li>" + describe(rp) + "</li><li>" + (rp.sounds ? "Sounds: " + rp.sounds + (rp.why ? ": " + rp.why + "." : ".") : "Sounds: the recorded trumpet.") + (rp.guests && rp.guests.length ? " Guest instruments the beat does not use: " + rp.guests.join(", ") + " (Regenerate brings others)." : "") + (rp.fallback ? " (The beat's instruments were not available here, so a muted trumpet played those lines.)" : "") + "</li><li>Mix: about " + Math.round(rp.voiceDb - rp.melodyDb) + " dB under your voice, in a pocket at 2.5 kHz, lowered while you sing" + (rp.mix && rp.mix.length > 1 ? "; " + rp.mix.slice(1).join("; ") : "") + ".</li></ul>" : (w.why ? '<p class="ml-note">' + w.why + "</p>" : ""));
         sheet.querySelectorAll("[data-ml]").forEach((b) => b.addEventListener("click", () => { const k = b.dataset.ml; ui[k] = k === "answer" ? b.dataset.v === "true" : b.dataset.v; paint(); }));
         sheet.querySelectorAll("[data-ml-act]").forEach((b) => b.addEventListener("click", () => ({ add, regen: regenerate, toggle, remove, undo }[b.dataset.mlAct]())));
         const au = sheet.querySelector("#ml-auto"); if (au) au.addEventListener("change", () => { settings().set("autoMelody", au.checked); suppressed = false; });
@@ -735,7 +829,7 @@
         if (rp.fills) parts.push(rp.fills + (rp.fills === 1 ? " small fill" : " small fills") + " in short gaps");
         if (rp.sparkles) parts.push(rp.sparkles + (rp.sparkles === 1 ? " chime" : " chimes") + " on phrase ends");
         if (rp.support) parts.push(rp.support + " supported note" + (rp.support === 1 ? "" : "s"));
-        const who = (rp.instruments || ["trumpet"]).map((i) => INST_NAME[i] || i).join(", ");
+        const who = (rp.instruments || ["trumpet"]).map((i) => INST_NAME[i] || (typeof instrumentName === "function" && GUEST_IDS[i] ? instrumentName(i) : i)).join(", ");
         return parts.join(", ") + ". Played by: " + who + ". Each is only added where the beat has room, and never over your singing" + (rp.dropped ? " (" + rp.dropped + " extra notes were left out to keep it light)" : "") + ".";
     }
     function build() {
@@ -756,5 +850,5 @@
     function init() { build(); setInterval(autoTick, 2500); window.addEventListener("vl-set-beat-studio", () => { suppressed = false; lastAuto = ""; previous = null; }); }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 
-    root.VLMelody = { beatHasMelody, generate, apply, add, regenerate, remove, undo, toggle, wantsMelody, chordsOf, write, listenToVocal, linesOf, singerKey, fitOf, _internal: { biquad, renderTrumpet, snapToScale, scalePcs, rng } };
+    root.VLMelody = { beatHasMelody, generate, apply, add, regenerate, remove, undo, toggle, wantsMelody, chordsOf, write, listenToVocal, linesOf, singerKey, fitOf, _internal: { biquad, renderTrumpet, renderRecorded, GUESTS, REG, chooseGuests, snapToScale, scalePcs, rng } };
 })(typeof window !== "undefined" ? window : this);

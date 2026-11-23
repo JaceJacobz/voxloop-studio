@@ -184,6 +184,43 @@
             d.score = sc / wt;
             d.label = d.score >= 0.68 ? "sung" : d.score <= 0.36 ? "rapped" : "mixed";
         }
+        // (d) a take that is rapped in one place and sung in another averages out to "sung" or "rapped" when it is judged as a whole
+        // (a rap verse with a sung hook scored 0.70 and was called plain singing). So judge it in 4-second windows as well: when a real
+        // share of the voiced time is clearly sung-like AND a real share is clearly rap-like, it is mixed.
+        if (wt > 0 && o.notes && o.notes.length && out.voicedSec >= 8) {
+            const winSec = 4, hopW = 2, total = midi.length * hopSec, res = [];
+            for (let t0 = 0; t0 + winSec <= total + 1e-6; t0 += hopW) {
+                const k0 = Math.floor(t0 / hopSec), k1 = Math.min(midi.length, Math.floor((t0 + winSec) / hopSec));
+                let vv = 0; for (let k = k0; k < k1; k++) if (!isNaN(midi[k])) vv++;
+                const voicedW = vv * hopSec; if (voicedW < 1.5) continue;                      // too little singing in this window to judge
+                let sv = 0, ss = 0; o.notes.forEach((n) => { const a = Math.max(n.start, k0), b = Math.min(n.end, k1); if (b > a) { const sec = (b - a) * hopSec; sv += sec; if ((n.end - n.start) * hopSec >= 0.22) ss += sec; } });
+                const sus = sv > 0 ? ss / sv : 0;
+                let plt = 0, pt = 0; for (let k = k0; k + wLen < k1; k += 2) {
+                    let lo = Infinity, hi = -Infinity, ok = true, any = false;
+                    for (let i = k; i < k + wLen; i++) { const m = midi[i]; if (isNaN(m)) { ok = false; continue; } any = true; if (m < lo) lo = m; if (m > hi) hi = m; }
+                    if (!any) continue; pt++; if (ok && hi - lo <= 1.2) plt++;
+                }
+                const pla = pt ? plt / pt : 0;
+                const b0 = Math.floor(t0 / 0.01), b1 = Math.min(ne, Math.floor((t0 + winSec) / 0.01)); let act = 0, pk = 0, last = -99;
+                for (let b = b0; b < b1; b++) if (sm[b] >= gate) act++;
+                for (let b = Math.max(5, b0); b < Math.min(ne - 5, b1); b++) {
+                    if (sm[b] < gate + 4) continue;
+                    let isMax = true; for (let j = -5; j <= 5; j++) if (sm[b + j] > sm[b]) { isMax = false; break; }
+                    if (!isMax || b - last < 8) continue;
+                    let lv = sm[b], rv = sm[b]; for (let j = 1; j <= 15 && b - j >= 0; j++) lv = Math.min(lv, sm[b - j]); for (let j = 1; j <= 15 && b + j < ne; j++) rv = Math.min(rv, sm[b + j]);
+                    if (sm[b] - Math.max(lv, rv) >= 2.5) { pk++; last = b; }
+                }
+                const syl = act > 60 ? pk / (act * 0.01) : null;
+                let ws = 0, ww = 0.42 + 0.28; ws += 0.42 * smooth01(sus, 0.22, 0.7) + 0.28 * smooth01(pla, 0.12, 0.6);
+                if (syl != null) { ws += 0.30 * (1 - smooth01(syl, 3.2, 6.2)); ww += 0.30; }
+                res.push({ score: ws / ww, sec: voicedW });
+            }
+            let tv = 0, sungSec = 0, rapSec = 0; res.forEach((w) => { tv += w.sec; if (w.score >= 0.62) sungSec += w.sec; else if (w.score <= 0.42) rapSec += w.sec; });
+            if (res.length >= 3 && tv > 0) {
+                d.windows = { n: res.length, sung: sungSec / tv, rapped: rapSec / tv };
+                if (d.windows.sung >= 0.25 && d.windows.rapped >= 0.25 && d.label !== "mixed") { d.label = "mixed"; d.mixedFrom = "windows"; }
+            }
+        }
 
         // ---- 5. register. Pitch alone cannot tell a high male voice from a low female one, so the bands in the middle say so
         // instead of guessing. (A formant-based "voice size" was tried and removed: on test voices the same vocal tract

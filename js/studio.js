@@ -117,8 +117,10 @@ function createStudioEngine() {
         return 10 * Math.log10((nr * nr + ni * ni) / (dr * dr + di * di));
     }
 
-    function runBiquad(x, k) {
-        const out = new Float32Array(x.length);
+    // `into` (optional) is where the result is written. It may be `x` itself: each sample is read before it is written, so
+    // filtering in place gives exactly the same numbers. (v2.25.5: a cascade used to make a new song-length array per filter.)
+    function runBiquad(x, k, into) {
+        const out = into || new Float32Array(x.length);
         let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
         for (let i = 0; i < x.length; i++) {
             const v = x[i];
@@ -129,7 +131,14 @@ function createStudioEngine() {
         return out;
     }
 
-    const runCascade = (x, filters) => filters.reduce((sig, k) => runBiquad(sig, k), x);
+    // The first filter writes a new array (the caller's input is never changed); every further filter works inside that array.
+    // `inPlace` is for an outer call whose input is a temporary the caller no longer needs (the second half of a band-pass):
+    // then even the first filter works inside it.
+    const runCascade = (x, filters, inPlace) => {
+        let sig = x;
+        for (let i = 0; i < filters.length; i++) sig = runBiquad(sig, filters[i], i === 0 && !inPlace ? null : sig);
+        return sig;
+    };
 
     // ---------------------------------------------------------
     // 1. High-pass
@@ -165,7 +174,7 @@ function createStudioEngine() {
         // Presence band detector (~2–4 kHz) so we know "s" vs bright singing
         const presHp = [design.highpass(2000, sr), design.highpass(2000, sr)];
         const presLp = [design.lowpass(4000, sr), design.lowpass(4000, sr)];
-        const presence = channels.map((x) => runCascade(runCascade(x, presHp), presLp));
+        const presence = channels.map((x) => runCascade(runCascade(x, presHp), presLp, true));
 
         // Fast attack / slower release on the sibilance envelope
         const att = Math.exp(-1 / (0.0004 * sr));
@@ -312,7 +321,7 @@ function createStudioEngine() {
 
         function bandpass(x, lo, hi) {
             return runCascade(runCascade(x, [design.highpass(lo, sr), design.highpass(lo, sr)]),
-                [design.lowpass(hi, sr), design.lowpass(hi, sr)]);
+                [design.lowpass(hi, sr), design.lowpass(hi, sr)], true);
         }
 
         const mono = new Float32Array(n);
@@ -468,7 +477,7 @@ function createStudioEngine() {
 
         const hop = Math.max(1, Math.round(0.01 * sr)), frames = Math.ceil(n / hop);
         const bp = (x, lo, hi) => runCascade(runCascade(x, [design.highpass(lo, sr), design.highpass(lo, sr)]),
-            [design.lowpass(hi, sr), design.lowpass(hi, sr)]);
+            [design.lowpass(hi, sr), design.lowpass(hi, sr)], true);
 
         const strainCh = channels.map((x) => bp(x, o.lowHz, o.highHz));
         const bodyCh = channels.map((x) => bp(x, 250, 1200));
@@ -578,11 +587,34 @@ function createStudioEngine() {
 
         const hann = new Float64Array(N); for (let i = 0; i < N; i++) hann[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
         const re = new Float64Array(N), im = new Float64Array(N), K = N / 2, avg = new Float64Array(K);
+        // Each frame is also filed under the note being sung (the semitone of its pitch). A room ring sits at the same frequency whatever
+        // note is sung; a partial of a sung note only shows up while that note is sung. Telling them apart needs the notes kept apart.
+        const pr = new Float64Array(N), pim = new Float64Array(N), lagMin = Math.max(8, Math.floor(sr / 1100)), lagMax = Math.min(N / 2 - 2, Math.floor(sr / 80));
+        const groups = new Map();
+        const pitchLag = () => {                                    // autocorrelation of the frame from its power spectrum (Wiener-Khinchin)
+            const r0 = pr[0]; if (!(r0 > 0)) return 0;
+            let L = 0, bv = 0;
+            for (let l = lagMin; l <= lagMax; l++) if (pr[l] > pr[l - 1] && pr[l] >= pr[l + 1] && pr[l] > bv) { bv = pr[l]; L = l; }
+            if (!L || bv / r0 < 0.45) return 0;
+            for (let d = 4; d >= 2; d--) { const Ld = Math.round(L / d); if (Ld < lagMin) continue; let m = 0, ml = 0; for (let l = Ld - 2; l <= Ld + 2; l++) if (pr[l] > m) { m = pr[l]; ml = l; } if (m >= 0.9 * bv) return ml; }
+            return L;
+        };
         for (const f of voiced) {
             for (let i = 0; i < N; i++) { re[i] = mono[f * hop + i] * hann[i]; im[i] = 0; }
             fft(re, im);
-            for (let k = 0; k < K; k++) avg[k] += re[k] * re[k] + im[k] * im[k];
+            for (let k = 0; k < K; k++) { const pw = re[k] * re[k] + im[k] * im[k]; avg[k] += pw; pr[k] = pw; if (k > 0) pr[N - k] = pw; }
+            pr[K] = 0; for (let i = 0; i < N; i++) pim[i] = 0;
+            fft(pr, pim);                                            // (pr now holds the autocorrelation)
+            const lag = pitchLag();
+            if (lag) {
+                const g = Math.round(12 * Math.log2((sr / lag) / 55));
+                let G = groups.get(g); if (!G) { G = { n: 0, p: new Float64Array(K) }; groups.set(g, G); }
+                G.n++; for (let k = 0; k < K; k++) G.p[k] += re[k] * re[k] + im[k] * im[k];
+            }
         }
+        const noteGroups = Array.from(groups.values()).filter((G) => G.n >= 4);
+        // Fewer than four different notes: a ring cannot be told from a sung partial, so nothing is dipped.
+        if (o.requirePersistence !== false && noteGroups.length < 4) return Object.assign({ channels, applied: false, bands: [], reason: "too few different notes to tell a ring from the singing" });
         // blend over +-1/40 octave in the power domain, just enough to settle bin-to-bin jitter
         const Ldb = new Float64Array(K);
         {
@@ -603,6 +635,26 @@ function createStudioEngine() {
             const a = Math.max(1, Math.floor(k / q)), b = Math.min(K - 1, Math.ceil(k * q));
             const w = Array.from(Ldb.subarray(a, b + 1)).sort((x, y) => x - y);
             excess[k] = Ldb[k] - w[w.length >> 1];
+        }
+        // Only what sticks out in (nearly) every note counts: the 30th percentile, across note groups, of each group's own excess over the
+        // take's usual level. A sung partial sticks out only in the notes whose harmonic lands there, so it drops out; a ring stays.
+        if (o.requirePersistence !== false) {
+            const r40 = Math.pow(2, 1 / 40), per = [];
+            for (const G of noteGroups) {
+                const pre = new Float64Array(K + 1); for (let k = 0; k < K; k++) pre[k + 1] = pre[k] + G.p[k];
+                const L = new Float64Array(K), off = [];
+                for (let k = Math.max(1, kLo - 4); k <= Math.min(K - 2, kHi + 4); k++) {
+                    const a = Math.max(0, Math.min(k - 1, Math.floor(k / r40))), b = Math.min(K, Math.max(k + 2, Math.ceil(k * r40) + 1));
+                    L[k] = 10 * Math.log10((pre[b] - pre[a]) / (b - a) / G.n + 1e-20);
+                    if (k >= kLo && k <= kHi) off.push(L[k] - (Ldb[k] - excess[k]));          // this note's level against the take's usual level
+                }
+                off.sort((x, y) => x - y); per.push({ L, o: off[off.length >> 1] });
+            }
+            const col = new Float64Array(per.length), qi = Math.floor((o.persistQ != null ? o.persistQ : 0.3) * (per.length - 1));
+            for (let k = kLo; k <= kHi; k++) {
+                for (let g = 0; g < per.length; g++) col[g] = per[g].L[k] - (Ldb[k] - excess[k]) - per[g].o;
+                excess[k] = Float64Array.from(col).sort()[qi];
+            }
         }
         // light smoothing across 3 bins
         const ex = new Float64Array(K);
@@ -640,7 +692,7 @@ function createStudioEngine() {
 
         let out = channels;
         for (const c of chosen) {
-            const bp = runCascade(runCascade(mono, [design.highpass(c.fc / 1.12, sr), design.highpass(c.fc / 1.12, sr)]), [design.lowpass(c.fc * 1.12, sr), design.lowpass(c.fc * 1.12, sr)]);
+            const bp = runCascade(runCascade(mono, [design.highpass(c.fc / 1.12, sr), design.highpass(c.fc / 1.12, sr)]), [design.lowpass(c.fc * 1.12, sr), design.lowpass(c.fc * 1.12, sr)], true);
             const bDb = new Float32Array(nf), ref = [];
             for (let f = 0; f < nf; f++) {
                 let e = 0; const a = f * h, b = Math.min(n, a + h); for (let i = a; i < b; i++) e += bp[i] * bp[i];
@@ -1484,7 +1536,7 @@ function createStudioEngine() {
         const n = channels[0].length;
         const mono = new Float32Array(n);
         for (const ch of channels) for (let i = 0; i < n; i++) mono[i] += ch[i] / channels.length;
-        const band = (hp, lp) => runCascade(runCascade(mono, [design.highpass(hp, sr), design.highpass(hp, sr)]), [design.lowpass(lp, sr), design.lowpass(lp, sr)]);
+        const band = (hp, lp) => runCascade(runCascade(mono, [design.highpass(hp, sr), design.highpass(hp, sr)]), [design.lowpass(lp, sr), design.lowpass(lp, sr)], true);
         const hi = band(4000, 9000), mid = band(300, 3000);
         const win = Math.round(0.05 * sr), frames = Math.floor(n / win);
         const ratios = [];

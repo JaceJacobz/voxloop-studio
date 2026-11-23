@@ -445,7 +445,7 @@
         if (bpm > 30 && bpm < 300) { info.bpm = bpm; beat.bpm = bpm; info.source = Object.assign({}, info.source, { bpm: "set by you" }); delete info.tempoNote; }
         if (keyLabel && window.VLBrain && window.VLBrain.parseKey) {
             const k = window.VLBrain.parseKey(keyLabel);
-            if (k) { k.refCents = (info.key && info.key.refCents) || 0; info.key = k; beat.key = k; info.source = Object.assign({}, info.source, { key: "set by you" }); }
+            if (k) { k.refCents = (info.key && info.key.refCents) || 0; info.key = k; beat.key = k; delete info.keyAmbiguous; info.source = Object.assign({}, info.source, { key: "set by you" }); }
         }
         drawRuler(); updatePlayheadUi();
         window.dispatchEvent(new CustomEvent("vl-beat-info", { detail: { state: "ready", info } }));
@@ -1255,7 +1255,10 @@
         const beatSec = 60 / bpm;
         const clicks = S.get("countIn") ? 4 * S.get("countInBars") : 0;
         const lead = 0.12;
-        if (clicks) S.clicks(ctx, ctx.currentTime + lead, beatSec, clicks);
+        if (clicks) {
+            const loaded = window.VLClick ? await window.VLClick.ready() : false;
+            if (!loaded || !S.clicks(ctx, ctx.currentTime + lead, beatSec, clicks)) status("The count-in click recordings could not be loaded, so there is no count-in");
+        }
 
         stopSources();
         isPlaying = false;

@@ -512,9 +512,11 @@ function syncStructureControls() {
 // ---------- Mute, solo and the mixer ----------
 const strips = {};   // the mixer controls of each track (plus "master")
 
-// The melody toggle ("Melody" in the toolbar, on by default). Off removes the melody line: the lead and the pluck.
-// The chords, pad, bass and all drums and percussion stay. Downloads, stems and the Mix Doctor all follow it,
-// because they use isAudible too.
+// The melody toggle ("Melody" in the toolbar, on by default). Off removes everything that plays a TUNE a singer would
+// feel pushed to follow: the lead and the pluck are silenced, and the bass and the log drum stop playing riffs and play
+// the root note of the chord only (their rhythm stays, so the beat still grooves). The chords, pad and all drums and
+// percussion stay, so the key and the chord changes are all still there for the vocal and for the Studio melody
+// writer. Downloads, stems and the Mix Doctor all follow it (isAudible and flatMelody travel with the render settings).
 let melodyOn = true;
 function isMelodyTrack(name) {
   if (name === "lead" || name === "pluck") return true;
@@ -544,9 +546,10 @@ function refreshStates() {
 const melodyEl = $("bl-melody");
 melodyEl?.addEventListener("change", () => {
   melodyOn = melodyEl.checked;
+  playCtx.flatMelody = !melodyOn;
   ensureEngine();
   refreshStates();
-  statusEl.textContent = melodyOn ? "Melody on." : "Melody off: no lead or pluck. Chords, pad, bass and drums keep playing.";
+  statusEl.textContent = melodyOn ? "Melody on." : "Melody off: no lead, no pluck, and the bass and log drum play only the root note. Chords, pad and drums keep playing, so the key stays and you are free to sing any tune.";
 });
 
 function toggleMute(name) {
@@ -1113,7 +1116,7 @@ renderMixReport();
 // ---------- Sequencer ----------
 const playCtx = {
   template: null, beat: null, view: null, stepSec: 0.2, swing: 0, humanize: true,
-  sidechainOn: true, isAudible, floorTime: 0, lastWhen: {}
+  sidechainOn: true, isAudible, flatMelody: false, floorTime: 0, lastWhen: {}
 };
 
 let sequence = null;
@@ -1206,6 +1209,7 @@ function sequenceTick(time, step) {
   playCtx.swing = swing;
   playCtx.humanize = humanize;
   playCtx.sidechainOn = sidechainOn;
+  playCtx.flatMelody = !melodyOn;
   playCtx.floorTime = Tone.immediate();
   TRACK_ORDER.forEach(trackName => playTrackStep(engine, playCtx, trackName, step, time));
 
@@ -1864,7 +1868,7 @@ function currentRenderSettings() {
     autos: { ...autoMix.autos },
     masterDb: autoMix.master,
     masterStripDb: Tone.getDestination().volume.value,
-    masteringOn, vocalSpaceOn, sidechainOn, humanize, swing, isAudible
+    masteringOn, vocalSpaceOn, sidechainOn, humanize, swing, isAudible, flatMelody: !melodyOn
   };
 }
 
@@ -2177,7 +2181,7 @@ try {
       muted.clear(); (s.muted || []).forEach(n => muted.add(n));
       soloed.clear(); (s.soloed || []).forEach(n => soloed.add(n));
       locked.clear(); (s.locked || []).forEach(n => locked.add(n));
-      melodyOn = s.melodyOn !== false; if (melodyEl) melodyEl.checked = melodyOn;
+      melodyOn = s.melodyOn !== false; if (melodyEl) melodyEl.checked = melodyOn; playCtx.flatMelody = !melodyOn;
       genreEl.value = s.beat.genre; fillStyleOptions();
       switchTo(s.beat);
       if (s.swing != null) { swing = s.swing; swingEl.value = Math.round(swing * 100); swingValEl.textContent = swingEl.value; }

@@ -92,13 +92,19 @@ function loadInstrumentNote(id, note) {
   return INSTRUMENT_LOADING[key];
 }
 
-// Every recording of one instrument: { notes: [midi...], buffers: {midi: AudioBuffer} } (what is loaded so far)
+// MEASURED (the pitch of every recording of these, v2.25.4 and again in v2.25.5): six instruments sound one octave ABOVE the note they are
+// filed under in instrumentmap.js (a marimba filed as C4 really sounds C5). Everything that plays a recording asks instrumentSet() for its
+// notes, so the sounding pitch is applied here, once: a note asked for sounds as asked, in the Beat Lab, in fills and in Studio's guests.
+// (The files and the labels in instrumentmap.js are untouched, only the label each recording is offered under.)
+const INSTRUMENT_SOUNDS_ABOVE_LABEL = { marimba: 12, vibraphone: 12, kalimba: 12, mbira: 12, balafon: 12, glockenspiel: 12 };
+
+// Every recording of one instrument: { notes: [midi...], buffers: {midi: AudioBuffer} } (what is loaded so far), under the pitch it really sounds
 function instrumentSet(id) {
   const info = instrumentInfo(id);
   if (!info) return null;
-  const buffers = {}, notes = [];
-  info.notes.forEach(n => { const b = INSTRUMENT_BANK[id + "/" + n]; if (b) { buffers[n] = b; notes.push(n); } });
-  return notes.length ? { info, notes, buffers } : null;
+  const up = INSTRUMENT_SOUNDS_ABOVE_LABEL[id] || 0, buffers = {}, notes = [];
+  info.notes.forEach(n => { const b = INSTRUMENT_BANK[id + "/" + n]; if (b) { buffers[n + up] = b; notes.push(n + up); } });
+  return notes.length ? { info, notes, buffers, shift: up } : null;
 }
 
 const instrumentReady = id => {

@@ -338,8 +338,12 @@
                 if (env && env.key) { rootPc = env.key.rootPc; scale = env.key.scale || scale; beatRef = env.key.refCents || 0; }
                 else chromatic = true;
             } else rootPc = Math.max(0, NOTE_NAMES.indexOf(p.key));
+            // Two keys that differ only by a note the beat never plays (B or B-flat in Am - F - C - Dm): both notes are left alone,
+            // as long as the key used here is still the one the beat was read as.
+            let alsoAllow;
+            if (env && env.key && Array.isArray(env.key.alsoAllow) && env.key.alsoAllow.length && rootPc === env.key.rootPc && String(scale).toLowerCase() === String(env.key.scale).toLowerCase()) alsoAllow = env.key.alsoAllow.slice();
             const options = {
-                rootPc, scale, chromatic, refCents: 1200 * Math.log2((p.detune || 440) / 440) + beatRef,
+                rootPc, scale, alsoAllow, chromatic, refCents: 1200 * Math.log2((p.detune || 440) / 440) + beatRef,
                 strength: 1, retuneMs: p.speed, selective: p.flex > 0, selectiveCents: Math.max(4, p.flex * 0.6), selectiveSoftCents: Math.max(10, p.flex * 1.2),
                 flatten: 0.6 * (1 - p.humanize / 100), vibratoAmount: p.vibrato, manualSemitones: Math.round(p.transpose),
                 cleanDb: 5 * (p.clean == null ? 60 : p.clean) / 100, cleanComb: 16.7 * (p.clean == null ? 60 : p.clean) / 100,
@@ -351,7 +355,7 @@
             if (p.lines !== "off" && !chromatic && (scale === "major" || scale === "minor") && root.PhraseBrain) {
                 try {
                     const a = await runTask("analyze", { mono: mono(ch), sr, rootPc, scale, refCents: options.refCents });
-                    const res = root.PhraseBrain.analyze({ notes: a.notes, hopSec: a.hop / sr, key: { rootPc, scale }, refCents: options.refCents, totalSec: ch[0].length / sr });
+                    const res = root.PhraseBrain.analyze({ notes: a.notes, hopSec: a.hop / sr, key: { rootPc, scale, alsoAllow }, refCents: options.refCents, totalSec: ch[0].length / sr });
                     if (res.zones.length && !res.globalMismatch && res.keyCoverage >= 0.55) { options.zones = res.zones; lineInfo = res; }
                 } catch (e) { lineInfo = null; }
             }

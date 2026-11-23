@@ -44,19 +44,16 @@
     onChange: fn => { listeners.push(fn); },
     report: text => { const e = document.getElementById("st-last"); if (e) e.textContent = text; },
 
-    // Count-in: short clicks on the audio clock (the first one higher), n clicks starting at `when`
+    // Count-in: short recorded clicks on the audio clock (the first one brighter), n clicks starting at `when`. Returns false if the
+    // recordings are not loaded (nothing is made up in code).
     clicks(ctx, when, beatSec, n) {
+      if (!window.VLClick) return false;
+      let ok = true;
       for (let i = 0; i < n; i++) {
-        const t = when + i * beatSec;
         const accent = i % 4 === 0;
-        const osc = ctx.createOscillator(), gain = ctx.createGain();
-        osc.type = "sine"; osc.frequency.value = accent ? 1568 : 1175;
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(0.7, t + 0.002);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.start(t); osc.stop(t + 0.08);
+        ok = window.VLClick.hit(ctx, when + i * beatSec, accent ? "accent" : "beat", accent ? 0.95 : 0.7) && ok;
       }
+      return ok;
     }
   };
 
