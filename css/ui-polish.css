@@ -262,6 +262,9 @@ button.fx-zone:hover { border-color: var(--vocal); }
 .eb-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text, #fff); font: 550 12px/1 Inter, system-ui, sans-serif; cursor: pointer; }
 .eb-btn:hover:not(:disabled) { background: var(--surface-2, rgba(255,255,255,.08)); }
 .eb-btn:disabled { opacity: .32; cursor: default; }
+.eb-btn.is-on { background: var(--accent-soft, rgba(124,92,252,.18)); color: var(--accent-hi, #b6a4ff); }
+.eb-btn[data-act="step"] { min-width: 52px; justify-content: center; font-variant-numeric: tabular-nums; }
+.eb-btn[data-act="step"] span { display: inline !important; }
 .eb-sep { flex: none; width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
 @media (max-width: 720px) { .eb-btn { padding: 0 8px; } .eb-btn span { display: none; } }
 .beat-chip { display: inline-flex; align-items: center; max-width: 100%; margin-left: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-strong, rgba(255,255,255,.2)); background: var(--accent-soft, rgba(124,92,255,.12)); color: var(--text, #fff); font: 600 12px/1.2 Inter, system-ui, sans-serif; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

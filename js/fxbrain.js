@@ -609,6 +609,7 @@
                     if (lineInfo.summary.changedKey) { const ix = r.findings.findIndex((f) => f && /drifts more than a quarter-tone/.test(f.text || "")); if (ix >= 0) r.findings.splice(ix, 1); }
                     r.findings.push({ ok: true, text: "Listened line by line: " + lineInfo.summary.lines + " lines" + (lineInfo.summary.rapped ? ", " + lineInfo.summary.rapped + " rapped (left as performed)" : "") + (lineInfo.summary.changedKey ? ", " + lineInfo.summary.changedKey + " use notes outside the plain key on purpose, which are kept" : ", all inside the key") + "." });
                 }
+                if (root.VLAutoPolicy) root.VLAutoPolicy.respectHandWork(r.chain, r.findings, clip);     // hand tools stay yours; hand-fixed notes are not tuned again
                 const extra = r.meas ? flavourZones(r.meas, flv, beat, clip.start, clip.duration, lane.type, opts.intensity, { prof: r.prof, key: r.key, lines: lineInfo ? lineInfo.phrases : null }) : [];
                 out.lanes.push({ laneId: lane.id, clipId: clip.id, laneName: lane.name, laneType: lane.type, clipName: clip.name, findings: r.findings, chain: r.chain, extra, meas: r.meas, vocal: r.prof ? r.prof.label : "", skippedCrowd: !!extra.skippedCrowd, skippedHarmony: !!extra.skippedHarmony, skippedResonance: extra.skippedResonance || "" });
                 if (opts.onProgress) opts.onProgress(lane.name);

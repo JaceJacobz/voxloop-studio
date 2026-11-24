@@ -1,7 +1,7 @@
 /**
  * Voxloop Studio — FX Rack (Studio mode)
  *
- *  1. Drag across part of a vocal clip to SELECT it (tap a clip = the whole clip)
+ *  1. Tap a vocal clip to pick it, then drag the two grips to pick just a part (a mouse can also drag across it). Tap it again for the plug-in icon
  *  2. Pick plugins (or a one-tap "recipe"), tweak, and hear a looping LIVE PREVIEW over the beat
  *  3. Apply → the effect is baked into just that part of the clip (undo any time)
  *  4. Auto: Voxloop listens to the vocal + beat and only adds what is actually needed
@@ -149,42 +149,18 @@
     }
 
     // ------------------------------------------------------------------ selecting part of a clip
-    let drag = null;
-    function bindSelection() {
-        const host = $("#studio-lanes");
-        if (!host || host.dataset.fxBound) return;
-        host.dataset.fxBound = "1";
-        host.addEventListener("pointerdown", (e) => {
-            const el = e.target.closest && e.target.closest(".studio-clip[data-clip-id]");
-            if (!el || e.button > 0) return;
-            const found = findClip({ laneId: el.dataset.laneId, clipId: el.dataset.clipId });
-            if (!found) return;
-            const r = el.getBoundingClientRect();
-            drag = { el, laneId: el.dataset.laneId, clipId: el.dataset.clipId, x0: e.clientX, rect: r, dur: found.clip.duration, moved: false, id: e.pointerId };
-            try { el.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
-        });
-        host.addEventListener("pointermove", (e) => {
-            if (!drag || e.pointerId !== drag.id) return;
-            if (Math.abs(e.clientX - drag.x0) > 5) drag.moved = true;
-            if (!drag.moved) return;
-            const t0 = clamp((drag.x0 - drag.rect.left) / drag.rect.width * drag.dur, 0, drag.dur);
-            const t1 = clamp((e.clientX - drag.rect.left) / drag.rect.width * drag.dur, 0, drag.dur);
-            drag.a = Math.min(t0, t1); drag.b = Math.max(t0, t1);
-            paintSel(drag.el, drag.a, drag.b, drag.dur);
-        });
-        const end = (e) => {
-            if (!drag || e.pointerId !== drag.id) return;
-            const d = drag; drag = null;
-            if (d.moved && d.b - d.a >= 0.12) select({ laneId: d.laneId, clipId: d.clipId, start: d.a, end: d.b });
-            else if (!d.moved) select({ laneId: d.laneId, clipId: d.clipId, start: 0, end: d.dur });
-            else afterRender();
-        };
-        host.addEventListener("pointerup", end);
-        host.addEventListener("pointercancel", end);
-    }
+    // The finger and mouse gestures on a clip (tap, tap again, press and hold to move, the two edge handles) live in
+    // clipgesture.js. This file only keeps what is picked (st.sel) and paints it.
+    function bindSelection() { /* gestures: js/clipgesture.js */ }
+    // The highlighted part of a clip, with a grip at each end so the part can be changed with a finger (the grips are
+    // handled by clipgesture.js; their touch area is 44 px wide, or less when the part is narrow).
     function paintSel(el, a, b, dur) {
         let o = $(".fx-sel-box", el);
-        if (!o) { o = document.createElement("div"); o.className = "fx-sel-box"; el.appendChild(o); }
+        if (!o) {
+            o = document.createElement("div"); o.className = "fx-sel-box";
+            o.innerHTML = '<i class="fx-handle" data-edge="a" aria-hidden="true"></i><i class="fx-handle" data-edge="b" aria-hidden="true"></i>';
+            el.appendChild(o);
+        }
         o.style.left = (a / dur * 100) + "%"; o.style.width = ((b - a) / dur * 100) + "%";
     }
     function select(sel) {
@@ -202,6 +178,7 @@
     function afterRender() {
         $$(".studio-clip .fx-sel-box").forEach((n) => n.remove());
         $$(".studio-clip .fx-badge").forEach((n) => n.remove());
+        $$(".fx-plug").forEach((n) => n.remove());           // the plug-in icon belongs to the pick that was just changed
         lanes().forEach((l) => l.clips.forEach((c) => {
             const el = $('.studio-clip[data-clip-id="' + c.id + '"]');
             if (!el) return;
@@ -231,7 +208,7 @@
         if (st.beatInfo) beatTxt = '<span class="fx-chip">' + (st.beatInfo.bpm ? Math.round(st.beatInfo.bpm) + " BPM" : "BPM ?") + (st.beatInfo.key ? " · " + esc(st.beatInfo.key.label) : "") + "</span>";
         el.innerHTML = f && st.sel
             ? '<strong>' + esc(f.lane.name) + '</strong> · ' + esc(f.clip.name) + ' <span class="fx-range">' + fmtT(f.clip.start + st.sel.start) + ' → ' + fmtT(f.clip.start + st.sel.end) + ' (' + (st.sel.end - st.sel.start).toFixed(1) + ' s)</span> ' + beatTxt
-            : '<span class="fx-hint">Drag across part of a vocal clip to select it — or tap a clip to pick all of it.</span> ' + beatTxt;
+            : '<span class="fx-hint">Tap a vocal clip to pick it, then drag its two grips to pick just a part.</span> ' + beatTxt;
     }
 
     function fmtVal(q, v) {
@@ -436,7 +413,7 @@
         const budget = historyBudgetBytes();
         while (h.length > 1 && total > budget) total -= bytes(h.shift());
     }
-    function bake(clip, s0, segLen, out, sr, text) {
+    function bake(clip, s0, segLen, out, sr, text, meta) {
         const ctx = api().ensureCtx(), buf = clip.buffer;
         const n0 = buf.length, nch = Math.max(buf.numberOfChannels, out.length), outLen = out[0].length, newLen = Math.max(n0, s0 + outLen);
         // v2.25.5: write straight into the new buffer (this used to build a second full copy first and then copy it over).
@@ -461,7 +438,7 @@
         if (clip.fxHistory.length > 10) clip.fxHistory.shift();
         trimHistory(clip);
         clip.buffer = nb; clip.duration = newLen / sr;
-        clip.fxLog = (clip.fxLog || []).concat([{ text }]);
+        clip.fxLog = (clip.fxLog || []).concat([Object.assign({ text }, meta || {})]);
         st.rev++; st.cache = [];
     }
     function refreshDaw() { const a = api(); if (a.renderLanes) a.renderLanes(); if (a.updateTotals) a.updateTotals(); if (a.refreshRoles) a.refreshRoles(); }
@@ -478,7 +455,9 @@
             while (st.running) await new Promise((r) => setTimeout(r, 30));
             const seg = segAudio(f.clip, st.sel.start, st.sel.end);
             const r = await Fx.runChain(seg.channels, seg.sr, st.chain, env());
-            bake(f.clip, seg.s0, seg.s1 - seg.s0, r.channels, seg.sr, chainText(st.chain, f.clip.start + st.sel.start, f.clip.start + st.sel.end));
+            // a chain that carries the Pitch editor is the person's own note work: mark it, so Autopilot does not tune over it later
+            const hand = st.chain.filter((p) => !p.bypass && window.VLAutoPolicy && window.VLAutoPolicy.isHand(p.type)).map((p) => p.type);
+            bake(f.clip, seg.s0, seg.s1 - seg.s0, r.channels, seg.sr, chainText(st.chain, f.clip.start + st.sel.start, f.clip.start + st.sel.end), hand.length ? { hand } : null);
             st.chain = []; st.out = null; st.pitch = null; st.heard = null;
             refreshDaw(); afterRender(); renderAll();
             status("Applied. Press Undo last if you don't like it.");
@@ -511,7 +490,9 @@
             const bi = await ensureBeatInfo();
             const seg = segAudio(f.clip, st.sel.start, st.sel.end);
             const r = await window.VLBrain.analyzeClip(seg.channels, seg.sr, { type: f.lane.type, style: st.planStyle, beat: bi || {}, voiceOverride: st.voice, beatKeyConfidence: bi && bi.source && (bi.source.key === "Beat Lab" || bi.source.key === "set by you") ? 1 : 0 });
-            st.heard = r.findings; st.chain = r.chain; st.cache = [];
+            const POL = window.VLAutoPolicy;
+            if (POL) POL.respectHandWork(r.chain, r.findings, f.clip);            // never a hand tool; no tuning over notes fixed by hand
+            st.heard = r.findings; st.chain = POL ? POL.keepHand(st.chain, r.chain) : r.chain; st.cache = [];     // a hand tool already on the chain stays as it is
             st.tab = "chain"; renderAll(); schedule();
             status(r.chain.length ? "Here's what this part needs. Press Preview to hear it." : "This part already sounds good. Nothing needed.");
         } catch (e) { console.warn(e); status("Could not analyse: " + (e.message || e)); }
@@ -523,6 +504,15 @@
     async function autoPlugin(i) {
         const pl = st.chain[i], f = findClip();
         if (!pl) return;
+        // Autopilot only decides the plugins its policy says it decides (autopolicy.js). A hand tool (the Pitch editor) or an extra that is
+        // placed on part of a clip (doubler, delay, crowd...) is left exactly as it is, instead of being switched off with "not needed".
+        const POL = window.VLAutoPolicy, pm = POL ? POL.modeOf(pl.type) : "chain", pname = Fx.P[pl.type].name;
+        if (pm !== "chain") {
+            const e = POL && POL.entry(pl.type);
+            status(pm === "extra" ? pname + " is an extra. Auto-produce places it " + (e ? e.where : "where it suits the song") + ". Here you set it by hand."
+                                  : pname + " is a hand tool. Autopilot leaves it exactly as you set it.");
+            return;
+        }
         if (!f || !st.sel) { status("Select part of a vocal clip first, then press Auto on a plugin"); return; }
         if (!window.VLBrain) { status("fxbrain.js is not loaded"); return; }
         setBusy(true, "listening…");
@@ -706,6 +696,17 @@
     }
 
     // ------------------------------------------------------------------ Auto-produce (whole project)
+    // What Autopilot does with each plugin, in words (from autopolicy.js). A plugin with no line there shows as "not known yet".
+    function policyHtml() {
+        const POL = window.VLAutoPolicy;
+        if (!POL) return "";
+        const label = { chain: "decided for the whole clip", extra: "placed on part of a clip", hand: "your hand tool", unknown: "hand tool (Autopilot does not know it yet)" };
+        const rows = POL.describe(Fx.ORDER, (id) => Fx.P[id].name).map((r) =>
+            "<li><b>" + esc(r.name) + "</b> <small>" + esc(label[r.mode] || label.unknown) + (r.byDefault ? "; chosen by itself: " + esc(r.byDefault) : "") + "</small><br>" +
+            (r.where ? "<span>Where: " + esc(r.where) + ".</span> " : "") + (r.use ? "<span>Used when: " + esc(r.use) + ".</span> " : "") + (r.never ? "<span>Left alone when: " + esc(r.never) + ".</span>" : "") + "</li>").join("");
+        return '<details class="fx-flav fx-policy"><summary>What Autopilot does with each plugin</summary><ul class="fx-policy-list">' + rows + "</ul></details>";
+    }
+
     function renderAuto() {
         const body = $("#fx-body");
         const styles = [["natural", "Natural", "Keeps it sounding like you. Gentle tuning, light space."], ["polished", "Polished", "Radio-ready balance. Tight tuning, clean tone."], ["big", "Big", "Thicker, wider, more reverb. Strong tuning."]];
@@ -719,6 +720,7 @@
             '<div class="fx-intens"><span>How much:</span><div class="fx-seg" id="fx-intens" role="group" aria-label="How much">' + [["subtle", "Subtle"], ["normal", "Normal"], ["lots", "Lots"]].map((i) => '<button type="button" data-int="' + i[0] + '" class="' + (st.intensity === i[0] ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div></details>" +
             '<label class="fx-ap-row"><input type="checkbox" id="fx-ap"' + (apOn() ? " checked" : "") + '> <span><b>Autopilot</b>: produce my vocals automatically when I send the mix to Pipeline</span></label>' +
                         '<div class="fx-intens"><span>Voice:</span><div class="fx-seg" id="fx-voice" role="group" aria-label="Voice type (Auto detects it; tap to correct it)">' + [["auto", "Auto"], ["sung", "Sung"], ["rapped", "Rapped"], ["low", "Low"], ["mid", "Mid"], ["high", "High"]].map((i) => '<button type="button" data-vc="' + i[0] + '" class="' + ((i[0] === "auto" && !st.voice) || (st.voice && (st.voice.delivery === i[0] || st.voice.range === i[0])) ? "is-on" : "") + '">' + i[1] + "</button>").join("") + "</div></div>" +
+            policyHtml() +
             '<button type="button" class="fx-btn fx-auto" id="fx-listen">' + VLI("sparkle", 15) + ' Listen & make a plan</button> <span class="fx-busy" id="fx-plan-busy" hidden></span>' +
             '<div id="fx-plan"></div></div>';
         body.innerHTML = html;
@@ -852,7 +854,7 @@
         apBusy = false;
         return ran;
     }
-    window.VLFxRack = { st, select, openEffects: () => { if (st.sel) select(Object.assign({}, st.sel, { openPanel: true })); }, autoPlugin, autoThis, addPlugin };      // also lets tests drive the rack without pointer gestures
+    window.VLFxRack = { st, select, paint: paintSel, realign: () => { if (st.pv) schedule(); }, openEffects: () => { if (st.sel) select(Object.assign({}, st.sel, { openPanel: true })); }, autoPlugin, autoThis, addPlugin };      // also lets tests drive the rack without pointer gestures
     window.VLStudioAutopilot = { markDone: (c) => apDone.add(c), isDone: (c) => apDone.has(c), runNow: apRunNow, get on() { return apOn(); }, get busy() { return apBusy; }, set: apSet };
 
     // ------------------------------------------------------------------ boot

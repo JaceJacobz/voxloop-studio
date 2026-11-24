@@ -8,10 +8,14 @@
  *                 an empty spot of it; it follows the armed lane and the selected clip). Nothing is replaced: if the lane already has
  *                 a vocal there, the pasted one is layered with it and both play (they show in two rows).
  *               - Everything can be undone (a recorded take too).
+ *  Moving       press and hold a clip, slide it, let go (js/clipgesture.js does the touching; moveClip() here does the move).
+ *               Everything is relative to the beat, so a moved vocal is mixed, heard, exported and sent to the Pipeline from its new
+ *               spot. Snap (edit bar, on by default) clicks a clip onto the beat, the playhead or another clip's edge. The Earlier /
+ *               Later buttons nudge the picked clip by 10 ms or 100 ms (the step button switches). Undo puts the clip back exactly.
  *  Zoom         pinch with two fingers, Ctrl + mouse wheel, or the buttons.
  *  Beat chip    the beat's tempo, key and style, worked out when it is loaded; tap it to correct it. Autopilot decides from the same
  *               numbers.
- *  Keys         Ctrl/Cmd + Z, Shift+Z, C, X, V, Delete, S (split)
+ *  Keys         Ctrl/Cmd + Z, Shift+Z, C, X, V, Delete, S (split); Shift + Left / Right nudges the picked clip 100 ms (Alt too: 10 ms)
  * Needs: daw.js (VLDAW), fxrack.js (selection), fxbrain.js (beat analysis).
  */
 (function () {
@@ -97,7 +101,7 @@
 
     function removeSelected() {
         const s = selected();
-        if (!s) { status("Tap a clip, or drag across part of it, then Delete"); return false; }
+        if (!s) { status("Tap a clip first, then Delete"); return false; }
         const { lane, clip } = s, a = s.sel.start, b = s.sel.end, d = clip.duration, i = lane.clips.indexOf(clip);
         const pieces = [];
         if (a > 0.02) pieces.push(makeClip(slice(clip.buffer, 0, a), clip.name, clip.start, clip));
@@ -111,7 +115,7 @@
     let clipboard = null;
     function copy(quiet) {
         const s = selected();
-        if (!s) { status("Tap a clip, or drag across part of it, then Copy"); return false; }
+        if (!s) { status("Tap a clip first, then Copy"); return false; }
         const buf = slice(s.clip.buffer, s.sel.start, s.sel.end);
         clipboard = { buffer: buf, name: s.clip.name, fxLog: s.clip.fxLog ? s.clip.fxLog.slice() : undefined, from: s.clip };
         if (!quiet) status("Copied " + buf.duration.toFixed(1) + " s. Move the playhead, tap a lane, then Paste");
@@ -120,7 +124,7 @@
     }
     function cut() {
         const s = selected();
-        if (!s) { status("Tap a clip, or drag across part of it, then Cut"); return; }
+        if (!s) { status("Tap a clip first, then Cut"); return; }
         copy(true); checkpoint(); removeSelected(); redraw();
         status("Cut " + clipboard.buffer.duration.toFixed(1) + " s. Move the playhead, tap a lane, then Paste");
     }
@@ -139,6 +143,51 @@
         const over = lane.clips.some((c) => c !== clip && c.start < start + clip.duration - 0.01 && c.start + c.duration > start + 0.01);
         status("Pasted on " + lane.name + " at " + fmt(start) + (over ? " (layered with what is already there)" : ""));
     }
+
+    // ------------------------------------------------------------------ moving a clip
+    // Snap: a clip clicks onto the beat, the playhead and other clips' edges while it is dragged (not when nudged).
+    let snapOn = true;
+    try { snapOn = localStorage.getItem("vl-clip-snap") !== "0"; } catch (e) { /* ignore */ }
+    function setSnap(on) {
+        snapOn = !!on;
+        try { localStorage.setItem("vl-clip-snap", snapOn ? "1" : "0"); } catch (e) { /* ignore */ }
+        status(snapOn ? "Snap on: a moved clip clicks onto the beat, the playhead and other clips" : "Snap off: a moved clip goes exactly where you drop it");
+        refresh();
+    }
+    const STEPS = [0.01, 0.1];
+    let stepI = 0, lastNudge = { id: "", at: 0 };
+    const ms = (s) => { const v = Math.round(Math.abs(s) * 1000); return v >= 1000 ? (v / 1000).toFixed(2) + " s" : v + " ms"; };
+
+    // Put a clip at a new start. One undo step (several nudges in a row on the same clip count as one). Nothing else about the clip changes:
+    // its audio, effects and lane stay; the beat and melody are not clips, so they never move. Returns true when it moved.
+    function moveClip(laneId, clipId, newStart, opt) {
+        const f = find(laneId, clipId);
+        if (!f) return false;
+        const want = Number(newStart);
+        if (!isFinite(want)) return false;
+        const to = Math.max(0, Math.round(want * 1000) / 1000);
+        const delta = to - f.clip.start;
+        if (Math.abs(delta) < 0.0005) { if (want < 0) status("A clip cannot start before 0:00"); return false; }
+        const merge = opt && opt.merge && lastNudge.id === clipId && Date.now() - lastNudge.at < 1500;
+        if (!merge) checkpoint();
+        lastNudge = { id: opt && opt.merge ? clipId : "", at: Date.now() };
+        f.clip.start = to;
+        redraw();
+        if (api().reschedule) api().reschedule();                                  // playing: the clip is heard from its new spot at once
+        if (window.VLFxRack && window.VLFxRack.realign) window.VLFxRack.realign(); // an effect preview over the beat lines up again
+        const g = api().gridInfo && api().gridInfo();
+        let where = fmt(to);
+        if (g) { const bar = Math.floor(to / g.barSec + 1e-6), beatN = Math.floor((to - bar * g.barSec) / g.beatSec + 1e-6); where = "bar " + (bar + 1) + ", beat " + (beatN + 1); }
+        status("Moved " + f.clip.name + " " + ms(delta) + (delta > 0 ? " later" : " earlier") + " (now at " + where + "). Undo puts it back.");
+        return true;
+    }
+    function nudge(dir, big) {
+        const s = selected();
+        if (!s) { status("Tap a clip first, then nudge it"); return false; }
+        const by = (big ? STEPS[1] : STEPS[stepI]) * dir;
+        return moveClip(s.lane.id, s.clip.id, s.clip.start + by, { merge: true });
+    }
+    function cycleStep() { stepI = (stepI + 1) % STEPS.length; status("Nudge step: " + ms(STEPS[stepI])); refresh(); }
 
     // ------------------------------------------------------------------ zoom
     function zoomBy(f, x) { const a = api(); if (a.setZoom) a.setZoom(a.getZoom() * f, x); refresh(); }
@@ -189,6 +238,10 @@
         zin: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M11 8v6M8 11h6"/>',
         zout: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M8 11h6"/>',
         fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+        snap: '<path d="M6 15a6 6 0 0 0 12 0V3h-4v12a2 2 0 0 1-4 0V3H6z"/><path d="M6 8h4M14 8h4"/>',
+        earlier: '<path d="M15 6l-6 6 6 6"/><path d="M5 5v14"/>',
+        later: '<path d="M9 6l6 6-6 6"/><path d="M19 5v14"/>',
+        step: '',
         check: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h9"/>',
         fx: '<path d="M12 3l1.8 4.7L18.5 9l-4.7 1.8L12 15.5l-1.8-4.7L5.5 9l4.7-1.3z"/><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>'
     };
@@ -197,6 +250,7 @@
         ["check", "Take check", () => { const s = selected(); if (s && s.clip.quality && window.VLTakeCheck) window.VLTakeCheck.show(s.clip); else status(s ? "This take was not recorded here, so there is nothing to check" : "Tap a recorded take first"); }], null,
         ["undo", "Undo", undo], ["redo", "Redo", redo], null,
         ["split", "Split", split], ["copy", "Copy", () => copy()], ["cut", "Cut", cut], ["paste", "Paste", paste], ["del", "Delete", del], null,
+        ["snap", "Snap", () => setSnap(!snapOn)], ["earlier", "Earlier", () => nudge(-1)], ["later", "Later", () => nudge(1)], ["step", "10 ms", cycleStep], null,
         ["zout", "Zoom out", () => zoomBy(1 / 1.5)], ["zin", "Zoom in", () => zoomBy(1.5)], ["fit", "Fit", fit]
     ];
     let bar = null;
@@ -209,7 +263,9 @@
             if (!b) { const s = document.createElement("span"); s.className = "eb-sep"; bar.appendChild(s); return; }
             const el = document.createElement("button");
             el.type = "button"; el.className = "eb-btn"; el.dataset.act = b[0]; el.title = b[1]; el.setAttribute("aria-label", b[1]);
-            el.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON[b[0]] + "</svg><span>" + b[1] + "</span>";
+            el.innerHTML = (ICON[b[0]] ? '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON[b[0]] + "</svg>" : "") + "<span>" + b[1] + "</span>";
+            if (b[0] === "snap") el.setAttribute("aria-pressed", "false");
+            if (b[0] === "earlier" || b[0] === "later") el.title = b[1] + " (nudge the picked clip)";
             el.addEventListener("click", b[2]);
             bar.appendChild(el);
         });
@@ -219,8 +275,12 @@
     function refresh() {
         if (!bar) return;
         const s = selected();
-        const on = { fx: !!s, check: !!(s && s.clip.quality), undo: undoStack.length > 0, redo: redoStack.length > 0, split: lanes().some((l) => l.clips.length), copy: !!s, cut: !!s, paste: !!clipboard && lanes().length > 0, del: !!s };
+        const on = { fx: !!s, check: !!(s && s.clip.quality), undo: undoStack.length > 0, redo: redoStack.length > 0, split: lanes().some((l) => l.clips.length), copy: !!s, cut: !!s, paste: !!clipboard && lanes().length > 0, del: !!s, earlier: !!s, later: !!s, step: !!s };
         bar.querySelectorAll(".eb-btn").forEach((b) => { if (b.dataset.act in on) b.disabled = !on[b.dataset.act]; });
+        const sn = bar.querySelector('[data-act="snap"]');
+        if (sn) { sn.classList.toggle("is-on", snapOn); sn.setAttribute("aria-pressed", snapOn ? "true" : "false"); sn.title = snapOn ? "Snap is on: a moved clip clicks onto the beat, the playhead and other clips" : "Snap is off: a moved clip goes exactly where you drop it"; }
+        const stp = bar.querySelector('[data-act="step"]');
+        if (stp) { const t = stp.querySelector("span"); if (t) t.textContent = ms(STEPS[stepI]); stp.title = "Nudge step: " + ms(STEPS[stepI]) + " (tap to switch)"; stp.setAttribute("aria-label", "Nudge step " + ms(STEPS[stepI]) + ", tap to switch"); }
     }
 
     document.addEventListener("keydown", (e) => {
@@ -236,6 +296,7 @@
         else if (mod && k === "v") { if (clipboard) { e.preventDefault(); paste(); } }
         else if (!mod && (k === "delete" || k === "backspace")) { if (selected()) { e.preventDefault(); del(); } }
         else if (!mod && !e.altKey && k === "s") { e.preventDefault(); split(); }
+        else if (!mod && e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && selected()) { e.preventDefault(); nudge(e.key === "ArrowLeft" ? -1 : 1, !e.altKey); }
     });
 
     // ------------------------------------------------------------------ the beat chip: what the beat is, and a way to correct it
@@ -314,7 +375,7 @@
     }
 
     window.addEventListener("vl-beat-info", paintChip);
-    window.VLEdit = { checkpoint, undo, redo, split, copy, cut, paste, del, paintAware, get clipboard() { return clipboard; } };
+    window.VLEdit = { checkpoint, undo, redo, split, copy, cut, paste, del, paintAware, moveClip, nudge, snapOn: () => snapOn, setSnap, get clipboard() { return clipboard; } };
 
     function init() {
         buildBar(); buildChip(); bindZoomGestures();

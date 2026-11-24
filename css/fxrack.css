@@ -4,7 +4,28 @@
    ========================================================= */
 
 /* ---------- selecting part of a clip ---------- */
-.studio-clip[data-clip-id] { cursor: crosshair; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+/* A swipe on a clip scrolls the timeline (both directions). Picking and moving are by tap, or press and hold (js/clipgesture.js). */
+.studio-clip[data-clip-id] { cursor: pointer; touch-action: pan-x pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+/* the clip while it is held: lifted, outlined, and only a transform changes while the finger moves */
+.studio-clip.is-lifted { z-index: 9; cursor: grabbing; opacity: .94; transition: none; will-change: transform;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5), 0 0 0 2px var(--accent-hi); }
+.clip-tip { position: fixed; z-index: 80; transform: translate(-50%, -100%); padding: 5px 10px; border-radius: var(--r-pill, 999px);
+    background: rgba(17, 15, 24, 0.94); border: 1px solid var(--accent-line); color: var(--text, #fff); pointer-events: none; white-space: nowrap;
+    font: 600 12px/1.2 Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+/* the two grips at the ends of the picked part: 44 px wide to hit with a finger (narrower when the part is narrow, so the middle of a short clip can still be held to move it) */
+.studio-clip .fx-handle { position: absolute; top: 0; bottom: 0; width: min(44px, 28%); z-index: 3; pointer-events: auto; touch-action: none; cursor: ew-resize; }
+.studio-clip .fx-handle[data-edge="a"] { left: 0; }
+.studio-clip .fx-handle[data-edge="b"] { right: 0; }
+.studio-clip .fx-handle::after { content: ""; position: absolute; top: 50%; width: 6px; height: 26px; margin-top: -13px; border-radius: 3px;
+    background: var(--accent-hi); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.studio-clip .fx-handle[data-edge="a"]::after { left: 2px; }
+.studio-clip .fx-handle[data-edge="b"]::after { right: 2px; }
+/* the plug-in icon shown when a picked clip is tapped again */
+.fx-plug { position: absolute; z-index: 7; width: 40px; height: 40px; margin: -20px 0 0 -20px; padding: 0; border-radius: 50%;
+    display: grid; place-items: center; border: 1px solid var(--accent-line); background: var(--accent-strong, #6a4cf0); color: #fff;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); cursor: pointer; touch-action: manipulation; animation: fx-plug-in .16s ease-out; }
+@keyframes fx-plug-in { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .fx-plug { animation: none; } .studio-clip.is-lifted { box-shadow: 0 0 0 2px var(--accent-hi); } }
 .studio-clip .fx-sel-box {
     position: absolute; top: 0; bottom: 0; z-index: 2; pointer-events: none;
     background: rgba(124, 92, 252, 0.32);
@@ -146,3 +167,9 @@ li.warn::before { background: var(--warn); -webkit-mask-image: url("data:image/s
     .fx-p { grid-template-columns: minmax(84px, 36%) 1fr 54px; }
     .fx-status { width: 100%; margin-left: 0; text-align: left; }
 }
+
+/* the Auto tab's list of what Autopilot does with each plugin */
+.fx-policy-list { margin: 8px 0 2px; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 12px; line-height: 1.45; color: var(--text-2); }
+.fx-policy-list li { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2, rgba(255,255,255,.03)); }
+.fx-policy-list b { color: var(--text); }
+.fx-policy-list small { color: var(--accent-hi); font-weight: 600; }

@@ -1990,7 +1990,7 @@
             sendToPipeline,
             MAX_LANES,
             // used by the FX Rack (fxrack.js)
-            api: { renderLanes, updateTotals, refreshRoles, ensureCtx, status, pause: pauseTransport, drawRuler, pxPerSec, timelineWidth, totalDuration, renderMix, refreshAutomation, getPlayhead: () => playhead, setPlayhead: (v) => { playhead = Math.max(0, v); updatePlayheadUi(); }, isPlaying: () => isPlaying, setZoom, getZoom: () => zoom, setActiveLane, getActiveLane: () => activeLaneId, audioBufferToWav, uid, setBeatInfo, snapTime, gridInfo, getMelody: () => melody, setMelody, snapshotProject, restoreProject, isEmpty: () => !beat.buffer && !lanes.some((l) => l.clips.length) }
+            api: { renderLanes, updateTotals, refreshRoles, ensureCtx, status, pause: pauseTransport, drawRuler, pxPerSec, timelineWidth, totalDuration, renderMix, refreshAutomation, getPlayhead: () => playhead, setPlayhead: (v) => { playhead = Math.max(0, v); updatePlayheadUi(); }, isPlaying: () => isPlaying, reschedule: () => { if (isPlaying && !isRecording) scheduleFrom(playhead); }, setZoom, getZoom: () => zoom, setActiveLane, getActiveLane: () => activeLaneId, audioBufferToWav, uid, setBeatInfo, snapTime, gridInfo, getMelody: () => melody, setMelody, snapshotProject, restoreProject, isEmpty: () => !beat.buffer && !lanes.some((l) => l.clips.length) }
         };
     }
 
