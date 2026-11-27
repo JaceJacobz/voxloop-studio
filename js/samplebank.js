@@ -143,25 +143,34 @@ function loadSample(genre, type, n) {
   return SAMPLE_LOADING[key];
 }
 
-// The decoded buffer of one pick, or null if it has not loaded (yet)
-function sampleBuffer(drums, type) {
-  if (!drums || !drums[type]) return null;
-  return SAMPLE_BANK[sampleKey(drums.genre, type, drums[type])] || null;
+// The voices of a beat's drum picks: the nine types, plus the second percussion and bell (perc2, bell2) a v2.27.0 beat has.
+// Each is [voice, type]: perc2 is a recording from the perc folder, bell2 from the bell folder.
+function drumVoices(drums) {
+  const list = SAMPLE_TYPES.map(type => [type, type]);
+  if (drums && drums.perc2) list.push(["perc2", "perc"]);
+  if (drums && drums.bell2) list.push(["bell2", "bell"]);
+  return list;
+}
+
+// The decoded buffer of one pick (a type, or perc2 / bell2), or null if it has not loaded (yet)
+function sampleBuffer(drums, voice) {
+  if (!drums || !drums[voice]) return null;
+  return SAMPLE_BANK[sampleKey(drums.genre, voice.replace(/2$/, ""), drums[voice])] || null;
 }
 
 // True when every sample of a pick is ready (or failed for good, so waiting longer would not help)
 function samplesReady(drums) {
   if (!drums) return true;
-  return SAMPLE_TYPES.every(type => {
-    const key = sampleKey(drums.genre, type, drums[type]);
+  return drumVoices(drums).every(([voice, type]) => {
+    const key = sampleKey(drums.genre, type, drums[voice]);
     return Boolean(SAMPLE_BANK[key]) || Boolean(SAMPLE_FAILED[key]);
   });
 }
 
-// Wait until the nine samples of a pick are loaded. Always resolves (a missing file only leaves that drum silent).
+// Wait until the samples of a pick are loaded. Always resolves (a missing file only leaves that drum silent).
 function ensureSamples(drums) {
   if (!drums) return Promise.resolve();
-  return Promise.all(SAMPLE_TYPES.map(type => loadSample(drums.genre, type, drums[type]))).then(() => undefined);
+  return Promise.all(drumVoices(drums).map(([voice, type]) => loadSample(drums.genre, type, drums[voice]))).then(() => undefined);
 }
 
 // Quietly fetch every sample of a genre (about 1.5 MB) so the next "New beat" starts instantly

@@ -44,7 +44,7 @@ async function renderSongBuffer(beat, settings, onProgress) {
 
   let rendered;
   try {
-    const E = createEngine({ live: false, reverbDecay: template.fx.reverb.decay });
+    const E = createEngine({ live: false, reverbDecay: Math.max(0.6, template.fx.reverb.decay * (typeof kitMixValues === "function" && beat.sound && beat.sound.mix ? kitMixValues(beat.sound.mix).dec : 1)) });
 
     // The same sound and mix as the live player
     E.applySound(beat.sound);

@@ -192,11 +192,13 @@
             <details class="panel-card beatlab-sound" id="bl-soundBox">
                 <summary>
                     <span class="panel-title">Sound: drum samples &amp; instruments</span>
-                    <span class="beatlab-sound-hint" id="bl-soundHint">Every drum is a real recording. Each new beat picks a different one of five per type.</span>
+                    <span class="beatlab-sound-hint" id="bl-soundHint">Every drum starts from a real recording. Each new beat picks one of five per type and tunes it its own way.</span>
                 </summary>
                 <h4 class="beatlab-samples-title">Drum samples</h4>
                 <p class="beatlab-sound-hint">Five recordings of each drum for this genre. Auto picks a new one every beat; choose a number to keep that one.</p>
                 <div class="beatlab-soundgrid" id="bl-drumGrid"></div>
+                <button type="button" id="bl-newKit" class="secondary-button">New kit: redesign this beat's drums &amp; mix</button>
+                <p class="beatlab-sound-hint" id="bl-kitHint">Every beat gets its own tuning, click and tail on each drum, its own reverb and its own tone on the keys. New kit draws another one; the notes stay the same.</p>
                 <h4 class="beatlab-samples-title">Instruments</h4>
                 <div class="beatlab-packrow">
                     <label class="field">
@@ -1298,12 +1300,18 @@
 
                 <fieldset class="settings-group">
                     <legend>Timing</legend>
-                    <p class="settings-note">The delay of your phone and earbuds is measured and removed from every take automatically. If takes still land a little early or late, nudge them here. Bluetooth earbuds usually need a positive value.</p>
+                    <p class="settings-note">The delay of your phone and earbuds is taken off every take automatically (measure it below to make that exact). If your voice still lands behind the beat, slide to a minus number; if it lands ahead, slide to a plus number.</p>
                     <div class="settings-row">
                         <input type="range" id="st-offset" min="-300" max="300" step="5" value="0" aria-label="Timing nudge in milliseconds">
                         <output id="st-offset-out">0 ms</output>
                     </div>
                     <p class="settings-now" id="st-last"></p>
+                </fieldset>
+
+                <fieldset class="settings-group" id="lat-card">
+                    <legend>Measure my delay</legend>
+                    <p class="settings-note">Singing over a beat, you hear it a moment late and the phone hears you a moment late. Measure it once for the earbuds you use, and Studio and Vocal Sketch take exactly that off every take.</p>
+                    <div id="lat-mount"></div>
                 </fieldset>
 
                 <fieldset class="settings-group" id="pwa-card">
@@ -1343,6 +1351,7 @@
 <script src="js/yield.js"></script>
 <script src="js/clicksound.js"></script>
 <script src="js/settings.js"></script>
+<script src="js/latency.js"></script>
 <script>
     (function () {
         if (window.__voxloopNativeAudioContext) {
@@ -1355,6 +1364,7 @@
 <script src="js/templates-afro.js"></script>
 <script src="js/samplemap.js"></script>
 <script src="js/samplebank.js"></script>
+<script src="js/kitdesign.js"></script>
 <script src="js/instrumentmap.js"></script>
 <script src="js/instrumentbank.js"></script>
 <script src="js/beatgen.js"></script>
@@ -1393,6 +1403,7 @@
 <script src="js/voiceid.js"></script>
 <script src="js/phrasebrain.js"></script>
 <script src="js/autopolicy.js"></script>
+<script src="js/passages.js"></script>
 <script src="js/fxbrain.js"></script>
 <script src="js/mixbrain.js"></script>
 <script src="js/fxrack.js"></script>

@@ -1390,6 +1390,28 @@ function setDrumPick(type, n) {
   }
 }
 
+// New kit (v2.27.0): another kit design, mix and tone for the beat on screen. The notes, the pattern and the chosen recordings stay;
+// only how each drum is tuned, clicked and tailed changes (and the reverb size, delay and the keys' tone).
+const newKitEl = $("bl-newKit");
+newKitEl?.addEventListener("click", () => {
+  if (!current || !current.sound || !current.sound.drums || typeof kitApply !== "function") return;
+  const seed = Math.floor(Math.random() * 2147483646) + 1;
+  current.sound = kitApply(current.sound, current.genre, current.style, seed, { from: current.sound.drums, keep: { kick: false } });
+  ensureEngine();
+  ensureBeatSound(current.sound).then(() => {
+    try {
+      engine.applySound(current.sound);
+      engine.applyFx(resolveTemplate(current.genre, current.style).fx);
+      statusEl.textContent = "New kit: the drums, reverb and tone are redesigned. The notes are the same.";
+      if (!playing) {                          // let the person hear it straight away: a kick, then a snare and a hat
+        Tone.start();
+        const t = Tone.now() + 0.05;
+        engine.voices.kick(t, 0.9, { step: 0 }); engine.voices.hat(t + 0.2, 0.7, { step: 2 }); engine.voices.snare(t + 0.4, 0.9, { step: 4 }); engine.voices.hat(t + 0.6, 0.7, { step: 6 });
+      }
+    } catch (err) { console.warn(err); }
+  });
+});
+
 function soundLabel(key, id) {
   const hit = SOUND_MENU[key].options.find(o => o[0] === id);
   return hit ? hit[1] : id;

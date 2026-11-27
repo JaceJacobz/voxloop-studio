@@ -1347,11 +1347,23 @@ function generatePattern(genreKey, options = {}) {
   const durations = {};
   Object.keys(tracks).forEach(name => { durations[name] = gateLengths(tracks[name], t.gate[name]); });
 
+  // (the seed is drawn here, in the same place in the random stream where it used to be drawn inside the object below)
+  const beatSeed = randomInt(1, 2147483646);
+  // The kit design (kitdesign.js): this beat's own drum tuning, second percussion, reverb size and instrument tone. It is made from the
+  // beat's seed and never touches Math.random, so the notes and patterns a seed makes are exactly what they were.
+  let beatSound = Object.assign({}, autoSound, options.sound || {}, { drums });
+  if (typeof kitApply === "function") {
+    const keepTypes = {};
+    if (lastDrums) SAMPLE_TYPES.forEach(type => { if (keeps(_groups[type])) keepTypes[type] = true; });
+    const carry = options.keepSound && from && from.sound && from.sound.mix ? from.sound : null;
+    beatSound = kitApply(beatSound, genreKey, styleId, beatSeed, { from: lastDrums, keep: keepTypes, keepMix: carry });
+  }
+
   return {
     genre: genreKey,
     style: styleId,
     styleName: t.styleName,
-    seed: randomInt(1, 2147483646),
+    seed: beatSeed,
     bpm,
     key,
     chordsPerBar,
@@ -1366,7 +1378,7 @@ function generatePattern(genreKey, options = {}) {
       : Array.from({ length: STEPS_PER_BAR }, () => pick(t.bassTones)),
     logTones: keeps("low") ? from.logTones.slice()
       : Array.from({ length: STEPS_PER_BAR }, () => pick(t.logdrum.tones)),
-    sound: Object.assign({}, autoSound, options.sound || {}, { drums }),
+    sound: beatSound,
     autoSound,
     pack: picked.pack,                                   // { id, name, blurb, swapped } or null
     riffs,

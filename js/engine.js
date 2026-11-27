@@ -428,7 +428,18 @@ function createEngine(opts = {}) {
     // as they have loaded (the newest call wins, so a quick change of beat does not bring back an old drum).
     E.kitSamples = {};
     const drums = sound.drums;
-    SAMPLE_TYPES.forEach(type => { const buffer = sampleBuffer(drums, type); if (buffer) E.kitSamples[type] = buffer; });
+    // A v2.27.0 beat carries a kit design (drums.dsn): each recording is reshaped once (kitdesign.js). An older beat has none and plays as recorded.
+    drumVoices(drums).forEach(([voice]) => {
+      const buffer = sampleBuffer(drums, voice);
+      if (buffer) E.kitSamples[voice] = typeof kitHit === "function" && drums.dsn ? kitHit(voice.replace(/2$/, ""), buffer, drums.dsn[voice]) : buffer;
+    });
+    // This beat's own mix: the drum bus drive and glue now; reverb, delay and air are applied with the style's fx (applyFx)
+    E.mix = typeof kitMixValues === "function" ? kitMixValues(sound.mix) : null;
+    const mixOn = !!sound.mix;
+    safe(() => {
+      drumDrive.wet.value = 0.12 + (mixOn ? E.mix.dd : 0);
+      drumComp.threshold.value = -16 + (mixOn ? E.mix.gl : 0);
+    });
     if ((drums && !samplesReady(drums)) || !instrumentsReady(sound) || !fxReady()) {
       // At most 3 tries per sound, a pause between them: a file that never loads must not make this loop for ever
       const tries = sound === E.soundTried ? (E.soundTries || 0) + 1 : 1;
@@ -449,6 +460,18 @@ function createEngine(opts = {}) {
       const id = resolveInstrument(role, sound[role]), track = TRACK_OF[role];
       E.instrumentOf[role] = id;
       const setup = Object.assign({}, SAMPLED_SETUP[id], role === "log" ? { release: 0.12, attack: 0.002 } : {});
+      // This beat's own tone (v2.27.0): the filter, chorus, attack and release of the keys, pad, pluck and lead are nudged a little,
+      // so the same recording does not always sound the same. (A beat made before that has no tone and is untouched.)
+      if (sound.tone && typeof kitToneValues === "function" && track !== "logdrum") {
+        const tv = kitToneValues(sound.tone, track === "bass" ? "bass" : track);
+        if (track === "bass") setup.drive = Math.min(0.6, (setup.drive || 0) + tv.d);
+        else if (["chords", "pad", "pluck", "lead"].includes(track)) {
+          setup.filter = Math.round((setup.filter || (track === "pad" ? 8000 : track === "pluck" ? 10000 : 9000)) * tv.f);
+          setup.chorus = Math.max(0, Math.min(0.6, (setup.chorus === undefined ? 0.12 : setup.chorus) + tv.c));
+          if (setup.attack !== undefined || tv.a !== 1) setup.attack = Math.min(0.4, (setup.attack !== undefined ? setup.attack : 0.04) * tv.a);
+          if (setup.release !== undefined) setup.release = Math.min(1.2, setup.release * tv.r);
+        }
+      }
       sampler[track].use(id, setup);
       // Level matching: the recordings differ a lot in loudness, so each is lifted or lowered (dB, measured per part)
       // to the same level; picking another instrument changes the SOUND and not the LEVEL.
@@ -468,11 +491,13 @@ function createEngine(opts = {}) {
   E.applyFx = (fx, bpm) => {
     if (!fx) return;
     safe(() => {
-      if (Math.abs(fx.reverb.decay - E.reverbDecay) > 0.01) { reverb.decay = fx.reverb.decay; E.reverbDecay = fx.reverb.decay; }
-      reverbSend.gain.value = fx.reverb.send;
-      delaySend.gain.value = fx.delay.send;
+      const m = E.mix || { rev: 1, dec: 1, dly: 1, air: 0 };           // this beat's own room (kitdesign.js); 1 / 0 for an older beat
+      const decay = Math.max(0.6, fx.reverb.decay * m.dec);
+      if (Math.abs(decay - E.reverbDecay) > 0.01) { reverb.decay = decay; E.reverbDecay = decay; }
+      reverbSend.gain.value = fx.reverb.send * m.rev;
+      delaySend.gain.value = fx.delay.send * m.dly;
       delay.feedback.value = fx.delay.feedback;
-      airShelf.gain.value = fx.air || 0;
+      airShelf.gain.value = (fx.air || 0) + m.air;
     });
     if (bpm) E.setTempo(bpm);
   };
@@ -638,8 +663,10 @@ function createEngine(opts = {}) {
   const DRUM_MAKEUP_DB = { kick: 6, snare: 6, clap: 5, rim: 5, hat: 6, openhat: 6, shaker: 11, perc: 9, bell: 7 };
   const DRUM_MAKEUP = {};
   Object.keys(DRUM_MAKEUP_DB).forEach(k => { DRUM_MAKEUP[k] = Math.pow(10, DRUM_MAKEUP_DB[k] / 20); });
-  const drumHit = (track, t, v, rate) => {
-    const buffer = drumBuffer(track);
+  // `alt` (perc2 / bell2): the beat's second recording of that kind, if it has one and no sample of your own replaced the track
+  const hasAlt = (track, alt) => !USER_SAMPLES[track] && E.kitSamples && E.kitSamples[alt];
+  const drumHit = (track, t, v, rate, alt) => {
+    const buffer = (alt && hasAlt(track, alt) && E.kitSamples[alt]) || drumBuffer(track);
     if (!buffer) return;
     instruments[track].play(buffer, t, Math.max(0, v) * 0.9 * (USER_SAMPLES[track] ? 1 : DRUM_MAKEUP[track]), rate || 1);
   };
@@ -660,8 +687,16 @@ function createEngine(opts = {}) {
     openhat: (t, v, c) => { openhat.choke(t, 0.012); drumHit("openhat", t, v, 1); },
     shaker: (t, v, c) => drumHit("shaker", t, v, wobble(c, v, 0.006)),
     // Percussion: hits between the beats are played a little higher, like the high and low drum of a pair
-    perc: (t, v, c) => drumHit("perc", t, v, (c.step % 2 === 1 ? 1.09 : 1) * wobble(c, v, 0.004)),
-    bell: (t, v, c) => drumHit("bell", t, v, (c.step % 2 === 1 || c.step % 8 === 6 ? 1.05 : 1) * wobble(c, v, 0.003))
+    // With a second recording (perc2) the hits between the beats are the OTHER drum of the pair (a real conga pair answers itself
+    // high and low); without one (an older beat, or your own sample on the track) the same drum is nudged up, as before.
+    perc: (t, v, c) => {
+      const off = c.step % 2 === 1, alt = off && hasAlt("perc", "perc2");
+      drumHit("perc", t, v, (off && !alt ? 1.09 : 1) * wobble(c, v, 0.004), alt ? "perc2" : null);
+    },
+    bell: (t, v, c) => {
+      const off = c.step % 2 === 1 || c.step % 8 === 6, alt = off && hasAlt("bell", "bell2");
+      drumHit("bell", t, v, (off && !alt ? 1.05 : 1) * wobble(c, v, 0.003), alt ? "bell2" : null);
+    }
   });
 
   // Every tonal voice plays at the loudness its current sound was matched to (E.lvl is filled in by applySound).

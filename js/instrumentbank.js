@@ -156,7 +156,7 @@ function ensureFx() {
 function soundProgress(sound) {
   let done = 0, total = 0;
   const d = sound && sound.drums;
-  if (d) SAMPLE_TYPES.forEach(t => { total++; const k = sampleKey(d.genre, t, d[t]); if (SAMPLE_BANK[k] || SAMPLE_FAILED[k]) done++; });
+  if (d) drumVoices(d).forEach(([v, t]) => { total++; const k = sampleKey(d.genre, t, d[v]); if (SAMPLE_BANK[k] || SAMPLE_FAILED[k]) done++; });
   soundInstrumentIds(sound).forEach(id => instrumentInfo(id).notes.forEach(n => { total++; const k = id + "/" + n; if (INSTRUMENT_BANK[k] || INSTRUMENT_FAILED[k]) done++; }));
   FX_NAMES.forEach(n => { total++; if (FX_BANK[n] || FX_FAILED[n]) done++; });
   return { done, total };
